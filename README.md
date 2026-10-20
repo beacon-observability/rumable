@@ -1,6 +1,6 @@
 # Rumable
 
-当前版本：**0.1.0-preview.2**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。
+当前版本：**0.1.0-preview.2**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[本地交付校验记录](docs/preview-0.1.0-preview.2.md)包含构建来源、分包摘要与实际验收边界。
 
 通过 Nginx / Apache / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
 
