@@ -1,0 +1,130 @@
+# 部署、缓存与恢复
+
+## 首次挂接
+
+1. 创建观测云 Web 应用，取得对应上报方式的参数。只使用浏览器 Client Token，不使用管理 API Key。
+2. 明确目标站点、所有 HTML handler 与路径前缀；每个 handler 至少配置一个实际可访问的 `probePaths`。
+3. 使用 `init --server nginx|apache|iis --reporting openway|datakit` 生成精简 TOML，填写网站、服务器目标及上报值；高级参数需要时用新文件执行 init --full 或参考完整模板。`render` 到最终受管目录，终端直接列出可复制的 attach、enable 命令和人工挂接说明；该目录需在服务和工具使用的文件系统命名空间中保持同一路径。容器内应在容器内执行 CLI，或确保生成路径与挂载路径一致。
+4. Linux Nginx / Apache 执行 `attach`，预览并输入 yes 确认；复杂配置按生成的 `ATTACH.md` 人工挂接 include。Apache 先安装并加载所需模块，按 [Apache 手册](apache.md)审查输出过滤、代理路径和缓存影响。IIS 安装 URL Rewrite 2.x、准备管理员权限、静态资源读取 ACL、JavaScript MIME 和匿名访问。
+5. 执行 `enable`，自动完成预检、配置检查、生效和 HTTP 探测；独立 check 是可选的提前诊断步骤。自动 attach 完成后可直接启用；人工挂接须检查、加载并设置 attachmentReviewed=true。失败时按诊断解决压缩、CSP、缓存及现有规则冲突。
+6. 在 Chrome 验证 SDK 两个资源正常加载、初始化无报错，检查上报请求的 HTTPS/CORS、状态和响应，再在观测云确认入库。
+
+`includePaths` 按 URL 路径前缀工作，不是文件扩展名规则。IIS 规则区分大小写，与 Nginx 保持一致。`/__rumable__/` 是应用保留路径，不允许和业务路由共用。
+
+## 自动首次挂接（Linux）
+
+```sh
+rumable render
+rumable attach --dry-run         # 只读识别和差异预览，不写业务配置或备份
+rumable attach                   # 展示当前差异，输入 yes 后执行
+rumable enable
+# 重复 attach 验证已有挂接，不重复插入或重载。
+# 多候选、通配名称、端口映射、默认站点或主机名不匹配时，明确选择输出中的真实位置：
+rumable attach --target /etc/nginx/sites-available/example:12
+# 自动化流水线显式确认：attach --yes；仍打印差异，并在提交前重新识别配置。
+```
+
+使用与服务一致的 binary、args、环境和权限，在 Linux 的实际配置命名空间执行。工具不安装软件、启用模块或猜测服务进程参数；从配置的 binary/args 调用 Nginx `-V/-T` 或 Apache `-v/-M/-t -D DUMP_INCLUDES/-S`，按 publicURL 的准确主机名和端口选择唯一 server/有效 VirtualHost。歧义时列出 FILE:LINE，要求显式 --target；这只选择候选，不能绕过安全检查。HTTPS 默认 443，HTTP 默认 80。多 IP 上同名同端口的站点也要求选择。变更后原行号可能变化，下次发现以新列表为准。
+
+Nginx 在真实 http、目标 server 和现有 handler 中加入独立标记的 include，不创建竞争的业务 location。复制有效的父 proxy_set_header 列表时保留 Host、Authorization、自定义头和变量；已有局部列表保持其原来的继承边界。目标代理 handler 清除上游 Accept-Encoding、If-None-Match、If-Modified-Since 并设置 proxy_cache off；安装 gzip_static/brotli 模块时关闭目标 handler 的预压缩直出。这些首次挂接调整在普通 disable 后仍保留，完整撤销挂接才恢复原值，差异会明确展示。输出 gzip 可以继续使用。includePaths 控制注入，挂接调整作用于整个 handler，包括其中非 HTML/排除路径；需要较窄范围时使用独立业务 location 或人工挂接。
+
+自动合并支持常见静态和 proxy_pass 配置、嵌套 location 及简单 include。已有 sub_filter/局部验证头指令、if/rewrite、预压缩 try_files、FastCGI/uWSGI/SCGI/gRPC、SSI/附加正文等需要人工审查，报告文件和行号。Nginx 1.9.4 的 http 层 sub_filter 在写文件前即阻止，不能由 --yes 或 attachmentReviewed 放行。
+
+Apache 使用原生 -S 输出识别有效 VirtualHost；只在其开始加入资源 ProxyPass 排除，在末尾加入受管 include。普通前置 Location/Directory 和明确的 CONTENT_SET DEFLATE 链可以保留；需要的模块必须事先加载。已有不明过滤链、AddOutputFilterByType、SetOutputFilter、重写、.htaccess 覆盖或保留路径映射转为人工挂接。未展开的复杂配置和模块生成配置不能保证自动合并。include 按 DUMP_INCLUDES 的原生父文件、行号和递归层级展开，保持目标 VirtualHost 的实际继承关系；无法解析的上下文直接拒绝。全局 Directory/Location 或条件过滤声明仍采取保守检查，可能要求人工处理实际不影响本站的配置。
+
+同一 FILE:LINE 对应多个块时拒绝显式选择，需先将各块分行。首次挂接扫描整个有效配置中的本站 ID 标记、保留资源路径和变量/过滤器名称；发现其他目录或站点已占用相同名称时拒绝，不能用新的 state-dir 接管已有部署。
+
+配置中的符号链接解析到真实文件，保留链接；被多处引用的待修改 include 拒绝自动修改，以免影响其他站点。先展示逐项增删差异和备份位置；输入 yes（或显式 --yes）后重新获取有效配置并核对全部读取文件的摘要，变化则要求重新预览。随后将完整原字节、文件模式及差异以 0600 保存到 `sites/<id>/attachment.json`，再原子替换业务配置，保留属主、组、模式和可读取的扩展属性（包括 ACL/SELinux 标签），拒绝直接替换符号链接及硬链接文件。使用同一个 state-dir 串行维护站点；外部配置工具也应在此期间停止修改配置。
+
+确认后还会核对部署状态、备份、符号链接指向及 Linux 文件身份/元数据；每次写入和重载前复查未受管输入。历史挂接备份采用排他创建，已有不同内容时停止覆盖。撤销及失败恢复重新识别有效 include 图，待恢复文件变为共享或无法确定归属时停止；未受管输入出现变化也停止并保留恢复记录。旧备份没有新增输入指纹时仍执行原字节/模式检查与已完成挂接的有效图检查。任意外部进程不遵守维护锁时不存在跨进程原子事务保证，不能在确认后继续并行发布服务器配置。
+
+候选须通过服务器配置检查，再做平滑重载并探测原页面、初始化脚本和所选 SDK 的 identity 和 gzip 版本。初始注入保持关闭，成功后才写入 attached 状态；enable 继续独立检查 CSP、注入和上报条件。配置检查、重载、HTTP/资源失败时恢复本次涉及文件并重新检查、重载、探测。中断或恢复失败保留 applying/restoring 记录，阻止普通部署操作，使用 `rollback --attachment` 重试；先按后文检查并移除确认已失效的进程锁。此命令与普通部署 rollback 相互独立。
+
+```sh
+rumable disable
+# 清理仍引用 SDK 的浏览器、CDN、代理、Service Worker HTML 缓存。
+rumable rollback --attachment --dry-run
+rumable rollback --attachment   # 展示撤销差异，输入 yes 后恢复首次挂接前的文件
+```
+
+完整撤销会移除同域资源映射，因此必须先 disable 并处理旧缓存页面。业务配置若与备份中的受管后版本不一致（包括无关编辑或后来挂接的其他站点），停止覆盖并报告冲突，不会把旧备份覆盖到新业务配置。先审查差异，可按挂接顺序反向撤销，或人工移除指定标记及恢复已调整的指令。普通启停只验证自动标记并修改受管部署文件，不回写业务文件。状态显示 attachment 的 phase、target 和 backup。成功撤销后仍保留备份和版本化资源；再次 attach 将旧记录归档为 `attachment.<时间>.json`，不会丢失原备份。备份含原服务器配置，state-dir 必须位于网站根目录之外并由管理员控制。
+
+## 压缩与缓存
+
+Apache 采用 mod_lua 的请求级输出过滤器，在普通响应分块间保留至多 6 个待匹配字节，只插入首个脚本。Lua 文件内容寻址、独立保留，旧 worker 和旧页面不会读到升级时被原地替换的代码。源响应须未压缩，允许后续 DEFLATE；已压缩源、下载、非 HTML、非 GET/200 直接旁路。缺少锚点的正文保持不变，probe 报告未接入。
+
+Apache 启用后对 includePaths 减去 excludePaths/保留资源后的 GET/HEAD 请求清除 If-None-Match、If-Modified-Since、Range、If-Range；此时还不知道 MIME，因此范围内的非 HTML 请求也受影响，POST 等其他方法保留原条件头。选中 HTML 移除原 Content-Length、ETag、Last-Modified、Content-MD5、Digest、Accept-Ranges；HEAD 不注入正文，也会清理 HTML 的这些元数据，防止验证旧页面。原有 Host/Authorization/自定义头和安全响应头不被替换。
+
+如果 Apache 加载 mod_cache，启用时对整个目标 VirtualHost 设置 CacheQuickHandler off，并对每个 includePaths 前缀设置 CacheDisable，防止快速缓存绕过输出过滤和保存带旧脚本的页面。这项缓存绕过也涵盖前缀内的排除路径和非 HTML；停用会移除受管指令，恢复原缓存配置。外层代理/CDN/Service Worker 仍需清理 HTML。不可在后续业务配置覆盖这些缓存约束；详细挂接与验证见 [Apache 手册](apache.md)。
+
+Nginx 的过滤器处理源 HTML，然后可以由 Nginx 做输出 gzip。反代请求应清除 `Accept-Encoding`，同时保留原有 Host/认证/自定义请求头。清除上游条件请求头，防止上游 304 绕过新版本注入。静态站点不能直接选取 `.gz`/`.br` 文件；只有安装相应模块时才能写对应 `gzip_static off` / `brotli_static off` 指令。
+
+Nginx 注入同时检查实际 HTML MIME 与源响应的 Content-Encoding；父层 `sub_filter_types *` 不会让 Rumable 改写 JSON 或 JavaScript。需要保留的业务 sub_filter 必须与 location include 显式放在同一层；停用时保留一个动态空匹配规则，避免启停改变规则继承。业务规则自己的改写范围仍由原配置决定。
+
+`check` 在 identity 页面上预检源压缩和 CSP。提交后的探测及独立 `probe` 还请求 gzip 变体并解压核对注入与版本；`gzip_static on` 导致只有压缩页面未注入时，启用失败并恢复受管状态。`gzip_static always` 连 identity 页面也返回压缩内容，会在预检时直接拒绝。探测解压后的正文仍受 8 MiB 限制。Brotli 预压缩仍须人工关闭；这轮未增加 Brotli 解码器。
+
+多页面 `probe` 和提交/恢复探测逐页检查 HTML 的 identity、gzip、注入版本及 CSP；同一轮内相同初始化脚本、SDK 和 Worker 的每种编码只检查一次。初始化脚本和 SDK 的两种响应在解压后都必须匹配受管 SHA-256；外置 Worker 检查 MIME，并要求 identity / gzip 解压后的内容一致，不因此证明 Worker 代码属于指定 SDK 版本。共用资源的检查结果不跨轮复用，重试仍会重新验证。这样增加 probePaths 不会重复下载同一编码的 SDK，也不会漏检后续页面的压缩或 CSP 差异。过期的脚本 .gz 文件、错误压缩缓存或仅 gzip 生效的业务过滤器也会使启用/升级失败；工具保留这些非受管文件，由运维审查并修复。
+
+Nginx 1.9.4 的 `http` 层 sub_filter 继承可能在 SDK 请求或提前返回的错误响应中导致 worker 崩溃。`check` / `enable` 自动根据 nginx -T 的有效配置和 include 层级检查，发现风险时报告源文件及行号并拒绝启用，attachmentReviewed=true 无法放行。普通回滚到启用状态、候选配置 reload 前也会检查；停用保留原有路径。先将业务规则移到 `server` / `location`，或升级到 1.9.5+，再重新 check / enable。
+
+检查只使用同一次 nginx -T 的转储，不把附属文件当作独立顶层配置；相对 include 按主配置目录解析，同一文件在 server 与 http 引用时会分别核对。未知/缺失的 include 上下文、异常转储或不支持的掩码会拒绝，支持范围和处理方法见[兼容性说明](compatibility.md)。check 会保存失败诊断；启用前拒绝不会创建事务、改写受管部署或 reload。中断恢复若在写回候选后仍遇到风险，会保留事务日志；先解决外部业务配置，再重试 rollback，不要删除日志绕过。
+
+IIS 原生 URL Rewrite 不兼容静态压缩。工具在允许时关闭所选应用的 `doStaticCompression` 并保存原局部值；停用时恢复值或删除新增属性，从而恢复原来的继承关系。其他站点的压缩设置不变。
+
+Nginx 活跃 HTML handler 关闭本地 ETag/条件日期处理；符合注入条件的 GET 与 HEAD 都激活过滤器的头部清理，移除原文 Content-Length、ETag、Last-Modified，HEAD 不输出正文。方法匹配使用正则 map 项，兼容旧版默认 map_hash_bucket_size，无需修改全局桶大小。不新增 proxy_hide_header，因此保留原有隐藏响应头列表。停用后恢复原验证头行为，但业务自己的过滤规则仍可能移除这些头。IIS 对选定 HTML 清除这两个验证头。HTTP 探测拒绝仍携带原文强 ETag 的改写页面。范围和继承的影响须在首次挂接时审查。历史快照按原字节回滚；需要新版本头部修复时，在新包下重新 enable 生成配置。
+
+同域哈希资源通过 `expires 1y` 提供一年缓存，不在资源 location 新增 add_header，保留旧 Nginx 的父层安全/CORS 响应头继承。资源路径不执行继承的业务 sub_filter，避免改变 SDK 字节。
+
+启用、停用、升级和回滚都需要考虑已缓存的 HTML：源站配置变化无法强制清除浏览器、CDN、反向代理或 Service Worker 中的页面。按站点缓存策略执行清理，并用真实浏览器复查。脚本使用内容哈希，旧版本文件始终保留，防止旧 HTML 引用 404。
+
+## CSP 与上报
+
+- 同域初始化脚本和所选 SDK 地址都需要被 `script-src-elem` / `script-src` / `default-src` 的有效策略允许；CDN 模式需额外放行实际 CDN URL。
+- 预检分别检查真实哈希初始化脚本和 SDK URL。CSP 路径以 `/` 结尾才作为目录前缀，否则按完整路径匹配；允许一个脚本不代表另一个也被允许。路径按分段解码比较，见 [CSP 路径匹配规范](https://www.w3.org/TR/CSP3/#match-paths)。
+- `connect-src` 需允许 OpenWay 或 DataKit 的准确 HTTPS origin；限制路径时须包含 `/v1/write/rum`、启用回放时的 `/v1/write/rum/replay`、启用远程配置时的 `/v1/env_variable`。多 CSP 策略取交集，增加一个宽松头不会覆盖原有严格策略。
+- 跨域 HTML `<base href>` 会改变根路径脚本和 Worker 的加载域名，预检会阻止启用；同域 base 可用。工具不改写业务的 base 标签。
+- 工具采用保守的常见 CSP 匹配，不能证明任意复杂策略或运行时 CSP 的兼容；严格 nonce、strict-dynamic、Trusted Types 不自动绕过。
+- 浏览器直连上报：内部 DataKit 地址对服务器可达，并不代表对访问者浏览器可达。跨域预检与实际 POST 均需由接收端正确允许；HTTP 探测不替代浏览器验证。
+- Session Replay 按站点的 `sessionReplayEnabled`、`sessionReplaySampleRate` 和 `sessionReplayOnErrorSampleRate` 开启，默认关闭；总开关关闭时本地普通及错误回放采样均为 0。
+- 回放、RUM 压缩、Canvas 及远程配置的 Worker 预检按 `worker-src` → `child-src` → `script-src` → `default-src` 取有效策略。内嵌 Worker 保守要求显式 `blob:`；`workerUrl` / `replayCanvasWorkerUrl` 可以改为同域托管，工具检查 URL、200 和 JS MIME，不验证第三方 Worker 代码逻辑，不自动修改 CSP。
+- 默认 `mask` 遮罩；其他隐私级别、错误补偿、Cookie/持久化、Trace/Visitor ID、Canvas 2D 等可配置，见[配置参考](configuration.md)。函数、插件、动态用户和业务上下文仍需业务代码。启用手动 View/Canvas 模式后，必须由业务调用对应 API；远程配置可能覆盖静态 SDK 参数。
+- `window.__RUMABLE__.replayStatus="requested"` 只表示调用录制 API，不能证明会话命中采样或上传成功；在 Chrome 检查 `DATAFLUX_RUM.isRecording()`、上传和观测云。新设置对新加载页面生效，采样变更应用于新会话；停用及回滚不终止已经打开页面的录制。
+- 只有基础自动采集；业务登录用户 ID、自定义上下文和业务事件需要业务自行接入，不会从页面或 Cookie 猜测。
+
+## 事务与漂移保护
+
+变更持有受管目录的 `operation.lock`。文件逐个通过同目录临时文件替换，操作前保存 `transaction.json`；多文件更新由日志和恢复流程保护，并非一次原子目录切换。
+
+成功后只保留当前和上一次成功快照。`rollback` 在两者之间切换；重复回滚会切回另一个快照。失败的变更不会占用成功历史。资源文件和已创建的同域资源映射保留，确保旧缓存页面仍能加载同域 SDK。CDN 快照保留实际 URL 和摘要，但外部内容由 CDN 管理，工具不能恢复被覆盖/删除的远程文件；固定版本和完整离线恢复优先使用默认 bundled，或不可变 CDN URL 加 SRI。详见[SDK 加载方式](configuration.md#sdk-加载方式)。
+
+Nginx / Apache 的 attachmentReviewed 只限制启用检查；首次 render 保存的 false 不阻止初始停用状态或回滚到该状态后的重复 disable。停用仍须通过有效 include、服务器配置和受管文件检查，不能用此绕过配置错误或漂移保护。
+
+工具在启停、回滚前检查受管文件与资源摘要。IIS 还比对所拥有规则、虚拟目录和局部压缩属性。发现外部修改时拒绝覆盖；只修改业务无关配置不会被恢复流程回滚。
+
+中断事务恢复在写配置前检查原快照资源摘要，并确认日志内前后快照属于当前受管站点的相同目标。快照中的初始化脚本及 SDK 引用必须与资源摘要一致。IIS XML 快照按其站点/应用路径不区分大小写的语义读取，保留原压缩属性和资源映射。
+
+新配置必须满足当前发布包的 SDK 参数校验。历史快照恢复原资源字节，因此只校验部署目标、路径及摘要，不将新的 SDK 参数限制套用到历史快照，避免升级后无法停用或恢复旧部署。修正参数后仍可使用原站点 ID 启用新配置。
+
+进程被强制终止时：
+
+1. 确认没有 Rumable 进程运行，备份受管目录及现场服务器配置。
+2. 确认锁为该退出进程遗留后，手动移除 `operation.lock`。
+3. 使用同一 `--state-dir` 与 `--site` 执行 `rollback` 恢复部署事务；首次挂接的 applying/restoring 状态使用 `rollback --attachment`。
+4. 出现外部文件变更、IIS 提交后但日志未记录的中断窗口，或恢复后的 HTTP 探测仍失败时，工具保留日志并停止。审查现场差异，不要直接删除日志或覆盖生产配置。
+
+IIS 没有跨配置提交与本地日志的分布式事务；遇到无法确认归属的状态，采用停止覆盖的保守恢复策略。备份中若存在旧 SDK 版本，使用对应发布包恢复，且保留版本化资源。
+
+部署前可在独立 Windows VM 按 [Windows/IIS 验收手册](windows-acceptance.md)运行完整流程。脚本创建自己的站点、应用池及父子规则，模拟提交后的 HTTP 探测失败并验证恢复；不对整台 IIS 恢复配置备份。Keep 现场使用配套 windows-cleanup.ps1 按报告归属清理。
+
+## 常见结果
+
+| 结果 | 含义与处理 |
+|---|---|
+| `missing effective Nginx include` | include 未加载或路径不一致，按 ATTACH.md 检查真实 handler |
+| `no literal </head>` | 非完整 HTML、锚点写法不同或登录重定向，不能直接使用该页面验收 |
+| `existing RUM integration found` | 业务已有 SDK，应保留现有接入或先明确迁移 |
+| `encoded response` | 上游/静态源仍返回压缩内容，先解决源压缩 |
+| `CSP ... blocks` | 修改站点的实际安全策略后重试；工具不会自动放宽 |
+| `stale bootstrap URL` | HTML 缓存未失效，按缓存层清理 |
+| `external change` / `asset drift` | 受管项被其他操作修改，先审查现场差异 |
+| `injection and script availability only` | HTML/文件检查通过，不等于浏览器执行或观测云入库成功 |

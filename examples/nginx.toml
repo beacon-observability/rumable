@@ -1,0 +1,22 @@
+schemaVersion = 1
+
+[[sites]]
+id = "website"
+publicURL = "https://www.example.com/"
+probePaths = ["/", "/login"]
+includePaths = ["/"]
+excludePaths = ["/api/", "/downloads/"]
+
+[sites.nginx]
+binary = "/usr/sbin/nginx"
+args = ["-c", "/etc/nginx/nginx.conf"]
+attachmentReviewed = false
+
+[sites.rum]
+applicationId = "REPLACE_APPLICATION_ID"
+site = "https://REPLACE_OPENWAY_HOST"
+clientToken = "REPLACE_CLIENT_TOKEN"
+env = "production"
+service = "browser"
+version = "1.0.0"
+sessionSampleRate = 100

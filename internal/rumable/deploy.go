@@ -1,0 +1,354 @@
+package rumable
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+)
+
+func verifyNative(root string, n Snapshot) error {
+	if err := attachmentPending(root, n.Site); err != nil {
+		return err
+	}
+	if n.Site.IIS == nil || len(n.Native) == 0 {
+		return nil
+	}
+	live, err := nativeCapture(root, n.Site)
+	if err != nil {
+		return err
+	}
+	if !sameJSON(live, n.Native) {
+		return errors.New("external change to owned IIS rules, virtual directory or compression; refusing overwrite")
+	}
+	return nil
+}
+
+func prepare(root string, s Site) (State, error) {
+	if st, err := loadState(root, s.ID); err == nil {
+		return st, fmt.Errorf("already rendered; use enable to apply config changes")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return State{}, err
+	}
+	n, public, err := render(root, s, false)
+	if err != nil {
+		return State{}, err
+	}
+	d := siteDir(root, s)
+	for name, data := range n.Files {
+		if old, e := os.ReadFile(filepath.Join(d, name)); e == nil && !bytes.Equal(old, data) {
+			return State{}, fmt.Errorf("refusing to overwrite existing file %s", name)
+		}
+	}
+	if err = deployAssets(root, s, public); err != nil {
+		return State{}, err
+	}
+	for _, name := range fileNames(n.Files) {
+		if err = atomicWrite(filepath.Join(d, name), n.Files[name], 0644); err != nil {
+			return State{}, err
+		}
+	}
+	if err = atomicWrite(filepath.Join(d, "ATTACH.md"), []byte(attachment(root, s)), 0644); err != nil {
+		return State{}, err
+	}
+	st := State{SchemaVersion: 1, Current: n}
+	return st, saveState(root, st)
+}
+
+func deployAssets(root string, s Site, files map[string][]byte) error {
+	for name, data := range files {
+		p := filepath.Join(siteDir(root, s), filepath.FromSlash(name))
+		if old, err := os.ReadFile(p); err == nil {
+			if !bytes.Equal(old, data) {
+				return fmt.Errorf("immutable asset conflict at %s", p)
+			}
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := atomicWrite(p, data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compatibleTarget(a, b Site) bool {
+	if a.ID != b.ID || a.platform() != b.platform() || a.PublicURL != b.PublicURL {
+		return false
+	}
+	if a.IIS != nil {
+		return a.IIS.Site == b.IIS.Site && a.IIS.Application == b.IIS.Application
+	}
+	var binaryA, binaryB string
+	var argsA, argsB []string
+	if a.Apache != nil {
+		binaryA, binaryB, argsA, argsB = a.Apache.Binary, b.Apache.Binary, a.Apache.Args, b.Apache.Args
+	} else {
+		binaryA, binaryB, argsA, argsB = a.Nginx.Binary, b.Nginx.Binary, a.Nginx.Args, b.Nginx.Args
+	}
+	if binaryA != binaryB || len(argsA) != len(argsB) {
+		return false
+	}
+	for i, arg := range argsA {
+		if arg != argsB[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func preflight(root string, s Site) error {
+	if err := nativeCheck(root, s, true); err != nil {
+		return err
+	}
+	if s.SDK.Source == "cdn" {
+		_, info, err := sdk()
+		if err != nil {
+			return err
+		}
+		if err = probeCDNSDK(s, info, sdkLocation(s, info)); err != nil {
+			return err
+		}
+	}
+	for _, path := range s.ProbePaths {
+		p, err := getPage(pageURL(s, path), nil)
+		if err != nil {
+			return err
+		}
+		if err = checkPage(s, p); err != nil {
+			return err
+		}
+	}
+	return probeWorkers(s)
+}
+
+func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
+	if !compatibleTarget(st.Current.Site, s) {
+		return errors.New("site identity/target changed; use a new site ID and separate attachment")
+	}
+	if err := verifyFiles(root, st.Current); err != nil {
+		return err
+	}
+	if err := verifyNative(root, st.Current); err != nil {
+		return err
+	}
+	if _, err := os.Stat(journalPath(root, s)); err == nil {
+		return errors.New("unfinished transaction; use rollback first")
+	}
+	if enabled {
+		if err := preflight(root, s); err != nil {
+			return err
+		}
+	} else if err := nativeCheck(root, s, false); err != nil {
+		return err
+	}
+	if s.IIS != nil && len(st.Current.Native) == 0 {
+		native, err := nativeCapture(root, s)
+		if err != nil {
+			return err
+		}
+		var owned struct {
+			Rules         []string `json:"rules"`
+			Preconditions []string `json:"preconditions"`
+		}
+		if err = json.Unmarshal(native, &owned); err != nil {
+			return err
+		}
+		if len(owned.Rules) > 0 || len(owned.Preconditions) > 0 {
+			return errors.New("owned IIS rule names already exist without managed state")
+		}
+		st.Current.Native = native
+		st.OriginalIIS = native
+	}
+	n, public, err := render(root, s, enabled)
+	if err != nil {
+		return err
+	}
+	if st.Current.Enabled == enabled && snapshotsEqual(st.Current, n) {
+		fmt.Fprintln(w, "Already in requested state; verifying HTTP probes.")
+		return waitProbes(st.Current)
+	}
+	fmt.Fprintf(w, "%s site %s (%s): SDK %s; managed files %s\n", map[bool]string{true: "Enable", false: "Disable"}[enabled], s.ID, s.platform(), n.SDK.Version, strings.Join(fileNames(n.Files), ", "))
+	if s.IIS != nil && enabled {
+		fmt.Fprintln(w, "IIS: static compression will be disabled for this application; original local setting is saved.")
+	}
+	if s.Apache != nil && enabled {
+		fmt.Fprintln(w, "Apache: selected paths lose conditional/range request headers; mod_cache is bypassed for includePaths prefixes while enabled. See ATTACH.md.")
+	}
+	return transact(root, st, n, public, false)
+}
+func snapshotsEqual(a, b Snapshot) bool {
+	x, y := a, b
+	x.Native = nil
+	y.Native = nil
+	u, _ := json.Marshal(x)
+	v, _ := json.Marshal(y)
+	return bytes.Equal(u, v)
+}
+
+func transact(root string, st State, n Snapshot, public map[string][]byte, restore bool) error {
+	t := transaction{Before: st, After: n}
+	jp := journalPath(root, n.Site)
+	if err := writeJSON(jp, t); err != nil {
+		return err
+	}
+	fail := func(cause error) error {
+		if err := restoreTransaction(root, t); err != nil {
+			return fmt.Errorf("operation failed: %v; recovery incomplete: %w; keep transaction.json", cause, err)
+		}
+		if err := os.Remove(jp); err != nil {
+			return fmt.Errorf("recovered, but cannot remove journal: %w", err)
+		}
+		return fmt.Errorf("operation failed and was rolled back: %w", cause)
+	}
+	if err := deployAssets(root, n.Site, public); err != nil {
+		return fail(err)
+	}
+	for _, name := range fileNames(n.Files) {
+		if err := atomicWrite(filepath.Join(siteDir(root, n.Site), name), n.Files[name], 0644); err != nil {
+			return fail(err)
+		}
+	}
+	var err error
+	if restore {
+		err = nativeRestore(root, &n)
+	} else {
+		err = nativeApply(root, &n, st.OriginalIIS)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	t.After = n
+	t.NativeCommitted = true
+	if err = writeJSON(jp, t); err != nil {
+		return fail(err)
+	}
+	if err = waitProbes(n); err != nil {
+		return fail(err)
+	}
+	old := st.Current
+	st.Previous = &old
+	st.Current = n
+	st.LastCheck = &CheckRecord{time.Now().UTC(), true, "configuration committed; HTTP injection/assets verified; browser and ingestion unverified"}
+	if err = saveState(root, st); err != nil {
+		return fail(err)
+	}
+	return os.Remove(jp)
+}
+
+func restoreTransaction(root string, t transaction) error {
+	if err := verifyFilesAssets(root, t.Before.Current); err != nil {
+		return err
+	}
+	d := siteDir(root, t.Before.Current.Site)
+	for name, before := range t.Before.Current.Files {
+		live, err := os.ReadFile(filepath.Join(d, name))
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(live, before) && !bytes.Equal(live, t.After.Files[name]) {
+			return fmt.Errorf("recovery blocked by external file change: %s", name)
+		}
+	}
+	if t.Before.Current.Site.IIS != nil {
+		live, err := nativeCapture(root, t.Before.Current.Site)
+		if err != nil {
+			return err
+		}
+		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) {
+			return errors.New("IIS state differs from journal; manual review required before recovery")
+		}
+	}
+	for name, before := range t.Before.Current.Files {
+		if err := atomicWrite(filepath.Join(d, name), before, 0644); err != nil {
+			return err
+		}
+	}
+	if err := nativeRestore(root, &t.Before.Current); err != nil {
+		return err
+	}
+	if err := waitProbes(t.Before.Current); err != nil {
+		return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w", err)
+	}
+	return saveState(root, t.Before)
+}
+
+func rollback(root string, st State, w io.Writer) error {
+	b, err := os.ReadFile(journalPath(root, st.Current.Site))
+	if err == nil {
+		var t transaction
+		if err = json.Unmarshal(b, &t); err != nil {
+			return err
+		}
+		if t.Before.SchemaVersion != 1 {
+			return errors.New("unsupported transaction state")
+		}
+		if err = validateSnapshot(t.Before.Current, st.Current.Site.ID); err != nil {
+			return err
+		}
+		if err = validateSnapshot(t.After, st.Current.Site.ID); err != nil {
+			return err
+		}
+		if !compatibleTarget(st.Current.Site, t.Before.Current.Site) || !compatibleTarget(t.Before.Current.Site, t.After.Site) {
+			return errors.New("transaction target differs from managed site; refusing recovery")
+		}
+		if t.Before.Previous != nil {
+			if err = validateSnapshot(*t.Before.Previous, st.Current.Site.ID); err != nil {
+				return err
+			}
+			if !compatibleTarget(t.Before.Current.Site, t.Before.Previous.Site) {
+				return errors.New("transaction history target mismatch")
+			}
+		}
+		if err = restoreTransaction(root, t); err != nil {
+			return err
+		}
+		return os.Remove(journalPath(root, st.Current.Site))
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if st.Previous == nil {
+		return errors.New("no previous successful deployment")
+	}
+	if err = verifyFiles(root, st.Current); err != nil {
+		return err
+	}
+	if err = verifyNative(root, st.Current); err != nil {
+		return err
+	}
+	if err = verifyFilesAssets(root, *st.Previous); err != nil {
+		return err
+	}
+	if st.Previous.Enabled && st.Previous.Site.IIS == nil {
+		if err = nativeCheck(root, st.Previous.Site, true); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(w, "Restoring previous successful deployment for", st.Current.Site.ID)
+	return transact(root, st, *st.Previous, nil, true)
+}
+func verifyFilesAssets(root string, n Snapshot) error { n.Files = nil; return verifyFiles(root, n) }
+
+func waitProbes(n Snapshot) error {
+	var err error
+	for attempt := 0; attempt < 12; attempt++ {
+		_, err = probePages(n.Site, n.Site.ProbePaths, &n)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return err
+}
+
+func hostInfo() map[string]string {
+	return map[string]string{"go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH}
+}

@@ -1,0 +1,85 @@
+schemaVersion = 1
+
+[[sites]]
+id = "intranet"
+publicURL = "https://intranet.example.com/"
+probePaths = ["/"]
+includePaths = ["/"]
+excludePaths = ["/api/", "/downloads/"]
+
+[sites.iis]
+site = "Default Web Site"
+application = "/"
+allowCompressionChanges = true
+
+[sites.rum]
+applicationId = "REPLACE_APPLICATION_ID"
+datakitOrigin = "https://datakit.example.com"
+env = "production"
+service = "browser"
+version = "1.0.0"
+sessionSampleRate = 100
+# Session Replay is opt-in. Error replay also requires this switch.
+sessionReplayEnabled = false
+sessionReplaySampleRate = 100
+sessionOnErrorSampleRate = 0
+sessionReplayOnErrorSampleRate = 0
+telemetrySampleRate = 100
+
+# Collection and privacy.
+trackUserInteractions = true
+enablePrivacyForActionName = false
+defaultPrivacyLevel = "mask"
+# actionNameAttribute = "data-rum-action-name"
+trackViewsManually = false
+enableLongAnimationFrame = false
+enableExperimentalFeatures = [] # Supported: "track_websockets"
+excludedActivityUrls = [] # Absolute URLs; exact string matching by the SDK.
+
+# Session cookies and context storage.
+sessionPersistence = "cookie" # "cookie" or "local-storage"
+useSecureSessionCookie = false # Requires HTTPS when enabled.
+usePartitionedCrossSiteSessionCookie = false # Requires HTTPS when enabled.
+trackSessionAcrossSubdomains = false
+allowFallbackToLocalStorage = false # Remove sessionPersistence to permit automatic fallback.
+storeContextsToLocal = false
+# storeContextsKey = "rumable-example"
+
+# Transport. Workers need CSP permission when the feature is enabled.
+compressIntakeRequests = false
+sendContentTypeByJson = false
+# workerUrl = "/rum-worker.js" # Host the matching official 3.3.21 worker yourself.
+# replayCanvasWorkerUrl = "/canvas-worker.js"
+remoteConfiguration = false # Remote values may override static SDK settings.
+silentMultipleInit = false # Rumable still never takes over an existing SDK.
+
+# Trace headers are disabled while the allow list is empty.
+allowedTracingUrls = []
+# Example: ["https://api.example.com/", {match = "https://api.example.com/v2/", traceType = "w3c_traceparent"}]
+traceType = "ddtrace"
+tracingSampleRate = 100
+traceId128Bit = false
+allowTraceHeaderWithoutSession = false
+
+# Canvas 2D recording. Requires Session Replay and a sampled session.
+replayCanvasEnabled = false
+replayCanvasMode = "auto" # "manual" requires a business snapshotCanvas() call.
+replayCanvasSampling = 2 # Positive number or "all".
+replayCanvasQuality = 0.4 # 0-1, or "low" / "medium" / "high" presets.
+replayCanvasMimeType = "image/webp"
+replayCanvasMaxCanvasSize = 1280
+replayCanvasMaxEncodedBytes = 40000
+replayCanvasMaxConcurrentEncodes = 1
+replayCanvasFlushImmediately = false
+replayCanvasAutoInterval = 250
+replayCanvasAutoCooldown = 250
+replayCanvasAutoUnchangedBackoff = 3000
+replayCanvasAutoFailureBackoff = 5000
+replayCanvasAutoMaxPerRun = 2
+
+# Optional Visitor ID headers; keep this table after the other rum options.
+# [sites.rum.visitorId]
+# enabled = false
+# header = "x-rum-visitor-id"
+# match = ["https://api.example.com/"]
+# ttlHours = 24

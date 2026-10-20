@@ -1,0 +1,7 @@
+/dist/
+/.rumable/
+/rumable
+/rumable.exe
+/rumable.toml
+.DS_Store
+/rumable-iis-results/
