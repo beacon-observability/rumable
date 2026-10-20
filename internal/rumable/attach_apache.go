@@ -123,6 +123,18 @@ func apacheWords(text string) ([]string, error) {
 var apacheVhostSource = regexp.MustCompile(`(?m)\(([^()\r\n]+):([0-9]+)\)\s*$`)
 
 func planApacheAttachment(root string, s Site, target string) (attachmentPlan, error) {
+	if err := checkOTelModule(s); err != nil {
+		return attachmentPlan{}, err
+	}
+	if s.OTel != nil {
+		// Resolve the native SDK ABI and loader dependencies before creating a
+		// backup or writing the first LoadModule into the live configuration.
+		x := s.Apache
+		args := append(append([]string{}, x.Args...), "-t", "-C", "LoadModule otel_apache_module "+apacheQuote(s.OTel.ModulePath))
+		if _, err := command(x.Binary, args...); err != nil {
+			return attachmentPlan{}, fmt.Errorf("OTel module load preflight failed before attachment: %w", err)
+		}
+	}
 	dump, err := apacheInspect(s)
 	if err != nil {
 		return attachmentPlan{}, err
@@ -176,6 +188,20 @@ func (c *attachConfig) planApache(root string, s Site, target string, active map
 	if err != nil {
 		return nil, "", err
 	}
+	var moduleEdit []attachEdit
+	if s.OTel != nil {
+		loaded, checkErr := c.checkApacheOTel(root, s)
+		if checkErr != nil {
+			return nil, "", checkErr
+		}
+		if !loaded {
+			main := selected
+			for main.parent != c.root {
+				main = main.parent
+			}
+			moduleEdit = append(moduleEdit, attachEdit{main.file, 0, 0, insertBlock(s, "otel-module", "LoadModule otel_apache_module "+apacheQuote(s.OTel.ModulePath)+"\nApacheModuleEnabled OFF\n")})
+		}
+	}
 	for parent := selected.parent; parent != nil && parent.words != nil; parent = parent.parent {
 		if key := strings.ToLower(parent.words[0]); key != "ifmodule" && key != "ifdefine" {
 			return nil, "", fmt.Errorf("VirtualHost in %s needs manual attachment", parent.words[0])
@@ -192,6 +218,9 @@ func (c *attachConfig) planApache(root string, s Site, target string, active map
 	// Directory/Location or conditional blocks. Unknown output chains need review.
 	err = visitNodes(c.root, func(n *attachNode) error {
 		if !apacheApplies(n, selected) {
+			return nil
+		}
+		if !s.RUM.isEnabled() {
 			return nil
 		}
 		key := strings.ToLower(n.words[0])
@@ -242,7 +271,7 @@ func (c *attachConfig) planApache(root string, s Site, target string, active map
 	// LocationMatch last so ordinary preceding sections cannot override it.
 	before := insertBlock(s, "proxy", "<IfModule proxy_module>\nProxyPass "+apacheQuote(s.assetPrefix())+" !\n</IfModule>\n")
 	after := insertBlock(s, "vhost", "Include "+apacheQuote(filepath.ToSlash(filepath.Join(siteDir(root, s), "apache.conf")))+"\n")
-	files, err := c.edits(s.ID, []attachEdit{{selected.file, selected.stop, selected.stop, before}, {selected.file, selected.close, selected.close, after}})
+	files, err := c.edits(s.ID, append(moduleEdit, attachEdit{selected.file, selected.stop, selected.stop, before}, attachEdit{selected.file, selected.close, selected.close, after}))
 	return files, selected.key(), err
 }
 func firstWord(n *attachNode) string {

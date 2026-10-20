@@ -45,7 +45,7 @@ func nativeCheck(root string, s Site, enabling bool) error {
 		return apacheCheck(root, s, enabling)
 	}
 	if s.Nginx == nil {
-		_, err := iisCommand(root, s, "check", nil)
+		_, err := iisCommand(root, s, "check", map[string]any{"checkingEnabled": enabling})
 		return err
 	}
 	if enabling {
@@ -63,10 +63,13 @@ func nativeCheck(root string, s Site, enabling bool) error {
 			return fmt.Errorf("missing effective Nginx include %s; complete ATTACH.md", p)
 		}
 	}
+	if s.OTel != nil {
+		return checkNginxOTel(root, s, v, dump)
+	}
 	if enabling && nginxVersion.FindString(string(v)) == "nginx/1.9.4" {
 		return checkNginx194(dump)
 	}
-	return nil
+	return checkNginxOTel(root, s, v, dump)
 }
 
 func nginxInspect(s Site) ([]byte, []byte, error) {
@@ -84,7 +87,7 @@ func nginxInspect(s Site) ([]byte, []byte, error) {
 	if major < 1 || (major == 1 && (minor < 9 || (minor == 9 && patch < 4))) {
 		return nil, nil, fmt.Errorf("Nginx >=1.9.4 is required for variable substitution")
 	}
-	if !strings.Contains(string(v), "--with-http_sub_module") {
+	if s.RUM.isEnabled() && !strings.Contains(string(v), "--with-http_sub_module") {
 		return nil, nil, fmt.Errorf("Nginx lacks --with-http_sub_module")
 	}
 	dump, _, err := commandOutput(s.Nginx.Binary, append(append([]string{}, s.Nginx.Args...), "-T")...)
@@ -94,9 +97,9 @@ func nginxInspect(s Site) ([]byte, []byte, error) {
 	return v, dump, nil
 }
 
-func nativeApply(root string, n *Snapshot, original json.RawMessage) error {
+func nativeApply(root string, n *Snapshot, original, expected json.RawMessage) error {
 	if n.Site.Apache != nil {
-		if err := apacheCheck(root, n.Site, n.Enabled); err != nil {
+		if err := apacheCheck(root, n.Site, n.active()); err != nil {
 			return err
 		}
 		x := n.Site.Apache
@@ -105,7 +108,7 @@ func nativeApply(root string, n *Snapshot, original json.RawMessage) error {
 	}
 	if n.Site.Nginx != nil {
 		x := n.Site.Nginx
-		if n.Enabled {
+		if n.active() {
 			if err := nativeCheck(root, n.Site, true); err != nil {
 				return err
 			}
@@ -116,7 +119,7 @@ func nativeApply(root string, n *Snapshot, original json.RawMessage) error {
 		_, err := command(x.Binary, append(append([]string{}, x.Args...), "-s", "reload")...)
 		return err
 	}
-	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "script": n.Script, "original": original})
+	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "otelEnabled": n.OTelEnabled, "script": n.Script, "original": original, "expected": expected})
 	if err == nil {
 		n.Native = data
 	}
@@ -130,11 +133,11 @@ func nativeCapture(root string, s Site) (json.RawMessage, error) {
 	return iisCommand(root, s, "inspect", nil)
 }
 
-func nativeRestore(root string, n *Snapshot) error {
+func nativeRestore(root string, n *Snapshot, expected json.RawMessage) error {
 	if n.Site.IIS == nil {
-		return nativeApply(root, n, nil)
+		return nativeApply(root, n, nil, nil)
 	}
-	data, err := iisCommand(root, n.Site, "restore", map[string]any{"snapshot": n.Native})
+	data, err := iisCommand(root, n.Site, "restore", map[string]any{"snapshot": n.Native, "expected": expected})
 	if err == nil {
 		n.Native = data
 	}
@@ -155,6 +158,10 @@ func iisCommand(root string, s Site, action string, extra map[string]any) (json.
 		return nil, err
 	}
 	if err := atomicWrite(filepath.Join(dir, "iis.ps1"), script, 0600); err != nil {
+		return nil, err
+	}
+	otelScript, _ := assets.ReadFile("assets/otel-iis.ps1")
+	if err := atomicWrite(filepath.Join(dir, "otel-iis.ps1"), otelScript, 0600); err != nil {
 		return nil, err
 	}
 	payload := map[string]any{"site": s, "root": dir, "action": action}

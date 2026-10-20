@@ -100,10 +100,22 @@ func setupInstructions(root string, s Site, config string) string {
 		executable = "rumable"
 	}
 	if s.IIS == nil {
-		fmt.Fprintf(&b, "\n1. Automatically detect and preview the first attachment, then confirm:\n   %s\n   Preview only: add --dry-run. Multiple candidates: use --target FILE:LINE.\n   Manual fallback: %s (then set %s.attachmentReviewed=true).\n", shellCommand(executable, "attach", "--config", config, "--site", s.ID, "--state-dir", root), filepath.Join(d, "ATTACH.md"), s.platform())
+		fmt.Fprintf(&b, "\n1. Automatically detect and preview the first attachment, then confirm:\n   %s\n   Preview only: add --dry-run. Multiple candidates: use --target FILE:LINE.\n", shellCommand(executable, "attach", "--config", config, "--site", s.ID, "--state-dir", root))
+		if s.OTel == nil {
+			fmt.Fprintf(&b, "   Manual fallback: %s (then set %s.attachmentReviewed=true).\n", filepath.Join(d, "ATTACH.md"), s.platform())
+		} else {
+			fmt.Fprintf(&b, "   OTel requires installed native dependencies and managed attachment ownership; see %s and docs/otel.md.\n", filepath.Join(d, "ATTACH.md"))
+		}
 	} else {
-		b.WriteString("\n1. Review ATTACH.md; prepare URL Rewrite, asset access and compression permission as Administrator.\n")
+		if s.RUM.isEnabled() {
+			b.WriteString("\n1. Review ATTACH.md; prepare URL Rewrite, asset access and compression permission as Administrator.\n")
+		} else {
+			b.WriteString("\n1. Review ATTACH.md; install the .NET Agent and prepare a dedicated IIS 10 application pool as Administrator.\n")
+		}
 	}
 	fmt.Fprintf(&b, "2. Enable (includes preflight, server validation, activation and HTTP probes):\n   %s\n", shellCommand(executable, "enable", "--config", config, "--site", s.ID, "--state-dir", root))
+	if s.OTel != nil && s.OTel.Backend == "dataway" && s.IIS == nil {
+		fmt.Fprintln(&b, "Dataway requires an existing OTLP/gRPC Collector. Its generated private JSON configuration is under", filepath.Join(d, "collector", s.ID), "(JSON is accepted as YAML). Start it with the tokenEnv environment variable before enable; status shows the exact configuration path. Shared exporters use ONE Collector process.")
+	}
 	return b.String()
 }

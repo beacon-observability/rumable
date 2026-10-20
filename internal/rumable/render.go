@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,17 +12,23 @@ import (
 )
 
 type Snapshot struct {
-	Enabled bool              `json:"enabled"`
-	Site    Site              `json:"site"`
-	Files   map[string][]byte `json:"files"`
-	Assets  map[string]string `json:"assets"`
-	Script  string            `json:"script"`
-	SDK     SDKInfo           `json:"sdk"`
-	SDKURL  string            `json:"sdkURL,omitempty"`
-	Native  json.RawMessage   `json:"native,omitempty"`
+	Enabled       bool              `json:"enabled"`
+	OTelEnabled   bool              `json:"otelEnabled,omitempty"`
+	OTelOwner     string            `json:"otelOwner,omitempty"`
+	OTelCollector string            `json:"otelCollector,omitempty"`
+	OTelTokenHash string            `json:"otelTokenHash,omitempty"`
+	Site          Site              `json:"site"`
+	Files         map[string][]byte `json:"files"`
+	Assets        map[string]string `json:"assets"`
+	Script        string            `json:"script"`
+	SDK           SDKInfo           `json:"sdk"`
+	SDKURL        string            `json:"sdkURL,omitempty"`
+	Native        json.RawMessage   `json:"native,omitempty"`
 }
 
 func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, error) {
+	active := enabled
+	enabled = enabled && s.RUM.isEnabled()
 	b, info, err := sdk()
 	if err != nil {
 		return Snapshot{}, nil, err
@@ -36,6 +43,17 @@ func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, err
 	manifest, _ := json.MarshalIndent(info, "", "  ")
 	public[filepath.Join("public", s.ID, "sdk."+info.SHA256+".json")] = manifest
 	n := Snapshot{Enabled: enabled, Site: s, Files: map[string][]byte{}, Assets: map[string]string{}, Script: s.assetPrefix() + bootName, SDK: info}
+	if s.OTel != nil {
+		n.OTelEnabled = active && s.OTel.Enabled
+		if n.OTelEnabled && s.IIS != nil && s.OTel.Backend == "dataway" {
+			n.OTelTokenHash = hash([]byte(os.Getenv(s.OTel.TokenEnv)))
+		}
+		n.OTelOwner, err = otelOwner(root, s)
+		if err != nil {
+			return Snapshot{}, nil, err
+		}
+		renderOTelCollector(s, &n, public)
+	}
 	if s.SDK.Source == "cdn" {
 		n.SDKURL = sdkURL
 	}
@@ -79,10 +97,15 @@ func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, err
 		// inherited http-level filters on Nginx 1.9.4. Retained business rules are
 		// attached explicitly alongside this include during first attachment.
 		filter := fmt.Sprintf("# Managed by Rumable. Injection disabled; empty dynamic anchor.\nsub_filter '$%s_anchor' '';\n", v)
+		if !s.RUM.isEnabled() {
+			filter = "# RUM disabled in TOML.\n"
+			n.Files["server.conf"] = []byte(strings.ReplaceAll(string(n.Files["server.conf"]), fmt.Sprintf("    sub_filter '$%s_anchor' '';\n", v), ""))
+		}
 		if enabled {
 			filter = fmt.Sprintf("# Managed by Rumable. HTML is gated independently of inherited sub_filter_types.\nsub_filter_once on;\nsub_filter_last_modified off;\nsub_filter '$%s_anchor' '$%s_tag</head>';\netag off;\nif_modified_since off;\n", v, v)
 		}
 		n.Files["location.conf"] = []byte(filter)
+		renderNginxOTel(&n)
 	}
 	return n, public, nil
 }
@@ -95,6 +118,22 @@ func nginxQuote(s string) string {
 }
 
 func attachment(root string, s Site) string {
+	if s.OTel != nil {
+		guide := "# Server OTel attachment\n\nUse docs/otel.md shipped with Rumable for native module/Agent requirements, DataKit/Dataway and Collector lifecycle.\n"
+		if s.IIS != nil {
+			guide += "IIS OTel requires IIS 10 / Windows 10 or Server 2016+, Windows PowerShell 5.1, an installed .NET Agent and a dedicated application pool. Run enable as Administrator; only that pool is configured/recycled.\n"
+		} else {
+			guide += "Run attach --dry-run, review the exact native module/shared exporter/target-site changes, then run attach to confirm. OTel requires the managed attachment record; do not create unmanaged OTel directives from the RUM manual fallback.\n"
+		}
+		if !s.RUM.isEnabled() {
+			return guide + "\nRUM is disabled: preserve existing compression, cache, business request headers and CSP. No HTML rewrite module or browser credentials are required. Run enable after attachment/dependency setup; use --component otel for later toggles and rollback for the previous successful deployment.\n"
+		}
+		return guide + "\nRUM is configured too. Its additional HTML requirements follow.\n\n" + rumAttachment(root, s)
+	}
+	return rumAttachment(root, s)
+}
+
+func rumAttachment(root string, s Site) string {
 	d := filepath.ToSlash(siteDir(root, s))
 	if s.Apache != nil {
 		return apacheAttachment(root, s)

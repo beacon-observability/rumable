@@ -36,6 +36,19 @@ func apacheCheck(root string, s Site, enabling bool) error {
 	if count != 1 {
 		return fmt.Errorf("expected exactly one effective Apache include %s, found %d; complete ATTACH.md", want, count)
 	}
+	if s.OTel != nil {
+		c, _, err := apacheAttachmentConfig(dump)
+		if err != nil {
+			return err
+		}
+		loaded, err := c.checkApacheOTel(root, s)
+		if err != nil {
+			return err
+		}
+		if !loaded {
+			return fmt.Errorf("Apache OTel module is not loaded; complete attachment first")
+		}
+	}
 	return nil
 }
 
@@ -59,7 +72,11 @@ func apacheInspect(s Site) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, module := range []string{"lua_module", "filter_module", "alias_module", "authz_core_module", "headers_module"} {
+	required := []string{"alias_module", "authz_core_module", "headers_module"}
+	if s.RUM.isEnabled() {
+		required = append(required, "lua_module", "filter_module")
+	}
+	for _, module := range required {
 		if !regexp.MustCompile(`(?m)^\s*` + module + `\s+\((?:shared|static)\)\s*$`).Match(modules) {
 			return nil, fmt.Errorf("Apache lacks loaded %s", module)
 		}
@@ -126,8 +143,17 @@ func renderApache(root string, n *Snapshot, files map[string][]byte) error {
 		}
 		b.WriteString("</IfModule>\n")
 	}
-	fmt.Fprintf(&b, "<Location %s>\n    FilterChain !\n    Header set Cache-Control \"public, max-age=31536000, immutable\"\n</Location>\n", apacheQuote(s.assetPrefix()))
+	filterReset := ""
+	if s.RUM.isEnabled() {
+		filterReset = "    FilterChain !\n"
+	}
+	fmt.Fprintf(&b, "<Location %s>\n%s    Header set Cache-Control \"public, max-age=31536000, immutable\"\n</Location>\n", apacheQuote(s.assetPrefix()), filterReset)
 	n.Files["apache.conf"] = []byte(b.String())
+	n.Files["apache.conf"] = append(n.Files["apache.conf"], apacheOTel(s, n.OTelEnabled)...)
+	if s.OTel != nil {
+		files["public/"+s.ID+"/otel-status.json"] = []byte("{}")
+		n.Files["apache.conf"] = append(n.Files["apache.conf"], fmt.Sprintf("<Location %s>\n    Header set X-Rumable-OTel %s\n    Header set Cache-Control \"no-store\"\n</Location>\n", apacheQuote(s.assetPrefix()+"otel-status.json"), apacheQuote(n.otelGeneration()))...)
+	}
 	return nil
 }
 

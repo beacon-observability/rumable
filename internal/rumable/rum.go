@@ -12,6 +12,7 @@ import (
 )
 
 type RUM struct {
+	Enabled                              *bool      `json:"enabled,omitempty" toml:"enabled"`
 	ApplicationID                        string     `json:"applicationId" toml:"applicationId"`
 	Site                                 string     `json:"site,omitempty" toml:"site"`
 	ClientToken                          string     `json:"clientToken,omitempty" toml:"clientToken"`
@@ -87,6 +88,8 @@ func (r RUM) replayRate() float64 {
 
 func enabled(v *bool) bool { return v != nil && *v }
 
+func (r RUM) isEnabled() bool { return r.Enabled == nil || *r.Enabled }
+
 func (r RUM) replayOnErrorRate() float64 {
 	if !r.SessionReplayEnabled || r.SessionReplayOnErrorSampleRate == nil {
 		return 0
@@ -107,6 +110,7 @@ func (r RUM) sdkConfig() map[string]any {
 	b, _ := json.Marshal(r)
 	_ = json.Unmarshal(b, &config)
 	delete(config, "sessionReplayEnabled")
+	delete(config, "enabled")
 	config["sessionReplaySampleRate"] = r.replayRate()
 	config["sessionReplayOnErrorSampleRate"] = r.replayOnErrorRate()
 	return config

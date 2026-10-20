@@ -31,6 +31,7 @@ type Site struct {
 	IIS        *IIS      `json:"iis,omitempty" toml:"iis"`
 	RUM        RUM       `json:"rum" toml:"rum"`
 	SDK        SDKConfig `json:"sdk,omitempty" toml:"sdk"`
+	OTel       *OTel     `json:"otel,omitempty" toml:"otel"`
 }
 
 type SDKConfig struct {
@@ -136,6 +137,12 @@ func (s Site) validate() error {
 	}
 	if err := s.SDK.validate(); err != nil {
 		return err
+	}
+	if err := s.OTel.validate(s); err != nil {
+		return err
+	}
+	if !s.RUM.isEnabled() {
+		return nil
 	}
 	return s.RUM.validate(s.PublicURL)
 }

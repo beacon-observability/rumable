@@ -25,7 +25,7 @@ func verifyNative(root string, n Snapshot) error {
 		return err
 	}
 	if !sameJSON(live, n.Native) {
-		return errors.New("external change to owned IIS rules, virtual directory or compression; refusing overwrite")
+		return errors.New("external change to owned IIS rules, resources, compression or OTel pool settings; refusing overwrite")
 	}
 	return nil
 }
@@ -105,8 +105,24 @@ func compatibleTarget(a, b Site) bool {
 }
 
 func preflight(root string, s Site) error {
+	if s.RUM.isEnabled() && s.IIS == nil {
+		if a, err := loadAttachment(root, s); err == nil && a.Phase == "attached" && !a.Site.RUM.isEnabled() {
+			return errors.New("RUM was not prepared in the original OTel-only attachment; use a new attachment with RUM prerequisites reviewed before enabling browser injection")
+		}
+	}
 	if err := nativeCheck(root, s, true); err != nil {
 		return err
+	}
+	if err := otelPreflight(root, s); err != nil {
+		return err
+	}
+	if !s.RUM.isEnabled() {
+		for _, path := range s.ProbePaths {
+			if _, err := getPage(pageURL(s, path), nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if s.SDK.Source == "cdn" {
 		_, info, err := sdk()
@@ -132,6 +148,12 @@ func preflight(root string, s Site) error {
 func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
 	if !compatibleTarget(st.Current.Site, s) {
 		return errors.New("site identity/target changed; use a new site ID and separate attachment")
+	}
+	if (st.Current.Site.OTel == nil) != (s.OTel == nil) {
+		return errors.New("adding/removing OTel changes the first attachment; disable and undo the existing attachment, then render a new site ID with OTel configured")
+	}
+	if s.OTel != nil && st.Current.Site.OTel.ModulePath != s.OTel.ModulePath {
+		return errors.New("modulePath is fixed by first attachment; use the original module path or detach before changing it")
 	}
 	if err := verifyFiles(root, st.Current); err != nil {
 		return err
@@ -171,15 +193,15 @@ func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if st.Current.Enabled == enabled && snapshotsEqual(st.Current, n) {
+	if snapshotsEqual(st.Current, n) {
 		fmt.Fprintln(w, "Already in requested state; verifying HTTP probes.")
 		return waitProbes(st.Current)
 	}
 	fmt.Fprintf(w, "%s site %s (%s): SDK %s; managed files %s\n", map[bool]string{true: "Enable", false: "Disable"}[enabled], s.ID, s.platform(), n.SDK.Version, strings.Join(fileNames(n.Files), ", "))
-	if s.IIS != nil && enabled {
+	if s.IIS != nil && n.Enabled {
 		fmt.Fprintln(w, "IIS: static compression will be disabled for this application; original local setting is saved.")
 	}
-	if s.Apache != nil && enabled {
+	if s.Apache != nil && n.Enabled {
 		fmt.Fprintln(w, "Apache: selected paths lose conditional/range request headers; mod_cache is bypassed for includePaths prefixes while enabled. See ATTACH.md.")
 	}
 	return transact(root, st, n, public, false)
@@ -218,9 +240,9 @@ func transact(root string, st State, n Snapshot, public map[string][]byte, resto
 	}
 	var err error
 	if restore {
-		err = nativeRestore(root, &n)
+		err = nativeRestore(root, &n, st.Current.Native)
 	} else {
-		err = nativeApply(root, &n, st.OriginalIIS)
+		err = nativeApply(root, &n, st.OriginalIIS, st.Current.Native)
 	}
 	if err != nil {
 		return fail(err)
@@ -236,7 +258,7 @@ func transact(root string, st State, n Snapshot, public map[string][]byte, resto
 	old := st.Current
 	st.Previous = &old
 	st.Current = n
-	st.LastCheck = &CheckRecord{time.Now().UTC(), true, "configuration committed; HTTP injection/assets verified; browser and ingestion unverified"}
+	st.LastCheck = &CheckRecord{time.Now().UTC(), true, "configuration committed; HTTP/component state verified; browser execution and OTLP ingestion unverified"}
 	if err = saveState(root, st); err != nil {
 		return fail(err)
 	}
@@ -257,6 +279,7 @@ func restoreTransaction(root string, t transaction) error {
 			return fmt.Errorf("recovery blocked by external file change: %s", name)
 		}
 	}
+	var nativeExpected json.RawMessage
 	if t.Before.Current.Site.IIS != nil {
 		live, err := nativeCapture(root, t.Before.Current.Site)
 		if err != nil {
@@ -265,13 +288,14 @@ func restoreTransaction(root string, t transaction) error {
 		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) {
 			return errors.New("IIS state differs from journal; manual review required before recovery")
 		}
+		nativeExpected = live
 	}
 	for name, before := range t.Before.Current.Files {
 		if err := atomicWrite(filepath.Join(d, name), before, 0644); err != nil {
 			return err
 		}
 	}
-	if err := nativeRestore(root, &t.Before.Current); err != nil {
+	if err := nativeRestore(root, &t.Before.Current, nativeExpected); err != nil {
 		return err
 	}
 	if err := waitProbes(t.Before.Current); err != nil {
@@ -327,7 +351,7 @@ func rollback(root string, st State, w io.Writer) error {
 	if err = verifyFilesAssets(root, *st.Previous); err != nil {
 		return err
 	}
-	if st.Previous.Enabled && st.Previous.Site.IIS == nil {
+	if st.Previous.active() && st.Previous.Site.IIS == nil {
 		if err = nativeCheck(root, st.Previous.Site, true); err != nil {
 			return err
 		}
@@ -339,12 +363,26 @@ func verifyFilesAssets(root string, n Snapshot) error { n.Files = nil; return ve
 
 func waitProbes(n Snapshot) error {
 	var err error
+	stable := 0
 	for attempt := 0; attempt < 12; attempt++ {
 		_, err = probePages(n.Site, n.Site.ProbePaths, &n)
 		if err == nil {
-			return nil
+			err = probeOTelState(n)
+		}
+		if err == nil {
+			stable++
+			// Nginx starts new workers before signalling the old ones to quit
+			// after its 100ms grace interval. One matching response is too early.
+			if stable == 2 {
+				return nil
+			}
+		} else {
+			stable = 0
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	if err == nil {
+		err = errors.New("deployment probes did not remain stable across successive checks")
 	}
 	return err
 }

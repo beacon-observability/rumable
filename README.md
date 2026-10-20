@@ -1,12 +1,14 @@
 # Rumable
 
-当前版本：**0.1.0-preview.1**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。
+当前版本：**0.1.0-preview.2**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。
 
 通过 Nginx / Apache / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
 
 自动挂接、差异预览、备份及恢复的范围见[操作手册](docs/operations.md#自动首次挂接linux)。
 
 Go 实现，TOML 解析器编译进单个可执行文件，无常驻进程、数据库或 Node.js 运行依赖。内嵌官方 SDK **3.3.21**，校验信息见 [sdk.json](internal/rumable/assets/sdk.json)，第三方许可随发布包提供。
+
+本版包含 **Nginx / Apache / IIS/.NET 服务端 OTel 请求 Trace**：`[sites.otel]` 与 `[sites.rum].enabled` 独立配置，支持 DataKit、Dataway、自动挂接及受管配置回滚。Dataway 在 Linux 通过已有 Collector 转换协议，IIS/.NET 可直连；原生模块/Agent 有独立兼容范围。安装、示例和验收见 [OTel 使用手册](docs/otel.md)。0.1.0-preview.2 包含 OTel 支持；原 0.1.0-preview.1 包保持不变。
 
 站点使用官方 CDN 时，在 TOML 中加入以下配置，再执行 `enable`；省略此表仍使用同域内置 SDK。
 
@@ -41,6 +43,7 @@ rumable enable
 rumable status
 rumable probe
 rumable disable
+rumable disable --component otel # 只停用服务端采集，保留 RUM
 rumable rollback
 # 完全撤销首次自动挂接（先 disable，清理缓存页面，再确认恢复原服务器文件）：
 rumable rollback --attachment
@@ -169,11 +172,11 @@ NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-nginx.sh
 # 同份源码，两个真实编译器；仅设置 go.mod 不会让新 Go 支持旧 Windows。
 # 默认先同步官方最新稳定 v3 SDK，再运行两套编译器的测试、vet 和打包。
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.0-preview.1
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.0-preview.2
 ```
 
-发布目录默认为 `dist/0.1.0-preview.1/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
+发布目录默认为 `dist/0.1.0-preview.2/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
 
 可单独执行 `go run scripts/sync-sdk.go` 同步并审查 SDK、版本、来源和 SHA-256；CDN 与官方 NPM 稳定版不一致、版本不是稳定 v3 或许可变更时中止。离线重建可显式使用 `release.go --skip-sdk-sync`，其含义是沿用已校验文件，不检查最新版本。站点不会自动更新；分发新二进制后执行 `enable` 升级，默认同域方式保留旧资源供缓存页面和回滚使用。
 
-正式构建自动记录本地 Git HEAD，并要求工作区、暂存区和未跟踪源码均干净；同步更新 SDK 后应先审查、提交，再重新构建，避免将新源码标为旧提交。尚未提交的候选验证可显式使用 `--revision uncommitted`，其 build.json 会如实标记；分发包应使用已提交的源码。
+正式构建自动记录本地 Git HEAD，并要求工作区、暂存区和未跟踪源码均干净；同步更新 SDK 后应先审查、提交，再重新构建，避免将新源码标为旧提交。尚未提交的候选验证可显式使用 `--revision uncommitted`，其 build.json 会如实标记；分发包应使用已提交的源码。发布目录必须不存在；脚本拒绝覆盖旧包，构建完成前再次核对源码未变化。dist 按现有仓库规则不进入 Git，源码和发布验证记录提交到本地仓库。

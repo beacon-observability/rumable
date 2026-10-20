@@ -157,6 +157,9 @@ func validateSnapshot(n Snapshot, id string) error {
 	privateFilters := 0
 	for name, digest := range n.Assets {
 		allowed := strings.HasPrefix(name, "public/"+id+"/")
+		if n.Site.OTel != nil && name == "collector/"+id+"/otel."+digest+".json" && n.OTelCollector == name {
+			allowed = true
+		}
 		if n.Site.Apache != nil && name == "filters/"+id+"/filter."+digest+".lua" {
 			allowed = true
 			privateFilters++
@@ -173,6 +176,21 @@ func validateSnapshot(n Snapshot, id string) error {
 	}
 	if len(n.Assets) < 2 {
 		return errors.New("incomplete assets in snapshot")
+	}
+	if n.OTelEnabled && n.Site.OTel == nil {
+		return errors.New("OTel snapshot is missing its configuration")
+	}
+	if n.OTelOwner != "" && !idPattern.MatchString(n.OTelOwner) {
+		return errors.New("invalid OTel exporter owner")
+	}
+	if n.OTelTokenHash != "" && (!digestPattern.MatchString(n.OTelTokenHash) || n.Site.IIS == nil || n.Site.OTel == nil || n.Site.OTel.Backend != "dataway") {
+		return errors.New("invalid IIS OTel credential fingerprint")
+	}
+	if n.OTelCollector != "" {
+		digest := n.Assets[n.OTelCollector]
+		if !digestPattern.MatchString(digest) || n.OTelCollector != "collector/"+id+"/otel."+digest+".json" {
+			return errors.New("missing OTel Collector asset digest")
+		}
 	}
 	sdkName := "public/" + id + "/sdk." + n.SDK.SHA256 + ".js"
 	initName := strings.TrimPrefix(n.Script, n.Site.assetPrefix())

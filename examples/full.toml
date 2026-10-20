@@ -1,3 +1,4 @@
+# 服务端 OTel 独立配置见 otel-nginx.toml / otel-apache.toml / otel-iis.toml 和 docs/otel.md。
 schemaVersion = 1
 
 [[sites]]

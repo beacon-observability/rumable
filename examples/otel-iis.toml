@@ -1,0 +1,28 @@
+schemaVersion = 1
+
+[[sites]]
+id = "iis-otel"
+publicURL = "http://www.example.com/"
+probePaths = ["/"]
+includePaths = ["/"]
+
+[sites.iis]
+site = "Default Web Site"
+application = "/"
+
+[sites.rum]
+enabled = false
+
+[sites.otel]
+enabled = true
+backend = "datakit"
+endpoint = "http://127.0.0.1:4317"
+serviceName = "iis-application"
+agentPath = 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
+runtime = "netframework" # Or dotnet for ASP.NET Core.
+sampleRate = 100
+# Dataway sends directly via OTLP/HTTP: replace backend/endpoint below.
+# backend = "dataway"
+# endpoint = "https://dataway.example.com/otel"
+# tokenEnv = "RUMABLE_DATAWAY_TOKEN"
+# IIS 10 / Windows 10 or Server 2016+ / PowerShell 5.1, dedicated pool required.

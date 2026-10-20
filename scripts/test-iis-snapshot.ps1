@@ -6,6 +6,18 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($bridge, [ref]$
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 $read = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Read-Snapshot' }, $true)
 Invoke-Expression $read.Extent.Text
+$restoreCompression = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Restore-Compression' }, $true)
+Invoke-Expression $restoreCompression.Extent.Text
+$assertSnapshot = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-Snapshot' }, $true)
+Invoke-Expression $assertSnapshot.Extent.Text
+$compression = [pscustomobject]@{ Writes=0; Value=$null }
+$compression | Add-Member ScriptMethod SetAttributeValue { param($key,$value) $this.Writes++; $this.Value=$value }
+$compression | Add-Member ScriptMethod GetAttribute { throw 'Unexpected attribute deletion on unchanged locked compression.' }
+$same = @{ compressionPresent=$true; compressionValue='true' }
+Restore-Compression $same ($same | ConvertTo-Json | ConvertFrom-Json)
+if ($compression.Writes -ne 0) { throw 'OTel-only restore attempted to modify unchanged compression.' }
+Restore-Compression $same @{ compressionPresent=$true; compressionValue='false' }
+if ($compression.Writes -ne 1 -or $compression.Value -ne $true) { throw 'RUM disable did not restore changed compression.' }
 $configPath = [IO.Path]::GetTempFileName()
 try {
     [IO.File]::WriteAllText($configPath, @'
@@ -25,6 +37,16 @@ try {
     if ($null -eq $snapshot.virtualDirectory) { throw 'Case-insensitive virtual directory snapshot was lost.' }
     $roundTrip = $snapshot | ConvertTo-Json -Depth 30 -Compress | ConvertFrom-Json
     if (@($roundTrip.rules).Count -ne 1 -or $roundTrip.compressionValue -ne 'true') { throw 'Snapshot JSON round trip changed owned state.' }
+    $snapshot.otel = @{pool='Dedicated';runtime='v4.0';pipeline='Integrated';x86=$false;identity='ApplicationPoolIdentity';user='';applications=@('Site/');environment=@{OTEL_SERVICE_NAME='original'}}
+    $saved=$snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    Assert-Snapshot $saved $snapshot
+    foreach ($change in @('environment','pool','applications')) {
+        $live=$snapshot.Clone();$live.otel=$snapshot.otel.Clone()
+        if ($change -eq 'environment') {$live.otel.environment=@{OTEL_SERVICE_NAME='external'}}
+        elseif ($change -eq 'pool') {$live.otel.pool='AnotherPool'}
+        else {$live.otel.applications=@('Site/','Other/')}
+        try {Assert-Snapshot $saved $live;throw 'Concurrent change was accepted.'} catch {if ($_.Exception.Message -notlike '*changed before commit*') {throw}}
+    }
     $target = 'Other Site'; $site.iis.site = 'Other Site'
     $empty = Read-Snapshot
     if ($empty.compressionPresent -or $empty.rules.Count -or $null -ne $empty.virtualDirectory) { throw 'Snapshot captured another site.' }

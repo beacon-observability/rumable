@@ -20,11 +20,16 @@ try {
     $application = $webSite.Applications[$site.iis.application]
     if ($null -eq $application) { throw 'IIS application not found.' }
     $config = $manager.GetApplicationHostConfiguration()
-    $rewrite = $config.GetSection('system.webServer/rewrite/outboundRules', $target)
-    if ($rewrite.GetAttributeValue('rewriteBeforeCache')) { throw 'rewriteBeforeCache=true conflicts with streaming/chunked responses; review it manually.' }
-    $rules = $rewrite.GetCollection()
-    $preconditions = $rewrite.GetCollection('preConditions')
+    $rumWanted = $null -eq $site.rum.enabled -or [bool]$site.rum.enabled
+    $rewrite = $null; $rules = @(); $preconditions = @()
+    try {
+        $rewrite = $config.GetSection('system.webServer/rewrite/outboundRules', $target)
+        $rules = $rewrite.GetCollection()
+        $preconditions = $rewrite.GetCollection('preConditions')
+    } catch { if ($rumWanted) { throw } }
+    if ($rumWanted -and $null -ne $rewrite -and $rewrite.GetAttributeValue('rewriteBeforeCache')) { throw 'rewriteBeforeCache=true conflicts with streaming/chunked responses; review it manually.' }
     $compression = $config.GetSection('system.webServer/urlCompression', $target)
+    . (Join-Path $request.root 'otel-iis.ps1')
 
     function Read-Snapshot {
         # Capture only owned XML nodes and the exact local compression attribute.
@@ -46,7 +51,9 @@ try {
         $virtual = @($xmlApp.virtualDirectory | Where-Object { $_.path -ieq $vpath }) | Select-Object -First 1
         $virtualXml = $null
         if ($null -ne $virtual) { $virtualXml = $virtual.OuterXml }
-        return @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value }
+        $snapshot = @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value }
+        if ($null -ne $site.otel) { $snapshot.otel = Read-OTelSnapshot }
+        return $snapshot
     }
 
     function Remove-Owned($collection) {
@@ -75,7 +82,18 @@ try {
         }
     }
 
+    function Restore-Compression($snapshot, $current) {
+        # An OTel-only pool change must work even when URL compression is locked.
+        if ($snapshot.compressionPresent -eq $current.compressionPresent -and $snapshot.compressionValue -ceq $current.compressionValue) { return }
+        if ($snapshot.compressionPresent) {
+            $compression.SetAttributeValue('doStaticCompression', [bool]::Parse($snapshot.compressionValue))
+        } else {
+            $compression.GetAttribute('doStaticCompression').Delete()
+        }
+    }
+
     function Restore-Nodes($snapshot) {
+        $current = Read-Snapshot
         Remove-Owned $rules
         Remove-Owned $preconditions
         foreach ($text in @($snapshot.rules)) {
@@ -97,8 +115,8 @@ try {
         $virtual = $application.VirtualDirectories[$vpath]
         # Keep managed assets reachable for already cached HTML, even when
         # rolling back to the original disabled snapshot without a mapping.
-        if ($null -ne $virtual -and $null -ne $snapshot.virtualDirectory) { $application.VirtualDirectories.Remove($virtual) }
-        if ($null -ne $snapshot.virtualDirectory) {
+        if ($null -ne $virtual -and $null -ne $snapshot.virtualDirectory -and $snapshot.virtualDirectory -cne $current.virtualDirectory) { $application.VirtualDirectories.Remove($virtual) }
+        if ($null -ne $snapshot.virtualDirectory -and $snapshot.virtualDirectory -cne $current.virtualDirectory) {
             [xml]$doc = $snapshot.virtualDirectory
             if ($doc.DocumentElement.GetAttribute('path') -ne $vpath -or $doc.DocumentElement.GetAttribute('physicalPath') -ne (Join-Path $request.root 'public')) { throw 'Invalid virtual directory in snapshot.' }
             $virtual = $application.VirtualDirectories.Add($vpath, $doc.DocumentElement.GetAttribute('physicalPath'))
@@ -106,14 +124,36 @@ try {
                 if ($attribute.Name -ne 'path' -and $attribute.Name -ne 'physicalPath') { $virtual.SetAttributeValue($attribute.Name, [string]$attribute.Value) }
             }
         }
-        if ($snapshot.compressionPresent) {
-            $compression.SetAttributeValue('doStaticCompression', [bool]::Parse($snapshot.compressionValue))
-        } else {
-            $compression.GetAttribute('doStaticCompression').Delete()
+        Restore-Compression $snapshot $current
+        if ($null -ne $site.otel) { Restore-OTel $snapshot.otel }
+    }
+
+    function Assert-Snapshot($expected, $actual) {
+        foreach ($key in @('compressionPresent','compressionValue','virtualDirectory')) {
+            if ($expected.$key -cne $actual.$key) { throw 'IIS configuration changed before commit; refusing overwrite.' }
+        }
+        foreach ($key in @('rules','preconditions')) {
+            if ((@($expected.$key) | ConvertTo-Json -Compress) -cne (@($actual.$key) | ConvertTo-Json -Compress)) { throw 'IIS owned rules changed before commit; refusing overwrite.' }
+        }
+        if (($null -eq $expected.otel) -ne ($null -eq $actual.otel)) { throw 'IIS OTel ownership changed before commit.' }
+        if ($null -eq $expected.otel) { return }
+        foreach ($key in @('pool','runtime','pipeline','x86','identity','user')) {
+            if ($expected.otel.$key -cne $actual.otel.$key) { throw 'IIS OTel pool metadata changed before commit; refusing overwrite.' }
+        }
+        if ((@($expected.otel.applications) | ConvertTo-Json -Compress) -cne (@($actual.otel.applications) | ConvertTo-Json -Compress)) { throw 'IIS OTel pool membership changed before commit.' }
+        $values = $expected.otel.environment
+        if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties.Name) }
+        if ($names.Count -ne $actual.otel.environment.Count) { throw 'IIS OTel environment changed before commit.' }
+        foreach ($key in $names) {
+            if (-not $actual.otel.environment.ContainsKey($key) -or $values.$key -cne $actual.otel.environment.$key) { throw 'IIS OTel environment changed before commit.' }
         }
     }
 
     $before = Read-Snapshot
+    if ($request.action -eq 'apply' -or $request.action -eq 'restore') {
+        if ($null -eq $request.expected) { throw 'Expected IIS snapshot is required before changing configuration.' }
+        Assert-Snapshot $request.expected $before
+    }
     function Assert-LocalOwned($collection, $texts) {
         $localNames = @($texts | ForEach-Object { ([xml]$_).DocumentElement.GetAttribute('name') })
         foreach ($entry in $collection) {
@@ -124,17 +164,19 @@ try {
     Assert-LocalOwned $rules $before.rules
     Assert-LocalOwned $preconditions $before.preconditions
     if ($request.action -eq 'check') {
-        if ($compression.IsLocked -or $rewrite.IsLocked) { throw 'IIS rewrite/compression configuration is locked.' }
-        if ($compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
+        if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
+        if ($rumWanted -and $compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
+        if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool }
         $virtual = $application.VirtualDirectories[$vpath]
         $expectedPath = Join-Path $request.root 'public'
-        if ($null -ne $virtual -and $virtual.PhysicalPath -ne $expectedPath) { throw 'Reserved /__rumable__ virtual directory is already owned by another deployment.' }
+        if ($rumWanted -and $null -ne $virtual -and $virtual.PhysicalPath -ne $expectedPath) { throw 'Reserved /__rumable__ virtual directory is already owned by another deployment.' }
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'inspect') {
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'restore') {
         Restore-Nodes $request.snapshot
         $manager.CommitChanges()
+        try { Recycle-OTelPool $before.otel } catch { Restore-Nodes $before; $manager.CommitChanges(); throw }
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'apply') {
         Remove-Owned $rules
@@ -179,10 +221,12 @@ try {
                 $rules.Add($rule)
             }
         } else {
-            if ($request.original.compressionPresent) { $compression.SetAttributeValue('doStaticCompression', [bool]::Parse($request.original.compressionValue)) } else { $compression.GetAttribute('doStaticCompression').Delete() }
+            Restore-Compression $request.original $before
         }
-        if ($null -eq $application.VirtualDirectories[$vpath]) { [void]$application.VirtualDirectories.Add($vpath, (Join-Path $request.root 'public')) }
+        if ($request.enabled -and $null -eq $application.VirtualDirectories[$vpath]) { [void]$application.VirtualDirectories.Add($vpath, (Join-Path $request.root 'public')) }
+        Apply-OTel
         $manager.CommitChanges()
+        try { Recycle-OTelPool $before.otel } catch { Restore-Nodes $before; $manager.CommitChanges(); throw }
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } else { throw 'Unknown bridge action.' }
     $manager.Dispose()

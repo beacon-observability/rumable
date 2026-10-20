@@ -52,7 +52,7 @@ func TestAttachmentStopsReloadWhenConfigChangesDuringConfigtest(t *testing.T) {
 	s := testSite()
 	s.Nginx.Binary = binary
 	a := attachmentRecord{Site: s, Files: []attachmentFile{{Path: name, Before: []byte("before"), After: []byte("after"), Mode: 0644}}}
-	if err := reloadAttachment(a, true); err == nil {
+	if err := reloadAttachment(t.TempDir(), a, true); err == nil {
 		t.Fatal("changed candidate was reloaded")
 	}
 	if _, err := os.Stat(signal); !os.IsNotExist(err) {
@@ -173,5 +173,33 @@ func TestAttachmentRecoversPartiallyWrittenFiles(t *testing.T) {
 	saved, err := loadAttachment(root, s)
 	if err != nil || saved.Phase != "detached" {
 		t.Fatal("recovery record lost", err)
+	}
+}
+
+func TestAttachmentRecoversCandidateRejectedByNativeParser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><head></head></html>"))
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	name, binary := filepath.Join(root, "nginx.conf"), filepath.Join(root, "nginx")
+	before, after := []byte("# original\n"), []byte("# incompatible native module\n")
+	if err := os.WriteFile(name, after, 0644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncase \"$1\" in\n-V) echo 'nginx version: nginx/1.28.3 --with-http_sub_module';;\n-T|-t) ! " + shellCommand("grep", "-q", "incompatible", name) + ";;\n*) exit 0;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	s := testSite()
+	s.Nginx.Binary, s.PublicURL = binary, server.URL+"/"
+	a := attachmentRecord{SchemaVersion: 1, Site: s, Phase: "applying", Files: []attachmentFile{{Path: name, Before: before, After: after, Mode: 0644}}, Inputs: map[string]string{name: hash(before)}}
+	if err := restoreAttachment(root, a, Snapshot{Site: s}); err != nil {
+		t.Fatal("native parser rejection stranded the candidate configuration", err)
+	}
+	live, _ := os.ReadFile(name)
+	if string(live) != string(before) {
+		t.Fatal("original configuration was not restored")
 	}
 }

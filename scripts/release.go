@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.0-preview.1", "release version")
+	versionName := flag.String("version", "0.1.0-preview.2", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -104,7 +104,10 @@ func run() error {
 			}
 		}
 	}
-	if err = os.MkdirAll(*out, 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(*out), 0755); err != nil {
+		return err
+	}
+	if err = os.Mkdir(*out, 0755); err != nil {
 		return err
 	}
 	tmp, err := os.MkdirTemp("", "rumable-release-*")
@@ -113,7 +116,7 @@ func run() error {
 	}
 	defer os.RemoveAll(tmp)
 	shared := map[string][]byte{}
-	for _, file := range []string{"USER-GUIDE.md", "CHANGELOG.md", "docs/compatibility.md", "docs/operations.md", "docs/configuration.md", "docs/verification.md", "docs/apache.md", "docs/windows-acceptance.md", "scripts/windows-smoke.ps1", "scripts/windows-iis-helpers.ps1", "scripts/windows-fixture.aspx", "scripts/windows-cleanup.ps1", "scripts/test-windows-scripts.ps1", "examples/nginx.toml", "examples/apache.toml", "examples/iis.toml", "examples/full.toml", "third_party/BurntSushi-toml-LICENSE", "internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json"} {
+	for _, file := range []string{"USER-GUIDE.md", "CHANGELOG.md", "docs/compatibility.md", "docs/operations.md", "docs/configuration.md", "docs/verification.md", "docs/apache.md", "docs/otel.md", "docs/windows-acceptance.md", "scripts/windows-smoke.ps1", "scripts/windows-otel-smoke.ps1", "scripts/smoke-otel.sh", "internal/integration/otel-fixture.go", "scripts/build-apache-otel.sh", "scripts/patch-apache-otel.go", "scripts/windows-iis-helpers.ps1", "scripts/windows-fixture.aspx", "scripts/windows-cleanup.ps1", "scripts/test-windows-scripts.ps1", "examples/nginx.toml", "examples/apache.toml", "examples/iis.toml", "examples/full.toml", "examples/otel-nginx.toml", "examples/otel-apache.toml", "examples/otel-iis.toml", "third_party/BurntSushi-toml-LICENSE", "internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json"} {
 		b, e := os.ReadFile(file)
 		if e != nil {
 			return e
@@ -122,7 +125,7 @@ func run() error {
 	}
 	var sums []string
 	var downloads strings.Builder
-	fmt.Fprintf(&downloads, "# Rumable %s\n\nPreview 测试版本。先阅读 [使用指南](USER-GUIDE.md) 和 [版本说明](CHANGELOG.md)。\n\n386 = Windows/Linux x86 32 位；amd64 = Intel/AMD x64；arm64 = ARM64。旧 Windows 选择 legacy；32 位 Windows 不支持 IIS 配置管理。Windows 包已交叉编译，IIS 与 Windows 实机尚未验收。\n\n| 下载包 | 平台 | 编译器 |\n|---|---|---|\n", *versionName)
+	fmt.Fprintf(&downloads, "# Rumable %s\n\nPreview 测试版本。先阅读 [使用指南](USER-GUIDE.md) 和 [版本说明](CHANGELOG.md)。\n\n386 = Windows/Linux x86 32 位；amd64 = Intel/AMD x64；arm64 = ARM64。旧 Windows 选择 legacy；32 位 Windows 不支持 IIS 配置管理。包含 RUM 与服务端 OTel。原生模块、.NET Agent、Collector 需另行安装。Windows 包已交叉编译，IIS 与 Windows 实机尚未验收；IIS OTel 不支持 ARM64。\n\n| 下载包 | 平台 | 编译器 |\n|---|---|---|\n", *versionName)
 	for _, target := range []struct{ os, arch, compiler, label string }{
 		{"linux", "386", *modern, mv}, {"linux", "amd64", *modern, mv}, {"linux", "arm64", *modern, mv},
 		{"windows", "386", *modern, mv}, {"windows", "amd64", *modern, mv}, {"windows", "arm64", *modern, mv},
@@ -182,7 +185,7 @@ func run() error {
 		}
 		binaryHash := sha256.Sum256(contents[name])
 		contents["build.json"], _ = json.MarshalIndent(map[string]string{"version": *versionName, "revision": *revision, "channel": channel, "go": strings.TrimPrefix(target.label, "legacy-"), "flavor": flavor, "os": target.os, "arch": target.arch, "binarySHA256": hex.EncodeToString(binaryHash[:])}, "", "  ")
-		contents["README.md"] = []byte(fmt.Sprintf("# Rumable %s\n\n平台：%s/%s；编译器：%s；类型：%s。\n\n先阅读 [面向最终用户的使用指南](USER-GUIDE.md)。本包含可执行文件，无需安装 Go 或 Node.js。\n\n- [版本说明](CHANGELOG.md)\n- [平台兼容范围](docs/compatibility.md)\n- [完整 TOML 参数](docs/configuration.md)\n- [启停与恢复](docs/operations.md)\n\n在终端执行 `%s version` 核对版本；Windows PowerShell 使用 `.\\rumable.exe version`。构建来源与二进制摘要见 build.json，SDK 元数据见 sdk.json。\n", *versionName, target.os, target.arch, info.GoVersion, flavor, name))
+		contents["README.md"] = []byte(fmt.Sprintf("# Rumable %s\n\n平台：%s/%s；编译器：%s；类型：%s。\n\n先阅读 [面向最终用户的使用指南](USER-GUIDE.md)。本包含可执行文件，无需安装 Go 或 Node.js。\n\n- [版本说明](CHANGELOG.md)\n- [平台兼容范围](docs/compatibility.md)\n- [完整 TOML 参数](docs/configuration.md)\n- [启停与恢复](docs/operations.md)\n- [服务端 OTel 安装与使用](docs/otel.md)\n\n在终端执行 `%s version` 核对版本；Windows PowerShell 使用 `.\\rumable.exe version`。构建来源与二进制摘要见 build.json，SDK 元数据见 sdk.json。\n", *versionName, target.os, target.arch, info.GoVersion, flavor, name))
 		filename := fmt.Sprintf("rumable_%s_%s_%s", *versionName, target.os, target.arch)
 		if flavor == "legacy" {
 			filename += "_legacy"
@@ -206,7 +209,7 @@ func run() error {
 		fmt.Fprintf(&downloads, "| [%s](%s) | %s/%s | %s |\n", filename, filename, target.os, target.arch, info.GoVersion)
 		fmt.Println(filename)
 	}
-	fmt.Fprint(&downloads, "\n在此目录执行 `sha256sum -c SHA256SUMS` 校验；Windows 校验方法见使用指南。每个压缩包均含使用指南、TOML 示例、SDK 元数据和第三方许可。Windows、旧内核和 ARM64 IIS 需在目标机器验收；交叉编译不等于实机运行。\n")
+	fmt.Fprint(&downloads, "\n在此目录执行 `sha256sum -c SHA256SUMS` 校验；Windows 校验方法见使用指南。每个压缩包均含使用指南、TOML 示例、SDK 元数据和第三方许可。Windows 与旧内核需在目标机器验收；IIS OTel 的系统/Agent 限制见 OTel 手册，ARM64 不支持；交叉编译不等于实机运行。\n")
 	shared["README.md"] = []byte(downloads.String())
 	for _, name := range keys(shared) {
 		if err = os.MkdirAll(filepath.Dir(filepath.Join(*out, name)), 0755); err != nil {
@@ -219,6 +222,11 @@ func run() error {
 		sums = append(sums, hex.EncodeToString(h[:])+"  "+name)
 	}
 	sort.Strings(sums)
+	if *revision != "uncommitted" {
+		if err = verifySourceRevision(".", *revision); err != nil {
+			return fmt.Errorf("source changed during release; discard incomplete output %s: %w", *out, err)
+		}
+	}
 	return os.WriteFile(filepath.Join(*out, "SHA256SUMS"), []byte(strings.Join(sums, "\n")+"\n"), 0644)
 }
 

@@ -1,5 +1,7 @@
 # TOML 配置参考
 
+浏览器 RUM 与服务端 OTel 分别使用 `[sites.rum]` / `[sites.otel]`。`rum.enabled` 省略时为 true，显式 false 时不要求浏览器凭据；省略 otel 表保持旧行为。服务端参数、采样实际能力、模块要求和三种服务器示例见 [OTel 配置手册](otel.md)。`enable/disable --component rum|otel` 保留另一组件的当前状态；`enable` 不带组件时按 TOML 应用两者，`disable` 不带组件时全部停用。
+
 配置按 `[[sites]]` 隔离，SDK 参数放在该站点的 `[sites.rum]` 下。`rumable init` 默认生成精简配置，只展示接入和回放开关；`rumable init --full` 与[完整模板](../examples/full.toml)包含全部静态 SDK 参数。`--server nginx|apache|iis` 选择服务器，`--reporting openway|datakit` 选择上报方式，默认 nginx / openway。例如 `rumable init --server apache --reporting datakit`。所有组合默认关闭回放；IIS 初始配置不预先允许压缩调整。
 
 init 默认站点 ID 为 example；可通过 `init --site website` 命名。单个配置站点的 render/check/enable 无需 --site；多个配置站点必须指定。attach/status/disable/rollback/probe 优先从受管状态选择：只有一个受管站点时无需原始 TOML，多个受管站点必须指定 --site。显式 --config、--state-dir、--site 的原用法保留。[Nginx 示例](../examples/nginx.toml)、[Apache 示例](../examples/apache.toml)和 [IIS 示例](../examples/iis.toml)也可直接编辑使用；注释字段为可选示例。

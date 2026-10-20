@@ -81,9 +81,18 @@ func nginxAttachmentConfig(dump []byte) (*attachConfig, error) {
 }
 
 func planNginxAttachment(root string, s Site, target string) (attachmentPlan, error) {
+	if err := checkOTelModule(s); err != nil {
+		return attachmentPlan{}, err
+	}
 	v, dump, err := nginxInspect(s)
 	if err != nil {
 		return attachmentPlan{}, err
+	}
+	if s.OTel != nil {
+		m := nginxVersion.FindStringSubmatch(string(v))
+		if len(m) != 4 || !nginxOTelVersion(m[1], m[2], m[3]) {
+			return attachmentPlan{}, fmt.Errorf("Nginx OTel requires Nginx >=1.25.3 and a compatible ngx_otel_module")
+		}
 	}
 	// The risky 1.9.4 configuration must be rejected before any attachment writes.
 	if nginxVersion.FindString(string(v)) == "nginx/1.9.4" {
@@ -123,11 +132,18 @@ func (c *attachConfig) planNginx(root string, s Site, target, version string) ([
 	http := selected.parent
 	d := filepath.ToSlash(siteDir(root, s))
 	includes := func(name string) string { return "include " + nginxQuote(d+"/"+name) + ";\n" }
-	edits := []attachEdit{{http.file, http.close, http.close, insertBlock(s, "http", includes("http.conf"))}}
+	edits, err := nginxOTelAttachment(c, root, s, selected)
+	if err != nil {
+		return nil, "", err
+	}
+	edits = append(edits, attachEdit{http.file, http.close, http.close, insertBlock(s, "http", includes("http.conf"))})
 	// A competing reserved handler, server rewrite or a non-HTTP upstream cannot
 	// be safely merged by inserting a few directives. Keep these on the manual path.
 	scopes := []*attachNode{selected}
 	err = visitNodes(selected, func(n *attachNode) error {
+		if !s.RUM.isEnabled() && n.words[0] != "location" {
+			return nil
+		}
 		switch n.words[0] {
 		case "location":
 			if strings.Contains(strings.Join(n.words, " "), "__rumable__") {
@@ -151,6 +167,14 @@ func (c *attachConfig) planNginx(root string, s Site, target, version string) ([
 	// Disabling an inherited body filter would change business responses, including
 	// in the initial disabled deployment. Require an explicit manual merge instead.
 	for _, scope := range scopes {
+		if !s.RUM.isEnabled() {
+			body := includes("location.conf")
+			if scope == selected {
+				body = includes("server.conf") + body
+			}
+			edits = append(edits, attachEdit{scope.file, scope.close, scope.close, insertBlock(s, "otel-handler-"+hash([]byte(scope.key() + ":" + strconv.Itoa(scope.start)))[:12], body)})
+			continue
+		}
 		for _, directive := range []string{"sub_filter", "sub_filter_once", "sub_filter_last_modified", "etag", "if_modified_since"} {
 			if nodes := inherited(scope, directive); len(nodes) > 0 {
 				return nil, "", fmt.Errorf("existing %s at %s needs manual merge in ATTACH.md", directive, nodes[0].key())

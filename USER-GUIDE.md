@@ -1,18 +1,20 @@
 # Rumable Preview 使用指南
 
-版本：**0.1.0-preview.1**。本版面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
+版本：**0.1.0-preview.2**。本版面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
 
 Rumable 在 Nginx、Apache 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
 
+本版包含服务端 OTel 自动插桩，可与 RUM 分别启停，并通过 DataKit/Dataway 上报。先按第 7 节安装外部原生模块或 .NET Agent；Linux Dataway 模式还需要已运行的 Collector。仅启用 OTel 时无需浏览器 applicationId，也不要求 HTML 页面。
+
 ## 1. 选择下载包
 
-在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0-preview.1_` 开头。
+在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0-preview.2_` 开头。
 
 | 系统 / CPU | 文件名后缀 | 适用条件 |
 |---|---|---|
 | Windows x86 | `windows_386.zip` | Windows 10+ 的 32 位程序；IIS 管理需运行在 64 位 Windows 上 |
 | Windows x64 | `windows_amd64.zip` | Windows 10+ / Server 2016+ x64；IIS 接入优先选择此包 |
-| Windows ARM64 | `windows_arm64.zip` | Windows ARM64；CLI 与 IIS 均需目标机器验收 |
+| Windows ARM64 | `windows_arm64.zip` | Windows ARM64；RUM/IIS 需实机验收，本版拒绝 IIS OTel |
 | 旧 Windows x86 | `windows_386_legacy.zip` | Windows 7 SP1+ 的 32 位程序；32 位 Windows 不支持 IIS 管理 |
 | 旧 Windows x64 | `windows_amd64_legacy.zip` | Windows 7 SP1 / Server 2008 R2 SP1、Server 2012 / 2012 R2 等旧 x64 系统 |
 | Linux x86 | `linux_386.tar.gz` | 32 位 Linux，内核 3.2+，CPU 支持 SSE2 |
@@ -21,7 +23,7 @@ Rumable 在 Nginx、Apache 或 IIS 返回的完整 HTML 中加入观测云 RUM �
 | 旧 Linux x86 | `linux_386_legacy.tar.gz` | 32 位 Linux，内核 2.6.32+、SSE2；旧内核需实机验收 |
 | 旧 Linux x64 | `linux_amd64_legacy.tar.gz` | 64 位 Linux，内核 2.6.32+；旧内核需实机验收 |
 
-现代包使用 Go 1.26.8，legacy 包使用 Go 1.20.14，均为无 CGO 依赖的独立可执行文件。Go 1.20 已停止维护；旧系统兼容范围不等于完成了旧系统安全和运行验收。完整约束见[兼容性矩阵](docs/compatibility.md)。
+现代包使用 Go 1.26.9，legacy 包使用 Go 1.20.14，均为无 CGO 依赖的独立可执行文件。Go 1.20 已停止维护；旧系统兼容范围不等于完成了旧系统安全和运行验收。完整约束见[兼容性矩阵](docs/compatibility.md)。
 
 Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；在真正的 32 位 Windows 上可执行 `version`、`init`、`render`、`status`、`probe`，不支持 IIS 的 check/enable/disable/rollback。Windows ARM64 包不代表已验证 ARM64 IIS；版本检查成功也不代表 IIS 模块可用。
 
@@ -31,17 +33,17 @@ Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；�
 
 ```sh
 sha256sum -c SHA256SUMS
-mkdir rumable-0.1.0-preview.1
-tar -xzf rumable_0.1.0-preview.1_linux_amd64.tar.gz -C rumable-0.1.0-preview.1
-cd rumable-0.1.0-preview.1
+mkdir rumable-0.1.0-preview.2
+tar -xzf rumable_0.1.0-preview.2_linux_amd64.tar.gz -C rumable-0.1.0-preview.2
+cd rumable-0.1.0-preview.2
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\rumable_0.1.0-preview.1_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\rumable_0.1.0-preview.2_windows_amd64.zip -Algorithm SHA256
 # 与 SHA256SUMS 内同名文件的摘要比较，然后解压到新目录。
-Expand-Archive .\rumable_0.1.0-preview.1_windows_amd64.zip -DestinationPath C:\Tools\Rumable
+Expand-Archive .\rumable_0.1.0-preview.2_windows_amd64.zip -DestinationPath C:\Tools\Rumable
 C:\Tools\Rumable\rumable.exe version
 ```
 
@@ -51,7 +53,7 @@ C:\Tools\Rumable\rumable.exe version
 
 ## 3. 准备接入信息
 
-需要网站公开访问地址、可匿名返回 200 的完整 HTML 页面，以及观测云 Web 应用的 `applicationId`。上报方式二选一：
+以下为浏览器 RUM 的准备步骤；仅使用服务端 OTel 可直接转到第 7 节。RUM 需要网站公开访问地址、可匿名返回 200 的完整 HTML 页面，以及观测云 Web 应用的 `applicationId`。上报方式二选一：
 
 | 上报方式 | 在 `[sites.rum]` 中填写 |
 |---|---|
@@ -184,7 +186,65 @@ source = "cdn"
 
 改好 TOML 后，再次执行同站点的 `enable --state-dir 原目录`。新脚本使用内容哈希路径，旧文件保留供缓存页面读取。
 
-## 7. 验收、停用、回滚与升级
+## 7. 服务端 OTel
+
+| 服务器 | 启用 OTel 前的条件 |
+|---|---|
+| Linux Nginx | 1.25.3+，已安装与服务器版本、发行版和架构匹配的 ngx_otel_module |
+| Linux Apache | Linux x64、Apache 2.4.23+，使用包含 Rumable 请求隔离修复的模块；原版模块会被拒绝 |
+| Windows IIS/.NET | IIS 10 / Windows 10或Server 2016+、64 位 Windows PowerShell 5.1、官方 .NET Agent、独占应用池；不覆盖静态页、Classic ASP、纯代理 |
+
+CLI 的 x86/x64/ARM64 包可运行范围与原生模块/Agent 的兼容范围分开判断。旧 Nginx、旧 Windows/IIS 保持原有 RUM 支持，不因此获得 OTel 能力。
+
+先启用 DataKit 的 OpenTelemetry gRPC 接收，复制对应的 `examples/otel-nginx.toml`、`otel-apache.toml` 或 `otel-iis.toml`，编辑站点地址、服务器定位、模块/Agent 路径和上报地址。示例默认 `rum.enabled=false`、`otel.enabled=true`：
+
+```toml
+[sites.rum]
+enabled = false
+
+[sites.otel]
+enabled = true
+backend = "datakit"
+endpoint = "http://127.0.0.1:4317"
+serviceName = "web-gateway"
+modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so" # Apache 改为已修复模块的路径
+sampleRate = 100
+excludePaths = ["/health"]
+```
+
+上述为 Linux 参数片段；IIS 改用 `agentPath` 和 `runtime`，使用 IIS 示例完整填写。Nginx/Apache 的 exporter 和 serviceName 在同一实例共享，站点的开关、路径与采样可独立设置；Apache 原生采样只接受 0/100。IIS 按整个独占池采集，采样为父级优先，不支持路径过滤。
+
+Linux 以管理员运行（以新 OTel 站点为例）：
+
+```sh
+rumable render --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
+rumable attach --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel --dry-run
+rumable attach --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
+# 核对差异后输入 yes；工具保存备份、验证并重载。
+rumable enable --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
+```
+
+IIS 使用管理员的 64 位 Windows PowerShell 5.1，执行 render、check、enable；不需要 attach，不重启整台 IIS。纯 OTel 不需要 URL Rewrite，也不改变压缩或 CSP：
+
+```powershell
+.\rumable.exe render --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
+.\rumable.exe check --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
+.\rumable.exe enable --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
+```
+
+Dataway 模式要求 1.17.0+，endpoint 写到 `/otel`，Token 通过 tokenEnv 指定。Linux 还需本机 Collector，把 gRPC 转为 OTLP/HTTP protobuf；先用 `render --collector-config` 生成候选配置，再启动 Collector，不能只修改文件却沿用旧出口。IIS Agent 可直接发 HTTP/protobuf。Token 不进入浏览器，但 IIS 池配置、状态和备份会包含服务端凭据，必须限制目录 ACL。Collector 的服务启停和旧出口恢复由运维管理。
+
+```sh
+rumable disable --component otel --state-dir /var/lib/rumable-otel
+rumable rollback --state-dir /var/lib/rumable-otel
+# 多个受管站点时加 --site ID；也可对 rum 单独启停。
+```
+
+如果计划以后启用两种能力，首次就准备完整 RUM 参数并保留 `rum.enabled=true`，先执行 `enable --component otel`。以纯 OTel 配置首次挂接，之后添加 RUM 需要重新审查 HTML 改写要求。原有 RUM-only 站点升级增加 OTel，也需要撤销旧挂接并按新站点重新部署；普通版本升级继续使用原状态。完整安装、Dataway、迁移和恢复步骤见 [OTel 手册](docs/otel.md)。
+
+probe 只证明 HTTP 与配置生效，不能证明 Trace 入库。向业务发送带已知 W3C traceparent 的请求，在观测云核对 Trace ID、service.name 和上下游关系。Windows/IIS 实机与真实后端入库仍待目标环境验收，随包提供 `scripts/windows-otel-smoke.ps1`。
+
+## 8. 验收、停用、回滚与升级
 
 先执行 probe，随后用真实浏览器打开每种 HTML 页面：检查脚本只加载一次、页面交互正常、Console 没有非预期错误，Network 中出现成功的 RUM 请求；开启回放时使用新会话检查录制。最后进入观测云对应 Web 应用确认页面、资源、错误、操作及所需回放。**HTTP 探测成功不能证明实际入库。**
 
@@ -199,7 +259,7 @@ Linux 如需完全撤销首次自动挂接，先 disable，清理浏览器、CDN
 
 升级时先备份 TOML、整个状态目录和服务器配置，将新包解压到新目录，核对版本后替换可执行文件；继续使用原 TOML、站点 ID、目标和状态目录，执行 enable。不重复 init/render，不删除旧资源。
 
-## 8. 常见问题
+## 9. 常见问题
 
 | 提示 / 现象 | 处理 |
 |---|---|

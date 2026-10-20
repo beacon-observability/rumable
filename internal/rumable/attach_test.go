@@ -155,13 +155,13 @@ func TestAttachmentSourceAndBackupConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := attachmentRecord{Inputs: map[string]string{name: hash([]byte("original"))}, Aliases: map[string]string{alias: canonical}}
-	if err := verifyAttachmentSources(a); err != nil {
+	if err := verifyAttachmentSources(t.TempDir(), a); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(name, []byte("external edit"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if verifyAttachmentSources(a) == nil {
+	if verifyAttachmentSources(t.TempDir(), a) == nil {
 		t.Fatal("changed parent configuration accepted during recovery")
 	}
 	if err := os.WriteFile(name, []byte("original"), 0644); err != nil {
@@ -173,7 +173,7 @@ func TestAttachmentSourceAndBackupConflicts(t *testing.T) {
 	if err := os.Symlink("another.conf", alias); err != nil {
 		t.Fatal(err)
 	}
-	if verifyAttachmentSources(a) == nil {
+	if verifyAttachmentSources(t.TempDir(), a) == nil {
 		t.Fatal("retargeted include symlink accepted")
 	}
 	archive := filepath.Join(dir, "attachment.saved.json")

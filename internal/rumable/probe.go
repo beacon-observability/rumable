@@ -35,6 +35,9 @@ func getPage(raw string, headers http.Header) (Page, error) {
 	}
 	r.Header.Set("Accept-Encoding", "identity")
 	r.Header.Set("Cache-Control", "no-cache")
+	// A graceful reload can leave established connections on an old worker.
+	// Deployment probes must reconnect to observe the current listener.
+	r.Close = true
 	for k, v := range headers {
 		r.Header[k] = v
 	}
@@ -166,7 +169,7 @@ func probePages(s Site, paths []string, expected *Snapshot) ([]ProbeResult, erro
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pageURL(s, path), err)
 		}
-		if (expected == nil || expected.Enabled) && !checked[r.Script] {
+		if (expected == nil && s.RUM.isEnabled() || expected != nil && expected.Enabled) && !checked[r.Script] {
 			if err := probeScripts(s, r.Script, expected); err != nil {
 				return nil, err
 			}
@@ -174,7 +177,7 @@ func probePages(s Site, paths []string, expected *Snapshot) ([]ProbeResult, erro
 		}
 		results = append(results, r)
 	}
-	if expected == nil || expected.Enabled {
+	if expected == nil && s.RUM.isEnabled() || expected != nil && expected.Enabled {
 		if err := probeWorkers(s); err != nil {
 			return nil, err
 		}
@@ -207,10 +210,17 @@ func probePage(s Site, path string, expected *Snapshot) (ProbeResult, error) {
 }
 
 func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
+	if expected == nil && !s.RUM.isEnabled() {
+		expected = &Snapshot{}
+	}
 	r := ProbeResult{URL: p.URL, Message: "injection and script availability only; browser execution and ingestion are not verified"}
 	contentType, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
-	if contentType != "text/html" {
+	if contentType != "text/html" && (expected == nil && s.RUM.isEnabled() || expected != nil && expected.Enabled) {
 		return r, errors.New("probe target no longer serves HTML")
+	}
+	if contentType != "text/html" {
+		r.Message = "non-HTML HTTP response verified; no browser SDK expected, OTLP ingestion unverified"
+		return r, nil
 	}
 	count := 0
 	total := 0
@@ -226,6 +236,7 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 	}
 	r.Injected = count > 0
 	if expected != nil && !expected.Enabled {
+		r.Message = "RUM injection absent; HTTP/component state only, SDK execution and OTLP ingestion unverified"
 		if count != 0 {
 			return r, errors.New("injection still present after disable; check HTML caches")
 		}

@@ -1,5 +1,14 @@
 # 版本说明
 
+## 0.1.0-preview.2 · 2026-10-20
+
+- 增加 Linux Nginx、Linux Apache、IIS/.NET 的站点级 OTel 配置，RUM/OTel 独立开关和组件启停。
+- 支持 DataKit OTLP/gRPC；Dataway 使用 Linux Collector 转换或 IIS/.NET 直接 OTLP/HTTP，Token 保留在服务器侧。
+- 复用差异确认、挂接备份和部署回滚，增加 Linux 配置生效标记，连续确认配置代次，避免平滑重载的新旧 worker 交接窗口中提前返回。
+- Apache 要求包含请求隔离修复的模块；IIS 要求 IIS 10 和独占应用池，只在环境值真正变化时回收目标池。
+- 撤销挂接释放共享 exporter，未完成恢复阻止新部署；构建拒绝覆盖已有发布目录，并在完成前复核源码提交。
+- 使用说明和实际验收边界见 [OTel 手册](docs/otel.md)及[验证记录](docs/verification.md)。本版提供 Windows/Linux x86、x64、ARM64 现代包及适用的 legacy 包；不包含原生模块、.NET Agent 或 Collector。
+
 ## 0.1.0-preview.1 · 2026-10-20
 
 本地 preview 发布，提供 Windows / Linux 独立可执行文件、TOML 示例、使用指南、SDK 来源/摘要和第三方许可。未发布到远程 GitLab，不包含 macOS 发布包。

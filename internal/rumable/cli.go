@@ -13,7 +13,7 @@ import (
 
 func Run(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "rumable init|render|attach|check|enable|disable|status|rollback|probe|version\nStart: init --server nginx|apache|iis --reporting openway|datakit; edit TOML; render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach: --dry-run previews; --target FILE:LINE selects; --yes confirms without a prompt\nrollback --attachment: undo first attachment after disable\ninit: --full lists advanced SDK options; probe: --path / (optional)")
+		fmt.Fprintln(out, "rumable init|render|attach|check|enable|disable|status|rollback|probe|version\nStart: init --server nginx|apache|iis --reporting openway|datakit; edit TOML; render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach: --dry-run previews; --target FILE:LINE selects; --yes confirms without a prompt\nrollback --attachment: undo first attachment after disable\nenable/disable: --component all|rum|otel (default all)\nrender --collector-config: print Dataway Collector JSON without deployment changes\ninit: --full lists advanced SDK options; probe: --path / (optional)")
 		return nil
 	}
 	if args[0] == "version" {
@@ -37,6 +37,14 @@ func Run(args []string, out io.Writer) error {
 	path := f.String("path", "", "probe path (defaults to configured probePaths)")
 	var server, reporting *string
 	var full *bool
+	var collectorConfig *bool
+	if cmd == "render" {
+		collectorConfig = f.Bool("collector-config", false, "print Dataway Collector JSON only; does not modify deployment state")
+	}
+	component := "all"
+	if cmd == "enable" || cmd == "disable" {
+		f.StringVar(&component, "component", "all", "all, rum or otel; independently change one component")
+	}
 	var target *string
 	var yes, dry, attachmentUndo *bool
 	if cmd == "attach" || cmd == "rollback" {
@@ -62,6 +70,9 @@ func Run(args []string, out io.Writer) error {
 	}
 	if f.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	if component != "all" && component != "rum" && component != "otel" {
+		return errors.New("--component must be all, rum or otel")
 	}
 	if cmd == "init" {
 		text, err := initialConfig(*server, *reporting, *id, *full)
@@ -117,7 +128,11 @@ func Run(args []string, out io.Writer) error {
 			attachmentStatus = map[string]string{"error": e.Error()}
 		}
 		_, pending := os.Stat(journalPath(root, st.Current.Site))
-		return output(out, map[string]any{"site": *id, "enabled": st.Current.Enabled, "platform": st.Current.Site.platform(), "sdk": st.Current.SDK, "sdkURL": st.Current.SDKURL, "lastCheck": st.LastCheck, "drift": drift, "pendingTransaction": pending == nil, "attachment": attachmentStatus, "host": hostInfo()})
+		collector := ""
+		if st.Current.OTelCollector != "" {
+			collector = filepath.Join(siteDir(root, st.Current.Site), filepath.FromSlash(st.Current.OTelCollector))
+		}
+		return output(out, map[string]any{"site": *id, "enabled": st.Current.active(), "rumEnabled": st.Current.Enabled, "otelEnabled": st.Current.OTelEnabled, "otelExporterOwner": st.Current.OTelOwner, "otelCollectorConfig": collector, "platform": st.Current.Site.platform(), "sdk": st.Current.SDK, "sdkURL": st.Current.SDKURL, "lastCheck": st.LastCheck, "drift": drift, "pendingTransaction": pending == nil, "attachment": attachmentStatus, "host": hostInfo()})
 	}
 	if cmd == "probe" {
 		st, stateErr := loadState(root, *id)
@@ -146,6 +161,11 @@ func Run(args []string, out io.Writer) error {
 		results, err := probePages(s, paths, expected)
 		if err != nil {
 			return err
+		}
+		if expected != nil {
+			if err := probeOTelState(*expected); err != nil {
+				return err
+			}
 		}
 		for _, r := range results {
 			if err = output(out, r); err != nil {
@@ -180,7 +200,11 @@ func Run(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
-		return apply(root, st, st.Current.Site, false, out)
+		s, activate, err := componentSite(st.Current.Site, st.Current, component, false)
+		if err != nil {
+			return err
+		}
+		return apply(root, st, s, activate, out)
 	}
 	if cmd == "attach" {
 		st, err := loadState(root, *id)
@@ -194,6 +218,16 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	if cmd == "render" {
+		if *collectorConfig {
+			n := Snapshot{}
+			files := map[string][]byte{}
+			renderOTelCollector(s, &n, files)
+			if n.OTelCollector == "" {
+				return errors.New("--collector-config requires Linux Nginx/Apache otel.backend=dataway")
+			}
+			_, err := fmt.Fprintln(out, string(files[n.OTelCollector]))
+			return err
+		}
 		_, err = prepare(root, s)
 		if err != nil {
 			return err
@@ -220,7 +254,7 @@ func Run(args []string, out io.Writer) error {
 		if e == nil {
 			e = preflight(root, s)
 		}
-		detail := "server prerequisites and sampled HTML/CSP passed; endpoint reachability/CORS/browser execution/ingestion need browser verification"
+		detail := "server prerequisites and HTTP checks passed; browser execution and backend ingestion are not verified"
 		if e != nil {
 			detail = e.Error()
 		}
@@ -233,7 +267,46 @@ func Run(args []string, out io.Writer) error {
 		}
 		return output(out, st.LastCheck)
 	}
-	return apply(root, st, s, cmd == "enable", out)
+	s, activate, err := componentSite(s, st.Current, component, true)
+	if err != nil {
+		return err
+	}
+	if err = s.validate(); err != nil {
+		return err
+	}
+	return apply(root, st, s, activate, out)
+}
+
+func componentSite(s Site, current Snapshot, component string, on bool) (Site, bool, error) {
+	if component == "all" {
+		return s, on, nil
+	}
+	if component == "rum" {
+		s.OTel = current.Site.OTel
+	} else {
+		s.RUM = current.Site.RUM
+		s.SDK = current.Site.SDK
+		s.Include, s.Exclude = current.Site.Include, current.Site.Exclude
+	}
+	// Clone pointer fields: changing the desired state must not mutate history.
+	if s.OTel != nil {
+		copy := *s.OTel
+		s.OTel = &copy
+	}
+	rumOn := current.Enabled
+	if component == "rum" {
+		rumOn = on
+	} else {
+		if s.OTel == nil {
+			return s, false, errors.New("configure OTel before using --component otel")
+		}
+		s.OTel.Enabled = on
+	}
+	if component == "rum" && s.OTel != nil {
+		s.OTel.Enabled = current.OTelEnabled
+	}
+	s.RUM.Enabled = &rumOn
+	return s, rumOn || s.OTel != nil && s.OTel.Enabled, nil
 }
 
 func output(w io.Writer, v any) error {

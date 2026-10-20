@@ -1,5 +1,7 @@
 # Windows / IIS 验收
 
+以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](../scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
+
 Preview 提供 Windows x86/x64/ARM64 CLI；本手册的 IIS 流程仍要求 64 位 Windows 与 64 位 Windows PowerShell。x86 CLI 在 x64 系统经 Sysnative 运行管理桥接；真正 32 位 Windows 不运行本 IIS 验收。脚本核对实际架构与 build.json，ARM64 必须在对应原生系统独立验收。
 
 本流程在目标 Windows 上运行，只创建一个随机命名的 Rumable-Acceptance 测试站点、专用应用池和三个应用，绑定 127.0.0.1:19182。默认完成后清理，证据单独保存。它不重启 IIS、不安装组件、不改变已有站点、全局压缩或配置委派。

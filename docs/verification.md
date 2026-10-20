@@ -342,6 +342,75 @@ Windows/IIS、旧内核、真实 OpenWay/DataKit 入库仍未执行；CDN 模式
 
 证据日志：/tmp/rumable-preview-candidate-build.log、/tmp/rumable-preview-go-preflight.log、/tmp/rumable-preview-x86-tests.log、/tmp/rumable-preview-race.log、/tmp/rumable-preview-nginx-x86.log、/tmp/rumable-preview-apache-x64.log、/tmp/rumable-preview-nginx-arm64-cdn.log、/tmp/rumable-preview-powershell-portable.log。Windows 所有架构、IIS 7.5/10、旧 Windows / Linux 内核及真实 OpenWay/DataKit 入库继续列为未验收；Windows ARM64 包尤其不能视为 ARM64 IIS 能力保证。
 
+## 2026-10-20 · 服务端 OTel 源码验收
+
+本节针对本轮源码，既有 `0.1.0-preview.1` dist 未重新生成。RUM、服务端 OTel 与 CLI 系统兼容范围分别记录，不能用编译或 HTTP 探测替代真实入库。
+
+| 验证对象 | 实际执行与结果 |
+|---|---|
+| Go | OrbStack Linux arm64，Go 1.20.14 / 1.26.9 全量 test、vet 和发布归档契约测试通过；1.26.9 race 通过 |
+| Windows 构建 | Go 1.26.9 交叉编译 Windows 386/amd64/arm64，通过；不是 Windows 运行验证 |
+| Nginx OTel | Linux arm64：Nginx 1.25.3 + 官方模块 0.1.0、Nginx 1.28.3 + 官方模块 0.1.2，真实 Trace 链路全流程通过 |
+| Apache OTel | Linux amd64（OrbStack 仿真）：Apache 2.4.69 + webserver/v1.0.4 SDK + Rumable 隔离修复，真实 Trace 链路全流程通过；构建脚本输出也已实际用于该验收 |
+| Collector | 实际运行官方 Collector 0.163.1，原生模块发送 OTLP/gRPC，Collector 转成 OTLP/HTTP protobuf 至私有测试接收器 |
+| 原有 RUM | Nginx 1.9.4、Apache 2.4.23 自动挂接回归通过；各自完整 RUM smoke 也通过，覆盖压缩、缓存、继承、HEAD、启停、升级及恢复 |
+| Chrome | 本机 Chrome / Nginx 1.28.3：同时启用时一个 init、一个 SDK 标签，SDK 状态 initialized、Fetch 返回正常 JSON；停用 RUM 后无脚本、SDK=false、交互正常，Console 无错误/警告 |
+| IIS 脚本 | OrbStack PowerShell 7.4 / Linux amd64：桥接与实机验收脚本解析、可移植快照和 OTel mock 契约测试通过；未运行 Windows/IIS/.NET Agent |
+
+真实原生 Trace 验证包含：已知 W3C Trace ID、上游上下文、service.name 实际进入 protobuf、DataKit 配置的 gRPC 分支、Dataway 配置的 `/otel/v1/traces` 与 X-Token、RUM/OTel 独立启停、重复启用、0/100 采样、API 路径、排除路径和未受管 VirtualHost 不采集；第二个受管站点复用 exporter，在拥有者停用采集后仍上报，依赖关系阻止提前移除拥有者入口。重载失败恢复原状态和历史，按逆序撤销两站点后，业务配置逐字节等于原文件。
+
+另外在 Nginx 1.25.3 执行纯 OTel 首次挂接：保留输出 gzip、原强 ETag、继承的 Host/Authorization，无 HTML 注入，JSON 页面可探测，API Trace 到达私有接收器，撤销后恢复原文件。原生装载失败的真实候选配置也已验证自动恢复；旧模块使用 HTTPS 在写入/创建挂接备份前被拒绝。
+
+回归中修复的具体边界：旧版 ngx_otel_module 使用不带 http:// 的 gRPC host:port，允许 origin 末尾 `/` 时规范化；旧模块不伪装支持 TLS。探测重新建立连接，避免被 keep-alive 固定到旧 worker，并检查 OTel 配置代次。Apache 校验请求级 OFF、受管模块块的精确所有权和原生 ABI，拒绝原版未修复模块与无效 ELF 装载。依赖站点正常提交的启停配置不会被误判成外部修改；未提交的编辑仍阻止恢复。
+
+IIS mock 覆盖协议、Token 转义、采样百分比、x86/x64/runtime 切换、业务环境变量保留、回滚池名边界；快照测试覆盖提交前池归属/元数据/环境漂移与未变化压缩的零写入。Go 测试另覆盖 Dataway Token 轮换触发部署、单组件操作不应用另一组件尚未部署的 TOML 参数、共享 exporter 冲突、状态/私有资源校验及外部修改恢复保护。
+
+本轮可追溯构建材料：Nginx 1.25.3 模块 `nginx-module-otel_1.25.3+0.1.0-1~bookworm_arm64.deb`，SHA-256 `7a39abec8ac3b0f3f00f03d26c2264915bb9c48ce1e1a638f41a8407dd8bcf74`。Apache 构建产物模块 SHA-256 `7f500be0d2166e049e919852a0d0a9b9cb8b4316dd1bbac5eecdbd6e937cd931`，带 `rumable-apache-isolation-v1` 标记和上游许可；上游发布标签是 webserver/v1.0.4，附件内部 VERSION.txt 为 1.0.3GA，不将二者混写。
+
+主要证据：`/tmp/rumable-otel-nginx-final.log`、`/tmp/rumable-otel-nginx125-final.log`、`/tmp/rumable-otel-apache-final.log`、`/tmp/rumable-otel-builder.log`、`/tmp/rumable-otel-nginx-native-failure.log`、`/tmp/rumable-otel-nginx-only.log`、`/tmp/rumable-otel-nginx-origin-slash.log`、`/tmp/rumable-otel-go120.log`、`/tmp/rumable-otel-go126.log`、`/tmp/rumable-otel-powershell.log`、`/tmp/rumable-otel-legacy-nginx.log`、`/tmp/rumable-otel-legacy-apache.log`。临时日志仅在本机保留，不随分发包提供。
+
+复验从源码目录运行：
+
+```sh
+go test ./...
+go vet ./...
+# 先准备匹配原生模块的镜像和 Linux arm64 Collector；本脚本针对本机 ARM64 OrbStack。
+OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=nginx NGINX_IMAGE=rumable-nginx-otel:1.25.3 bash scripts/smoke-otel.sh
+OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=apache APACHE_IMAGE=rumable-apache-otel:1.0.4-built bash scripts/smoke-otel.sh
+```
+
+模块与 Collector 安装、Apache 修复构建、IIS 管理员执行步骤见 [OTel 使用手册](otel.md)。Nginx 镜像分别预装对应官方 deb；Apache 镜像使用 `build-apache-otel.sh` 输出的 SDK，并配置动态库路径与日志目录权限。镜像是本轮本机验证环境，不是已发布的可下载镜像。
+
+未完成：Windows/IIS 10 原生 API、实际池回收、.NET Framework/ASP.NET Core Agent、Windows 7/Server 2008 R2 等旧系统；原生 TLS 握手/证书验收；真实 DataKit/Dataway 服务与观测云入库。Dataway 验证使用模拟空间 Token 和私有协议接收器，不能称为真实账号接入。IIS OTel 仅支持独占 .NET 应用池，静态页/Classic ASP/纯代理没有 .NET Span；旧 IIS 继续按 RUM 验收，不承诺 OTel。
+
+## 2026-10-20 · 0.1.0-preview.2 审查与候选包验收
+
+本次重新生成包含 OTel 的 Windows / Linux preview；旧 `0.1.0-preview.1` 文件保留。发布矩阵仍为 10 包：两个系统各有 x86/x64/ARM64 现代包及 x86/x64 legacy 包。现代编译器为 Go 1.26.9，legacy 为 Go 1.20.14，CGO=0。
+
+审查和运行验证发现并修复：
+
+- 已撤销挂接的旧站点仍占用共享 exporter，阻止新配置；现在已撤销站点释放占用，未完成的挂接/恢复仍阻止新部署。回归覆盖三种状态。
+- IIS 环境集合的序列化顺序变化可能触发无意义的池回收；现在按名称和值比较。PowerShell mock 验证仅调整顺序不回收，改变 service.name 才回收。
+- 初版候选包在 Nginx 1.25.3 真实运行时复现停用返回后仍接收新请求并产生 Span。官方平滑重载在启动新 worker 后等待 100ms，随后才通知旧 worker 退出；现在要求相隔 200ms 的连续两轮配置/HTTP 探测成功。回归模拟新→旧→新→新代次，完整原生流程复跑通过。已有请求和排队 Span 仍不承诺即时终止。
+- 发布构建现在拒绝覆盖已有输出目录，在写入最终校验清单前重新核对干净的源码提交；对已有候选目录执行构建确实拒绝，原 SHA256SUMS 不变。
+
+最终候选 `preview2-rc3` 的实际可执行文件用于以下验证；最终分发构建从干净的本地 Git 提交生成，并逐包比较 binarySHA256，以确保交付程序与候选一致。
+
+| 范围 | 实际执行结果 |
+|---|---|
+| Go | OrbStack Linux arm64：Go 1.20.14 / 1.26.9 全量 test、vet、SDK 同步及发布归档契约测试通过；1.26.9 race 通过 |
+| SDK | 发布前在线同步官方稳定 v3，仍为 3.3.21，SHA-256 `67c7d58349e376864f3297e9e6d4a60453ede6ff0c6f6b1900a74c2a44d4d3b1` |
+| Nginx OTel | 候选 Linux arm64 程序对 Nginx 1.25.3 / 官方模块 0.1.0、1.28.3 / 官方模块 0.1.2 完整流程通过；真实模块→Collector→私有 OTLP 接收器，包含 DataKit gRPC 和 Dataway HTTP/protobuf/Token 分支 |
+| Apache OTel | 候选 Linux amd64 程序对 Apache 2.4.69 / 已修复模块完整流程通过，包含拒绝未修复模块、站点隔离、独立启停、采样、故障恢复和原文件撤销 |
+| 最低 RUM 版本 | 候选 Linux x86 对 Nginx 1.9.4、Linux x64 对 Apache 2.4.23 的完整自动挂接回归通过，覆盖压缩、缓存、继承、确认、启停回滚、并发修改拒绝及备份保留 |
+| 五个 Linux 包 | x86/x64/ARM64 现代包和 x86/x64 legacy 包在 OrbStack 实际执行 version、完整 RUM init、三个服务器 OTel 示例 render/status，均通过；x86/x64 使用仿真，共享现代内核 |
+| Windows 与归档 | 交叉编译全部五个 Windows 包；PE/ELF 机器类型、编译器、preview 标记、二进制 SHA-256、ZIP CRC、Linux 可执行模式、包内文档链接和 OTel 示例检查通过 |
+| PowerShell | OrbStack PowerShell 7.4/Linux：IIS 快照与 OTel mock 通过；RUM/OTel 桥接和 Windows OTel 验收脚本解析通过。未执行 Windows/IIS API |
+
+本轮不改浏览器 SDK 或初始化行为，Chrome 的实际证据沿用上一节 OTel 源码验收记录，没有将其计为本轮重新执行。各包携带最终用户指南、三种 OTel 示例、原生模块安装/构建和 Dataway 配置步骤、Windows 实机脚本；原生模块、.NET Agent、Collector 需另行安装，不包含在 CLI 中。
+
+主要日志：`/tmp/rumable-preview2-rc3-build.log`、`/tmp/rumable-preview2-race.log`、`/tmp/rumable-preview2-otel-nginx125.log`、`/tmp/rumable-preview2-otel-nginx128.log`、`/tmp/rumable-preview2-otel-apache.log`、`/tmp/rumable-preview2-rum-nginx194.log`、`/tmp/rumable-preview2-rum-apache2423.log`、`/tmp/rumable-preview2-linux-matrix.log`、`/tmp/rumable-preview2-review-ps.log`、`/tmp/rumable-preview2-existing-output.log`。这些是本机日志，不随包分发。Windows/IIS 实机、旧内核、原生 TLS、真实 DataKit/Dataway 与观测云入库仍未验收；私有协议接收器成功不能替代真实入库。
+
 ## 尚未完成的环境验收
 
 - Windows 10 / Server 2016+ 与旧 Windows 7 / Server 2008 R2 / Server 2012 的真实运行。
