@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.0-preview.2", "release version")
+	versionName := flag.String("version", "0.1.0-preview.3", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -116,7 +116,7 @@ func run() error {
 	}
 	defer os.RemoveAll(tmp)
 	shared := map[string][]byte{}
-	for _, file := range []string{"USER-GUIDE.md", "CHANGELOG.md", "docs/compatibility.md", "docs/operations.md", "docs/configuration.md", "docs/verification.md", "docs/apache.md", "docs/otel.md", "docs/windows-acceptance.md", "scripts/windows-smoke.ps1", "scripts/windows-otel-smoke.ps1", "scripts/smoke-otel.sh", "internal/integration/otel-fixture.go", "scripts/build-apache-otel.sh", "scripts/patch-apache-otel.go", "scripts/windows-iis-helpers.ps1", "scripts/windows-fixture.aspx", "scripts/windows-cleanup.ps1", "scripts/test-windows-scripts.ps1", "examples/nginx.toml", "examples/apache.toml", "examples/iis.toml", "examples/full.toml", "examples/otel-nginx.toml", "examples/otel-apache.toml", "examples/otel-iis.toml", "third_party/BurntSushi-toml-LICENSE", "internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json"} {
+	for _, file := range []string{"USER-GUIDE.md", "CHANGELOG.md", "docs/compatibility.md", "docs/operations.md", "docs/configuration.md", "docs/verification.md", "docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md", "scripts/windows-smoke.ps1", "scripts/windows-otel-smoke.ps1", "scripts/smoke-otel.sh", "internal/integration/otel-fixture.go", "scripts/windows-iis-helpers.ps1", "scripts/windows-fixture.aspx", "scripts/windows-cleanup.ps1", "scripts/test-windows-scripts.ps1", "examples/nginx.toml", "examples/iis.toml", "examples/full.toml", "examples/otel-nginx.toml", "examples/otel-iis.toml", "third_party/BurntSushi-toml-LICENSE", "internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json"} {
 		b, e := os.ReadFile(file)
 		if e != nil {
 			return e
@@ -125,7 +125,7 @@ func run() error {
 	}
 	var sums []string
 	var downloads strings.Builder
-	fmt.Fprintf(&downloads, "# Rumable %s\n\nPreview 测试版本。先阅读 [使用指南](USER-GUIDE.md) 和 [版本说明](CHANGELOG.md)。\n\n386 = Windows/Linux x86 32 位；amd64 = Intel/AMD x64；arm64 = ARM64。旧 Windows 选择 legacy；32 位 Windows 不支持 IIS 配置管理。包含 RUM 与服务端 OTel。原生模块、.NET Agent、Collector 需另行安装。Windows 包已交叉编译，IIS 与 Windows 实机尚未验收；IIS OTel 不支持 ARM64。\n\n| 下载包 | 平台 | 编译器 |\n|---|---|---|\n", *versionName)
+	fmt.Fprintf(&downloads, "# Rumable %s\n\nPreview 测试版本。先阅读 [使用指南](USER-GUIDE.md) 和 [版本说明](CHANGELOG.md)。\n\n386 = Windows/Linux x86 32 位；amd64 = Intel/AMD x64；arm64 = ARM64。旧 Windows 选择 legacy；32 位 Windows 不支持 IIS 配置管理。包含 RUM 与服务端 OTel。OTel 模块和 .NET Agent 可用 install-otel 自动准备；外部 Collector 仍需自行运行。Windows 包已交叉编译，IIS 与 Windows 实机尚未验收；IIS OTel 不支持 ARM64。\n\n| 下载包 | 平台 | 编译器 |\n|---|---|---|\n", *versionName)
 	for _, target := range []struct{ os, arch, compiler, label string }{
 		{"linux", "386", *modern, mv}, {"linux", "amd64", *modern, mv}, {"linux", "arm64", *modern, mv},
 		{"windows", "386", *modern, mv}, {"windows", "amd64", *modern, mv}, {"windows", "arm64", *modern, mv},

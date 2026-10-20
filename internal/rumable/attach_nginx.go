@@ -25,6 +25,9 @@ func nginxAttachmentConfig(dump []byte) (*attachConfig, error) {
 		if err != nil {
 			return err
 		}
+		if c.root.file == "" {
+			c.root.file = file
+		}
 		if active[file] {
 			return fmt.Errorf("recursive include %s", file)
 		}
@@ -132,7 +135,7 @@ func (c *attachConfig) planNginx(root string, s Site, target, version string) ([
 	http := selected.parent
 	d := filepath.ToSlash(siteDir(root, s))
 	includes := func(name string) string { return "include " + nginxQuote(d+"/"+name) + ";\n" }
-	edits, err := nginxOTelAttachment(c, root, s, selected)
+	edits, err := nginxOTelAttachment(c, root, s)
 	if err != nil {
 		return nil, "", err
 	}

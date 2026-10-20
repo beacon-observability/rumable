@@ -2,14 +2,10 @@
 # Real native modules -> real Collector -> local OTLP/protobuf HTTP receiver.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-kind=${SERVER:-nginx}
 python=${PYTHON:-python3}
 : "${OTELCOL_BINARY:?Set OTELCOL_BINARY to a Linux arm64 otelcol executable for the OrbStack host}"
-case "$kind" in
- nginx) image=${NGINX_IMAGE:-rumable-nginx-otel:1.28.3}; arch=arm64; native=/usr/sbin/nginx; module=/usr/lib/nginx/modules/ngx_otel_module.so; platform=linux/arm64;;
- apache) image=${APACHE_IMAGE:-rumable-apache-otel:1.0.4-isolated}; arch=amd64; native=/usr/local/apache2/bin/httpd; module=/opt/otel/WebServerModule/Apache/libmod_apache_otel.so; platform=linux/amd64;;
- *) echo 'SERVER must be nginx or apache' >&2;exit 1;;
-esac
+image=${NGINX_IMAGE:-rumable-nginx-otel:1.28.3}
+arch=arm64; native=/usr/sbin/nginx; module=/usr/lib/nginx/modules/ngx_otel_module.so; platform=linux/arm64
 work=$(mktemp -d "${TMPDIR:-/tmp}/rumable-otel.XXXXXX")
 name=$(basename "$work" | tr '[:upper:]' '[:lower:]')
 cleanup(){
@@ -30,18 +26,20 @@ mkdir "$work/www"
 cat > "$work/native-wrapper" <<SH
 #!/bin/sh
 case " \$* " in
- *" -s reload "*|*" -k graceful "*)
+ *" -s reload "*)
  if [ -f /work/fail-reload ];then rm /work/fail-reload;echo 'intentional reload failure' >&2;exit 1;fi;;
 esac
 exec $native "\$@"
 SH
 chmod 755 "$work/native-wrapper"
 echo '<html><head><title>static</title></head><body>static</body></html>' > "$work/www/static.html"
-if [ "$kind" = nginx ]; then
- cat > "$work/native.conf" <<'CONF'
+cat > "$work/native.conf" <<'CONF'
 pid /work/nginx.pid;
 error_log /dev/stderr notice;
 events {}
+include /work/http.conf;
+CONF
+cat > "$work/http.conf" <<'CONF'
 http {
  default_type text/html;
  access_log off;
@@ -58,45 +56,12 @@ http {
  server {listen 19782;server_name other.test 127.0.0.1;location / {proxy_pass http://fixture:19781;}}
 }
 CONF
-else
- cat > "$work/native.conf" <<'CONF'
-ServerRoot /usr/local/apache2
-PidFile /work/httpd.pid
-Listen 19780
-Listen 19782
-ServerName localhost
-LoadModule mpm_event_module modules/mod_mpm_event.so
-LoadModule unixd_module modules/mod_unixd.so
-LoadModule authz_core_module modules/mod_authz_core.so
-LoadModule alias_module modules/mod_alias.so
-LoadModule headers_module modules/mod_headers.so
-LoadModule filter_module modules/mod_filter.so
-LoadModule lua_module modules/mod_lua.so
-LoadModule mime_module modules/mod_mime.so
-LoadModule proxy_module modules/mod_proxy.so
-LoadModule proxy_http_module modules/mod_proxy_http.so
-User daemon
-Group daemon
-ErrorLog /proc/self/fd/2
-TypesConfig conf/mime.types
-<VirtualHost *:19780>
- ServerName 127.0.0.1
- DocumentRoot /work/www
- <Directory /work/www>
-  Require all granted
-  AllowOverride None
- </Directory>
- ProxyPass /static.html !
- ProxyPass / http://fixture:19781/
-</VirtualHost>
-<VirtualHost *:19782>
- ServerName other.test
- ServerAlias 127.0.0.1
- ProxyPass / http://fixture:19781/
-</VirtualHost>
-CONF
-fi
 cp "$work/native.conf" "$work/original.conf"
+cp "$work/http.conf" "$work/original-http.conf"
+original_config() {
+ cmp "$work/native.conf" "$work/original.conf"
+ cmp "$work/http.conf" "$work/original-http.conf"
+}
 cat > "$work/config.toml" <<CONF
 schemaVersion = 1
 [[sites]]
@@ -105,9 +70,9 @@ publicURL = "http://127.0.0.1:19780/"
 includePaths = ["/"]
 excludePaths = ["/api/"]
 probePaths = ["/", "/static.html"]
-[sites.$kind]
+[sites.nginx]
 binary = "/work/native-wrapper"
-args = ["$(if [ "$kind" = nginx ];then echo -c;else echo -f;fi)", "/work/native.conf"]
+args = ["-c", "/work/native.conf"]
 [sites.rum]
 enabled = true
 applicationId = "local-acceptance"
@@ -118,38 +83,46 @@ backend = "dataway"
 endpoint = "http://fixture:19781/otel"
 collectorEndpoint = "http://127.0.0.1:4317"
 tokenEnv = "RUMABLE_ACCEPTANCE_TOKEN"
-serviceName = "native-$kind"
+serviceName = "native-nginx"
 modulePath = "$module"
 sampleRate = 100
 excludePaths = ["/excluded/"]
 CONF
 cp "$work/config.toml" "$work/original.toml"
+if [ "${INSTALL_OTEL:-0}" = 1 ];then
+ sed '/^modulePath = /d' "$work/config.toml" > "$work/auto.toml"
+ mv "$work/auto.toml" "$work/config.toml"
+  : "${NGINX_OTEL_ARCHIVE:?Set NGINX_OTEL_ARCHIVE to the official exact-version module .deb}"
+  cp "$NGINX_OTEL_ARCHIVE" "$work/module.deb"
+  digest=$("$python" -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$work/module.deb")
+  if [ "${NGINX_APT_FIXTURE:-0}" != 1 ];then printf '\n[sites.otel.install]\narchive = "/work/module.deb"\nsha256 = "%s"\n' "$digest" >> "$work/config.toml";fi
+ cp "$work/config.toml" "$work/original.toml"
+fi
 docker network create "$name-net" >/dev/null
 docker run -d --name "$name-fixture" --network "$name-net" --network-alias fixture -p 127.0.0.1:19781:19781 -v "$work:/work" --entrypoint /work/fixture golang:1.26-bookworm >/dev/null
-args=(-c /work/native.conf -g 'daemon off;');if [ "$kind" = apache ];then args=(-f /work/native.conf -DFOREGROUND);fi
+args=(-c /work/native.conf -g 'daemon off;')
 docker run -d --platform "$platform" --name "$name-server" --network "$name-net" -p 127.0.0.1:19780:19780 -p 127.0.0.1:19782:19782 -v "$work:/work" --entrypoint "$native" "$image" "${args[@]}" >/dev/null
 cli(){ docker exec "$name-server" /work/rumable "$@" --config /work/config.toml --state-dir /work/state --site smoke; }
 for i in $(seq 1 60);do if curl -fsS http://127.0.0.1:19780/ >/dev/null;then break;fi;sleep 0.2;done
-if [ "$kind" = apache ];then
- reject_module(){
-  local path=$1 message=$2
-  # Write through the Linux mount so configtest sees coherent file sizes under
-  # OrbStack; host replacements of different lengths can briefly read stale.
-  sed "s#^modulePath = .*#modulePath = \"$path\"#" "$work/config.toml" | docker exec -i "$name-server" sh -c 'cat > /work/rejected.toml'
-  local rejected=/work/rejected-$(basename "$path")
-  docker exec "$name-server" /work/rumable render --config /work/rejected.toml --state-dir "$rejected" >/dev/null
-  expect_failure "$message" docker exec "$name-server" /work/rumable attach --config /work/rejected.toml --state-dir "$rejected" --yes
-  cmp "$work/native.conf" "$work/original.conf"
-  test ! -f "$work/${rejected#/work/}/sites/smoke/attachment.json" || fail 'module preflight created a live attachment backup'
- }
- if [ -n "${UNPATCHED_APACHE_MODULE:-}" ];then
-  cp "$UNPATCHED_APACHE_MODULE" "$work/unpatched.so"
-  reject_module /work/unpatched.so 'lacks the per-request isolation fix'
+
+if [ "${INSTALL_OTEL:-0}" = 1 ];then
+ if [ "${NGINX_APT_FIXTURE:-0}" = 1 ];then
+  # A local repository exists only in this throwaway container. This exercises
+  # real apt-cache/apt-get/dpkg-deb without modifying the host repositories.
+  docker exec "$name-server" sh -c '
+   mkdir /work/repo
+   cp /work/module.deb /work/repo/module.deb
+   dpkg-deb -f /work/module.deb > /work/repo/Packages
+   printf "Filename: module.deb\nSize: %s\nSHA256: %s\n" "$(wc -c < /work/module.deb)" "$(sha256sum /work/module.deb | cut -d " " -f 1)" >> /work/repo/Packages
+   printf "deb [trusted=yes] file:/work/repo ./\n" > /etc/apt/sources.list.d/rumable-acceptance.list
+   apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/rumable-acceptance.list -o Dir::Etc::sourceparts=- update > /work/apt-update.log 2>&1
+  '
  fi
- # A real ELF dependency with a capability string still lacks Apache's module
- # symbol. Native -t -C must reject it before the first business-file write.
- docker exec "$name-server" sh -c 'cp /opt/otel/sdk_lib/lib/libopentelemetry_webserver_sdk.so /work/invalid-loader.so; printf rumable-apache-isolation-v1 >> /work/invalid-loader.so'
- reject_module /work/invalid-loader.so 'module load preflight failed before attachment'
+ cli install-otel --dry-run
+ test ! -d "$work/state-otel" || fail 'dry-run installed a dependency'
+ cli install-otel --yes
+ cli install-otel --yes
+ original_config
 fi
 cli render
 collector=$(find "$work/state/sites/smoke/collector" -name '*.json')
@@ -157,17 +130,24 @@ collector=/work/${collector#"$work/"}
 docker run -d --name "$name-collector" --network "container:$name-server" -e RUMABLE_ACCEPTANCE_TOKEN=local-test-token -v "$work:/work" --entrypoint /work/otelcol golang:1.26-bookworm --config "$collector" >/dev/null
 sleep 1
 cli attach --dry-run
-cmp "$work/native.conf" "$work/original.conf"
+original_config
 cli attach --yes
 cli enable
 cli enable
 cli status
+if [ "${INSTALL_OTEL:-0}" = 1 ];then
+ # Losing state must never turn an actively loaded dependency into a removable
+ # installation-only package. The live server remains unchanged on rejection.
+ docker exec "$name-server" mv /work/state/sites/smoke/state.json /work/saved-live-state.json
+ expect_failure 'still referenced' cli uninstall --yes --remove-dependencies
+ docker exec "$name-server" mv /work/saved-live-state.json /work/state/sites/smoke/state.json
+fi
 trace(){ curl -fsS -H "traceparent: 00-$1-0123456789abcdef-01" "http://127.0.0.1:$2$3" > "$work/body"; }
 assert_received(){
  local id=$1 token=$2
  for i in $(seq 1 40);do
   curl -fsS http://127.0.0.1:19781/records > "$work/records.json"
-  if "$python" - "$work/records.json" "$id" "$token" "native-$kind" 2>/dev/null <<'PY'
+  if "$python" - "$work/records.json" "$id" "$token" "native-nginx" 2>/dev/null <<'PY'
 import json,sys
 records=json.load(open(sys.argv[1])) or []
 assert any(sys.argv[2] in r['bodyHex'] and r['token']==sys.argv[3] and sys.argv[4].encode().hex() in r['bodyHex'] for r in records)
@@ -235,10 +215,41 @@ assert_received b3333333333333333333333333333333 local-test-token
 cli disable --component otel
 trace b4444444444444444444444444444444 19782 /
 assert_received b4444444444444444444444444444444 local-test-token
+# Exercise receiver downtime after export assertions: native SDKs may drop
+# queued spans while a receiver is stopped; delivery during an outage is not tested.
+docker stop "$name-collector" >/dev/null
+peer enable --component rum
+peer disable --component rum
+docker start "$name-collector" >/dev/null
+expect_failure 'still depends' cli uninstall --yes
 cli disable
 expect_failure 'still depends' cli rollback --attachment --yes
 peer disable
 peer rollback --attachment --yes
+# Model an interrupted two-file restore: main is original, while http still
+# contains OTel directives. The on-disk candidate cannot pass -T until resumed.
+docker exec "$name-server" cp /work/original.conf /work/native.conf
+"$python" - "$work/state/sites/smoke/attachment.json" <<'PY'
+import json,sys
+path=sys.argv[1]
+with open(path) as f: record=json.load(f)
+record['phase']='restoring'
+with open(path,'w') as f: json.dump(record,f)
+PY
+expect_failure 'unknown directive' docker exec "$name-server" "$native" -c /work/native.conf -t
 cli rollback --attachment --yes
-cmp "$work/native.conf" "$work/original.conf"
-echo "PASS: $kind real spans, DataKit/gRPC, Dataway/protobuf/token, sampling, path/site isolation, shared exporter, independent switches, reload failure recovery, rollback and original attachment restored"
+original_config
+peer uninstall --yes
+cli uninstall --dry-run
+test -f "$work/state/sites/smoke/state.json" || fail 'dry-run uninstalled the site'
+if [ "${INSTALL_OTEL:-0}" = 1 ];then
+ cli uninstall --yes --remove-dependencies
+ test -z "$(find "$work/state-otel" -name rumable-install.json)" || fail 'owned dependency not removed'
+else
+ cli uninstall --yes
+ docker exec "$name-server" test -f "$module" || fail 'external module removed'
+fi
+cli uninstall --yes
+test ! -f "$work/state/sites/smoke/state.json" || fail 'site state not archived'
+original_config
+echo "PASS: nginx real spans, DataKit/gRPC, Dataway/protobuf/token, sampling, path/site isolation, shared exporter, independent switches, reload failure recovery, rollback and original attachment restored"

@@ -49,10 +49,43 @@ try {
         else {$live.otel[$change]='external-change'}
         try {Assert-Snapshot $saved $live;throw 'Concurrent change was accepted.'} catch {if ($_.Exception.Message -notlike '*changed before commit*') {throw}}
     }
+    foreach ($name in @('Remove-Owned','Restore-Nodes')) {
+        $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+        Invoke-Expression $definition.Extent.Text
+    }
+    Add-Type @'
+public class TestVirtual {
+    public string PhysicalPath;
+}
+public class TestVirtualCollection {
+    public TestVirtual Value;
+    public TestVirtual this[string key] { get { return Value; } }
+    public void Remove(TestVirtual value) {
+        if (!object.ReferenceEquals(Value,value)) throw new System.Exception("Wrong virtual directory removed");
+        Value = null;
+    }
+}
+'@
+    $request = @{ root=[IO.Path]::GetTempPath(); removeMapping=$false }
+    $virtuals = New-Object TestVirtualCollection
+    $virtuals.Value = New-Object TestVirtual
+    $virtuals.Value.PhysicalPath = Join-Path $request.root 'public'
+    $application = @{ VirtualDirectories=$virtuals }
+    $rules=@(); $preconditions=@(); $site.otel=$null
+    $restore = @{ rules=@(); preconditions=@(); virtualDirectory=$null; compressionPresent=$true; compressionValue='true' }
+    Restore-Nodes $restore
+    if ($null -eq $virtuals.Value) { throw 'Ordinary rollback removed the retained asset mapping.' }
+    $request.removeMapping=$true
+    Restore-Nodes $restore
+    if ($null -ne $virtuals.Value) { throw 'Full uninstall retained the owned asset mapping.' }
+    $virtuals.Value = New-Object TestVirtual
+    $virtuals.Value.PhysicalPath = Join-Path $request.root 'foreign-public'
+    try { Restore-Nodes $restore; throw 'Foreign mapping removed.' } catch { if ($_.Exception.Message -notlike '*owned by another deployment*') { throw } }
+    if ($null -eq $virtuals.Value) { throw 'Uninstall deleted a foreign resource mapping.' }
     $target = 'Other Site'; $site.iis.site = 'Other Site'
     $empty = Read-Snapshot
     if ($empty.compressionPresent -or $empty.rules.Count -or $null -ne $empty.virtualDirectory) { throw 'Snapshot captured another site.' }
-    Write-Host 'IIS snapshot: case-insensitive ownership, site isolation and JSON persistence passed.'
+    Write-Host 'IIS snapshot: ownership, site isolation, persistence, retained mappings and full uninstall passed.'
 } finally {
     [IO.File]::Delete($configPath)
 }

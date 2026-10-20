@@ -1,13 +1,19 @@
 # 版本说明
 
-## 未发布 · IIS OTel 加固
+## 0.1.0-preview.3 · 2026-10-20
 
-- 丢弃 IIS Recycle 的状态返回值，修复桥接 JSON 被额外输出破坏；mock 同步模拟真实返回契约。
-- RUM 单组件操作保留已部署的 OTel 凭据和池进程，不因当前 Token 缺失/轮换改变 OTel；回滚使用保存的凭据。
-- IIS 配置提交后先持久化事务，再独立回收目标池；失败恢复和重复恢复均重试原进程代次，保留未完成日志与外部修改保护。
-- 等待被回收的旧 worker 退出，超时保留恢复状态，不强杀业务进程；重复启停不回收。
-- 拒绝 WAS/W3SVC 全局插桩、未受管信号级 OTEL 覆盖、ASP.NET Core 应用级覆盖及不适合的 CLR 池配置；Windows ARM64 的 x64 仿真宿主同样拒绝 OTel。
-- 修复 Windows OTel 验收资源名与清理校验不一致，增加独立结果目录、旁站池/PID 隔离和可选 RUM/OTel 联合验收。现有 preview.2 dist 未重打；实际验证见[验证记录](docs/verification.md)。
+本地 preview 更新，提供 Windows/Linux x86、x64、ARM64 现代包，以及 Windows/Linux x86、x64 legacy 包。当前仅支持 Nginx、IIS，不提供 macOS 包；旧发布压缩包保持不变。
+
+- 新增 `install-otel`：Nginx 准确版本 APT 包私有提取；IIS 官方 .NET Agent v1.17.0 下载、校验与读取权限设置。支持自定义离线/HTTPS 包，不升级服务器或全局注册 IIS。
+- 新增 `uninstall`：预览和确认后停用站点的 RUM/OTel、恢复受管配置、归档备份；可选清理未修改且无共享引用的受管依赖。
+- 修复 RUM 单独启停依赖未变更 OTel 接收端，以及停用后父层 Nginx 过滤规则改写缓存页面脚本的问题。
+- OTel 单组件操作保留已部署的浏览器 SDK、初始化脚本及 CDN 引用，不意外升级；Web SDK 升级使用普通 enable 或 enable --component rum。
+- 修复 http 块位于 include 文件时模块加载过晚；多文件恢复中断、临时配置无法解析时，可继续 rollback --attachment。
+- 包含 IIS 池隔离、事务落盘后独立回收、旧 worker 等待、重复恢复、RUM 操作保留凭据和增强验收脚本；Windows/IIS 实机仍需验收。
+- 删除 Apache RUM/OTel 实现、TOML 配置、模块构建与安装、自动挂接、Lua 资源、示例和专用脚本，不保留兼容分支。
+- 内置官方稳定 Web SDK 3.3.21，保留 Session Replay 默认关闭、同域/CDN 模式和站点级 TOML 配置。发布前在线同步与校验；现有站点不会后台升级。
+
+用户步骤见[使用指南](USER-GUIDE.md)、[安装与卸载](docs/otel-installation.md)；编译、本地运行和未完成的目标环境验收见[验证记录](docs/verification.md)。以下为旧版的历史记录。
 
 ## 0.1.0-preview.2 · 2026-10-20
 

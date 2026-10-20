@@ -1,25 +1,28 @@
 # 服务端 OpenTelemetry 自动插桩
 
-Rumable 可管理 Linux Nginx、Linux Apache 和 Windows IIS/.NET 的请求 Trace，与浏览器 RUM、Session Replay 分别配置。它负责生成配置、挂接、预检、启停、配置生效探测和受管项回滚。原生模块、.NET Agent、DataKit 和 Collector 是外部运行依赖，需先安装；CLI 不会偷偷升级服务器、下载未经匹配的模块或重启整个 IIS。
+Rumable 可管理 Linux Nginx 和 Windows IIS/.NET 的请求 Trace，与浏览器 RUM、Session Replay 分别配置。它负责生成配置、挂接、预检、启停、配置生效探测和受管项回滚。原生模块、.NET Agent、DataKit 和 Collector 是外部运行依赖，需先安装；CLI 不会偷偷升级服务器、下载未经匹配的模块或重启整个 IIS。
 
-本能力包含在 `0.1.0-preview.2` 发布包中；旧 `0.1.0-preview.1` 不包含 OTel。直接使用与目标平台匹配的新包，无需为 CLI 安装 Go。这里只采集 HTTP 请求链路；应用内部方法、数据库等仍由对应语言 Agent/SDK 负责。
+本页适用于 **0.1.0-preview.3**。直接使用与目标平台匹配的新包，无需为 CLI 安装 Go。这里只采集 HTTP 请求链路；应用内部方法、数据库等仍由对应语言 Agent/SDK 负责。
 
-本页的 IIS 事务分阶段、旧 worker 等待和增强验收脚本属于 preview.2 之后的源码修复，现有 dist 未重打。使用这些修复时需构建当前源码，脚本与 CLI 使用同一源码版本；本轮证据见[验证记录](verification.md)。
+本包已包含 IIS 事务分阶段、旧 worker 等待、增强验收脚本，以及 Linux 单组件启停和多文件恢复修复。请保持脚本与 CLI 来自同一发布包；实际运行边界见[验证记录](verification.md)。
 
 ## 支持范围
 
 | 目标 | 插桩方式 | 本版要求 |
 |---|---|---|
 | Nginx | 官方 `ngx_otel_module` | Linux，Nginx 1.25.3+，与 Nginx 版本、发行版、架构匹配的模块；明文兼容模块 0.1.0；TLS/自定义 CA 需要 0.1.2+ |
-| Apache | 社区 webserver/v1.0.4 模块加 Rumable 请求隔离修复 | Linux x64，Apache 2.4.23+，匹配目标系统/Apache 头文件构建；原版模块会被自动拒绝 |
 | IIS/.NET Framework | 官方 .NET Automatic Instrumentation | IIS 10，Windows 10/Server 2016+，Windows PowerShell 5.1，.NET Framework 4.6.2+，v4 Integrated 独占应用池 |
 | IIS/ASP.NET Core | 同一 Agent 的 CLR profiler + startup hook | 同上，池的 CLR Version 必须为 No Managed Code，按池位数安装 win-x64/win-x86 Agent；托管方式须在目标主机验收 |
 
 IIS 的 OTel 首版支持 x64 Windows 上的 x64/x86 应用池，ARM64 会拒绝启用。静态文件、Classic ASP、纯反向代理不是 .NET 应用插桩的覆盖范围。旧 Nginx 1.9.4、旧 Windows/IIS 7.5 仍可使用原有 RUM；不能因 legacy Go CLI 能运行就推断 OTel 模块/Agent 也兼容。
 
+## 自动安装与卸载
+
+本版提供 `install-otel` 和 `uninstall`。省略 modulePath/agentPath，执行 install-otel 自动准备受管依赖，再按原流程 render/attach/enable；卸载默认保留依赖，`--remove-dependencies` 按归属、摘要与共享引用清理。完整命令、离线包、Windows 步骤及限制见[安装与卸载](otel-installation.md)。下文手工安装方式仍可用于已有依赖。旧 preview.2 包不包含这些新命令。
+
 ## 按站点配置和独立开关
 
-直接复制对应示例：[Nginx](../examples/otel-nginx.toml)、[Apache](../examples/otel-apache.toml)、[IIS](../examples/otel-iis.toml)。它们默认仅开启服务端 OTel，无需浏览器 applicationId。
+直接复制对应示例：[Nginx](../examples/otel-nginx.toml)、[IIS](../examples/otel-iis.toml)。它们默认仅开启服务端 OTel，无需浏览器 applicationId。
 
 ```toml
 [sites.rum]
@@ -36,7 +39,7 @@ includePaths = ["/"]
 excludePaths = ["/health"]
 ```
 
-`rum.enabled` 省略时仍为 true，保持旧配置行为；省略整个 otel 表时不加载 OTel。存在 otel 表表示首次挂接会预留模块及 exporter，即使 `otel.enabled=false` 也需要匹配的模块/系统。`enabled` 只控制采集，停用后保留模块和配置入口，完整卸载入口使用 `rollback --attachment`。
+`rum.enabled` 省略时仍为 true，保持旧配置行为；省略整个 otel 表时不加载 OTel。存在 otel 表表示首次挂接会预留模块及 exporter，即使 `otel.enabled=false` 也需要匹配的模块/系统。`enabled` 只控制采集，停用后保留模块和配置入口，完整移除站点使用 `uninstall`；只撤销 Linux 首次挂接仍可使用 `disable` 后的 `rollback --attachment`。
 
 OTel 的路径范围与 RUM 独立，省略 includePaths 时覆盖 `/`，不会沿用 RUM 常见的 `/api/` 排除项。两者都是区分大小写的路径前缀，排除优先，自动跳过 `/__rumable__/`。IIS 按整个独占应用池插桩，不接受 OTel 路径过滤参数。
 
@@ -48,16 +51,17 @@ OTel 的路径范围与 RUM 独立，省略 includePaths 时覆盖 `/`，不会�
 | `backend` | 必填，`datakit` 或 `dataway` |
 | `endpoint` | 必填；DataKit 为带端口的 gRPC origin；Dataway 为 `/otel` 基础地址，禁止内嵌凭证、query 和 fragment |
 | `serviceName` | 必填；实例共享的服务名，禁止配置变量展开 |
-| `sampleRate` | 100；Nginx 支持两位小数，Apache 仅 0/100，IIS 为父级优先的比例采样 |
+| `sampleRate` | 100；Nginx 支持两位小数，IIS 为父级优先的比例采样 |
 | `includePaths` / `excludePaths` | Linux 默认 `[/]` / 空；IIS 不支持 |
-| `modulePath` | Linux 必填；绝对路径，与原服务器 ABI 匹配，首次挂接后固定 |
-| `trustedCA` | Linux HTTPS 原生出口的绝对 PEM 路径；Apache HTTPS 必填，Nginx 可使用系统 CA |
+| `modulePath` | Linux 可省略，由 install-otel 选择；显式填写须为匹配 ABI 的绝对路径，首次挂接后固定 |
+| `trustedCA` | Nginx HTTPS 原生出口的绝对 PEM 路径；省略时使用系统 CA |
 | `collectorEndpoint` | Linux Dataway 必填；本机 `http://127.0.0.1:PORT` 或 `http://localhost:PORT`，不得与 DataKit/IIS 混用 |
 | `tokenEnv` | Dataway 必填；空间 Token 的环境变量名，不是 Token 明文 |
-| `agentPath` | IIS 必填；绝对路径，使用预先安装的官方 .NET Agent |
+| `agentPath` | IIS 可省略，由 install-otel 选择；显式填写为外部维护的官方 .NET Agent 绝对路径 |
+| `install.archive` / `install.url` / `install.sha256` | 可选，自定义离线/HTTPS 包及必填摘要，见[安装手册](otel-installation.md) |
 | `runtime` | IIS 必填，`netframework` 或 `dotnet` |
 
-Nginx 采样率支持 0–100，最多两位小数，按 Trace ID 比例抽样；Apache 原生 SDK 仅支持 0 或 100，其他比例应在 Collector 做尾采样；IIS 使用 parentbased_traceidratio，百分比转换为 0–1。它们与 RUM 会话采样率互不替代。
+Nginx 采样率支持 0–100，最多两位小数，按 Trace ID 比例抽样；IIS 使用 parentbased_traceidratio，百分比转换为 0–1。它们与 RUM 会话采样率互不替代。
 
 若计划未来独立启用两种能力，首次就配置好 RUM 参数并保留 `rum.enabled=true`，先执行 `enable --component otel`；这会只启用服务端采集。以纯 OTel 配置首次挂接时，工具不会为未来 RUM 改写压缩、缓存和业务请求头；之后添加 RUM 需要重新审查并挂接 HTML 改写配置。
 
@@ -81,7 +85,7 @@ modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so"
 ```
 
 ```text
-Nginx/Apache → OTLP/gRPC → 已运行的 Collector → OTLP/HTTP protobuf + X-Token → Dataway
+Nginx → OTLP/gRPC → 已运行的 Collector → OTLP/HTTP protobuf + X-Token → Dataway
 IIS/.NET → OTLP/HTTP protobuf + X-Token → Dataway
 ```
 
@@ -109,7 +113,7 @@ IIS 不需要 Collector。修改 tokenEnv 对应环境变量的值后，执行�
 
 ## Nginx 自动挂接
 
-先从官方仓库安装版本匹配的 `nginx-module-otel`；发行版 Nginx 与官方模块不一定 ABI 兼容。设置真实 modulePath，再执行：
+优先使用 `install-otel`；手工方式可从官方仓库安装版本匹配的 `nginx-module-otel`；发行版 Nginx 与官方模块不一定 ABI 兼容。设置真实 modulePath，再执行：
 
 ```sh
 rumable render --config nginx-otel.toml
@@ -119,29 +123,11 @@ rumable attach --config nginx-otel.toml
 rumable enable --config nginx-otel.toml
 ```
 
-加载模块属于 main 层，exporter 和 service.name 属于 http 层，采集开关和上下文传播属于目标 server/location。Nginx 原生模块的 exporter 和 service.name 是实例共享的，因此同一受管实例的多个站点必须使用一致的 backend、endpoint、collectorEndpoint、serviceName、modulePath、trustedCA 和 tokenEnv；不一致会拒绝。每个站点的开关、路径和采样率可以不同，Span 附带 `rumable.site.id`。
+加载模块属于 main 层，exporter 和 service.name 属于 http 层，采集开关和上下文传播属于目标 server/location。自动挂接将 load_module 放在实际主配置文件开头，即使 http 块位于后续 include 文件中，也保证在 events/http 之前加载。业务 include 与主文件可能同时变更，预览、备份和撤销覆盖每个文件。Nginx 原生模块的 exporter 和 service.name 是实例共享的，因此同一受管实例的多个站点必须使用一致的 backend、endpoint、collectorEndpoint、serviceName、modulePath、trustedCA 和 tokenEnv；不一致会拒绝。每个站点的开关、路径和采样率可以不同，Span 附带 `rumable.site.id`。
 
 第一个配置站点拥有共享 exporter/module 入口，需先挂接它；后续站点复用，不重复定义 exporter。其他站点仍依赖该入口时禁止撤销拥有者的首次挂接。停用拥有者的采集不会移除入口，不影响其他站点。已完成撤销挂接的旧站点不再占用 exporter 配置；未完成的挂接必须先恢复。跨不同 state-dir 同时管理同一实例不受支持。已有未受管 OTel 配置需要先人工处理，工具不会接管。
 
-已加载模块的路径必须与 `modulePath` 的绝对路径一致；相对 LoadModule/load_module 入口需要先人工统一。多站点共享实例修改 exporter 参数时，应先停用并按挂接逆序撤销依赖站点，再重新规划一致的配置，不能逐站点切换共享出口。
-
-## Apache 模块和自动挂接
-
-社区 webserver/v1.0.4 的进程 SDK 初始化会绕过后续请求的目录级开关。Rumable 提供最小修复：每个请求在初始化/复用 SDK 前检查有效站点/路径开关，关闭的请求不创建 Span；同时跳过关闭配置的无效 exporter 校验。模块导出 `rumable-apache-isolation-v1` 能力标记，自动预检拒绝没有该修复的模块。
-
-使用官方 [webserver/v1.0.4 源码和 SDK 发布包](https://github.com/open-telemetry/opentelemetry-cpp-contrib/releases/tag/webserver/v1.0.4)，解压 SDK（发布附件内可能还有一层 tgz），执行：
-
-```sh
-# APACHE_IMAGE 必须与目标 Apache/发行版匹配；当前构建脚本以 Debian 系 httpd 镜像为基线。
-APACHE_IMAGE=httpd:2.4 bash scripts/build-apache-otel.sh \
-  /path/opentelemetry-cpp-contrib/instrumentation/otel-webserver-module \
-  /path/opentelemetry-webserver-sdk \
-  /path/new-apache-otel-output
-```
-
-输出 `/path/new-apache-otel-output/otel` 包含已修复模块、SDK 依赖和 SHA256SUMS。按 SDK 的目录结构安装到 `/opt/otel`，校验摘要，把 `sdk_lib/lib` 加入 Apache 服务的动态库搜索路径或系统 loader 配置；保留第三方许可。模块和 SDK 库需由管理员管理，worker 只有读取权限。Agent 的 logs 目录需允许对应 Apache worker 写入，按目标服务身份设置权限；不要使 SDK 二进制全局可写。
-
-然后使用 Apache 示例执行同样的 render → attach 预览/确认 → enable。模块只加载一次，全局默认 OFF，只有目标 LocationMatch 开启。未选择的 VirtualHost、路径和 SDK 资源不插桩。共享实例的 exporter 参数须一致，避免 SDK 的进程级配置取决于请求先后次序。每次 configtest 后使用 graceful，不重启整台主机。首次挂接会先进行独立的 LoadModule 原生装载预检，ABI/动态库错误在业务文件写入前拒绝。
+已加载模块的路径必须与 `modulePath` 的绝对路径一致；相对 load_module 入口需要先人工统一。多站点共享实例修改 exporter 参数时，应先停用并按挂接逆序撤销依赖站点，再重新规划一致的配置，不能逐站点切换共享出口。
 
 ## IIS 安装和操作
 
@@ -178,13 +164,13 @@ rumable rollback --attachment        # Linux：确认后恢复首次业务配置
 
 原有 RUM 部署不带 OTel 模块入口，不能仅补一张表后假定已经挂接。升级时先停用并撤销原自动挂接，保留旧状态备份和缓存所需资产，然后以新站点 ID/状态目录重新 render、预览及挂接；IIS 残留的旧资源映射需按原部署记录审查处理。不会静默删除旧配置或接管未知规则。
 
-单组件命令保留另一组件已部署的参数与开关，不应用其尚未部署的 TOML 修改。IIS 的 RUM 单组件操作还保留已部署的 Dataway Token，不重新读取当前进程的 Token，也不重新检查未变化的 Agent/接收端；OTel 环境不变时不会回收池。普通 enable/enable --component otel 才应用 Token 轮换。rollback 会检查目标 Agent/池条件，并使用已保存凭据，无需当前 Token 环境变量。所有多站点命令应显式传入 --site。
+单组件命令保留另一组件已部署的参数与开关，不应用其尚未部署的 TOML 修改。`enable/disable --component otel` 同时保留已部署的浏览器 SDK 版本、初始化脚本和 CDN 地址；更新 Web SDK 时使用普通 `enable` 或 `enable --component rum`。Nginx/IIS 的 RUM 单组件操作不因未变更的 OTel 接收端不可达而失败，服务器配置检查与提交后的 HTTP 探测仍执行。IIS 的 RUM 单组件操作还保留已部署的 Dataway Token，不重新读取当前进程的 Token，也不重新检查未变化的 Agent/接收端；OTel 环境不变时不会回收池。普通 enable/enable --component otel 才应用 Token 轮换。rollback 会检查目标 Agent/池条件，并使用已保存凭据，无需当前 Token 环境变量。所有多站点命令应显式传入 --site。
 
 配置检查、提交、reload/池回收、HTTP 探测失败时恢复本次受管变更；首次挂接的候选配置令原生解析失败时，也会在来源与受管字节未漂移的前提下恢复原文件。发现外部修改时停止覆盖并保留事务。HTTP 探测每次重新建立连接，Linux 专属配置生效探针进一步区分新旧 worker，并在相隔 200ms 的连续两轮均成功后才确认启停，覆盖 Nginx 先启动新 worker、再通知旧 worker 退出的窗口。停用不保证中止已有请求，已排队的 Span 可以继续上报。
 
 预检的接收地址检查目前是 TCP 可达；probe 校验 HTTP 和受管配置是否生效，不能证明 OTLP 鉴权成功或观测云入库。向应用发带已知 W3C traceparent 的请求，在观测云搜索该 Trace ID，确认 service.name 和上下游关系，才算接入验收。浏览器关联还需在 RUM 中设置 allowedTracingUrls / w3c_traceparent，并满足跨域请求要求。
 
-Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像为 arm64、Apache 镜像为 amd64，Collector 使用 Linux arm64；需 Go 和 OrbStack/Docker。有源码时直接构建 CLI，二进制包可用 RUMABLE_BINARY 指向与测试容器架构匹配的 Linux 可执行文件。脚本：[smoke-otel.sh](../scripts/smoke-otel.sh)，使用真实原生模块和 Collector、私有 OTLP HTTP 接收夹具，覆盖独立开关、站点/路径隔离、升级及回滚。Windows 实机脚本：[windows-otel-smoke.ps1](../scripts/windows-otel-smoke.ps1)：
+Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像和 Collector 均使用 Linux arm64；需 Go 和 OrbStack/Docker。有源码时直接构建 CLI，二进制包可用 RUMABLE_BINARY 指向与测试容器架构匹配的 Linux 可执行文件。脚本：[smoke-otel.sh](../scripts/smoke-otel.sh)，使用真实原生模块和 Collector、私有 OTLP HTTP 接收夹具，覆盖独立开关、站点/路径隔离、升级及回滚。Windows 实机脚本：[windows-otel-smoke.ps1](../scripts/windows-otel-smoke.ps1)：
 
 ```powershell
 .\scripts\windows-otel-smoke.ps1 -Binary C:\Rumable\rumable.exe `

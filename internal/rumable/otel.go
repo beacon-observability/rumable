@@ -20,19 +20,20 @@ import (
 
 // OTel describes server instrumentation. Credentials never enter browser assets.
 type OTel struct {
-	Enabled           bool     `json:"enabled" toml:"enabled"`
-	Backend           string   `json:"backend" toml:"backend"`
-	Endpoint          string   `json:"endpoint" toml:"endpoint"`
-	ServiceName       string   `json:"serviceName" toml:"serviceName"`
-	SampleRate        *float64 `json:"sampleRate,omitempty" toml:"sampleRate"`
-	Include           []string `json:"includePaths,omitempty" toml:"includePaths"`
-	Exclude           []string `json:"excludePaths,omitempty" toml:"excludePaths"`
-	ModulePath        string   `json:"modulePath,omitempty" toml:"modulePath"`
-	AgentPath         string   `json:"agentPath,omitempty" toml:"agentPath"`
-	Runtime           string   `json:"runtime,omitempty" toml:"runtime"`
-	CollectorEndpoint string   `json:"collectorEndpoint,omitempty" toml:"collectorEndpoint"`
-	TokenEnv          string   `json:"tokenEnv,omitempty" toml:"tokenEnv"`
-	TrustedCA         string   `json:"trustedCA,omitempty" toml:"trustedCA"`
+	Enabled           bool         `json:"enabled" toml:"enabled"`
+	Backend           string       `json:"backend" toml:"backend"`
+	Endpoint          string       `json:"endpoint" toml:"endpoint"`
+	ServiceName       string       `json:"serviceName" toml:"serviceName"`
+	SampleRate        *float64     `json:"sampleRate,omitempty" toml:"sampleRate"`
+	Include           []string     `json:"includePaths,omitempty" toml:"includePaths"`
+	Exclude           []string     `json:"excludePaths,omitempty" toml:"excludePaths"`
+	ModulePath        string       `json:"modulePath,omitempty" toml:"modulePath"`
+	AgentPath         string       `json:"agentPath,omitempty" toml:"agentPath"`
+	Runtime           string       `json:"runtime,omitempty" toml:"runtime"`
+	CollectorEndpoint string       `json:"collectorEndpoint,omitempty" toml:"collectorEndpoint"`
+	TokenEnv          string       `json:"tokenEnv,omitempty" toml:"tokenEnv"`
+	TrustedCA         string       `json:"trustedCA,omitempty" toml:"trustedCA"`
+	Install           *OTelInstall `json:"install,omitempty" toml:"install"`
 }
 
 func (o *OTel) rate() float64 {
@@ -55,6 +56,10 @@ func (o *OTel) validate(s Site) error {
 	if o == nil {
 		return nil
 	}
+	if err := o.Install.validate(); err != nil {
+		return err
+	}
+
 	if o.Backend != "datakit" && o.Backend != "dataway" {
 		return errors.New("otel.backend must be datakit or dataway")
 	}
@@ -100,15 +105,15 @@ func (o *OTel) validate(s Site) error {
 		if s.IIS == nil {
 			c, err := endpoint(o.CollectorEndpoint)
 			if err != nil || c.Port() == "" || (c.Path != "" && c.Path != "/") {
-				return errors.New("Nginx/Apache Dataway requires collectorEndpoint: an existing OTLP/gRPC Collector origin")
+				return errors.New("Nginx Dataway requires collectorEndpoint: an existing OTLP/gRPC Collector origin")
 			}
 		} else if o.CollectorEndpoint != "" {
 			return errors.New("IIS sends OTLP/HTTP directly to Dataway; omit collectorEndpoint")
 		}
 	}
 	if s.IIS != nil {
-		if o.AgentPath == "" || o.ModulePath != "" || o.TrustedCA != "" {
-			return errors.New("IIS OTel requires agentPath, with no modulePath or trustedCA (use Windows trust store)")
+		if o.ModulePath != "" || o.TrustedCA != "" {
+			return errors.New("IIS OTel accepts agentPath, with no modulePath or trustedCA (use Windows trust store)")
 		}
 		if o.Runtime != "netframework" && o.Runtime != "dotnet" {
 			return errors.New("IIS otel.runtime must be netframework or dotnet")
@@ -117,18 +122,14 @@ func (o *OTel) validate(s Site) error {
 			return errors.New("IIS OTel instruments the dedicated application pool; path filters are not supported")
 		}
 	} else {
-		if !path.IsAbs(o.ModulePath) || o.AgentPath != "" || o.Runtime != "" {
-			return errors.New("Linux OTel requires an absolute modulePath, with no agentPath or runtime")
+		if (o.ModulePath != "" && !path.IsAbs(o.ModulePath)) || o.AgentPath != "" || o.Runtime != "" {
+			return errors.New("Linux OTel modulePath must be absolute when set, with no agentPath or runtime")
 		}
-		if s.Apache != nil && o.rate() != 0 && o.rate() != 100 {
-			return errors.New("Apache native OTel sampler supports only 0 or 100; use Collector tail sampling for other rates")
-		}
+
 		if o.TrustedCA != "" && (!path.IsAbs(o.TrustedCA) || !strings.HasPrefix(o.nativeEndpoint(s), "https://")) {
 			return errors.New("otel.trustedCA requires an absolute Linux CA path and an HTTPS native exporter endpoint")
 		}
-		if s.Apache != nil && strings.HasPrefix(o.nativeEndpoint(s), "https://") && o.TrustedCA == "" {
-			return errors.New("Apache HTTPS OTel exporter requires an explicit trustedCA PEM file")
-		}
+
 		if o.Backend == "dataway" {
 			c, _ := url.Parse(o.CollectorEndpoint)
 			if c.Scheme != "http" || (c.Hostname() != "127.0.0.1" && c.Hostname() != "localhost") {
@@ -167,12 +168,8 @@ func probeOTelState(n Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if n.Site.Nginx != nil {
-		if string(p.Body) != n.otelGeneration() {
-			return errors.New("Nginx OTel configuration has not become active; waiting for graceful reload")
-		}
-	} else if p.Header.Get("X-Rumable-OTel") != n.otelGeneration() {
-		return errors.New("Apache OTel configuration has not become active; waiting for graceful reload")
+	if string(p.Body) != n.otelGeneration() {
+		return errors.New("Nginx OTel configuration has not become active; waiting for graceful reload")
 	}
 	return nil
 }
@@ -256,7 +253,7 @@ func otelPreflight(root string, s Site) error {
 	}
 	if s.IIS == nil {
 		if runtime.GOOS != "linux" {
-			return errors.New("native Nginx/Apache OTel activation requires Linux")
+			return errors.New("native Nginx OTel activation requires Linux")
 		}
 		f, err := os.Stat(s.OTel.ModulePath)
 		if err != nil || !f.Mode().IsRegular() {
@@ -296,12 +293,7 @@ func checkOTelModule(s Site) error {
 	if err != nil || module.Type != elf.ET_DYN {
 		return errors.New("otel.modulePath must be a Linux ELF shared module")
 	}
-	if s.Apache != nil && module.Machine != elf.EM_X86_64 {
-		return errors.New("Apache OTel currently requires a Linux x64 module/SDK")
-	}
-	if s.Apache != nil && !bytes.Contains(b, []byte("rumable-apache-isolation-v1")) {
-		return errors.New("Apache OTel module lacks the per-request isolation fix; build it with scripts/build-apache-otel.sh before attachment/enable")
-	}
+
 	if s.Nginx != nil && strings.HasPrefix(s.OTel.nativeEndpoint(s), "https://") && !bytes.Contains(b, []byte("trusted_certificate")) {
 		return errors.New("HTTPS OTel export requires ngx_otel_module 0.1.2+ with TLS support; use a compatible module or a local plaintext Collector")
 	}

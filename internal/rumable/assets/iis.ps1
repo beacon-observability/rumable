@@ -115,7 +115,10 @@ try {
         $virtual = $application.VirtualDirectories[$vpath]
         # Keep managed assets reachable for already cached HTML, even when
         # rolling back to the original disabled snapshot without a mapping.
-        if ($null -ne $virtual -and $null -ne $snapshot.virtualDirectory -and $snapshot.virtualDirectory -cne $current.virtualDirectory) { $application.VirtualDirectories.Remove($virtual) }
+        if ($null -ne $virtual -and $snapshot.virtualDirectory -cne $current.virtualDirectory -and ($null -ne $snapshot.virtualDirectory -or $request.removeMapping)) {
+            if ($request.removeMapping -and $virtual.PhysicalPath -ne (Join-Path $request.root 'public')) { throw 'Uninstall refuses a virtual directory owned by another deployment.' }
+            $application.VirtualDirectories.Remove($virtual)
+        }
         if ($null -ne $snapshot.virtualDirectory -and $snapshot.virtualDirectory -cne $current.virtualDirectory) {
             [xml]$doc = $snapshot.virtualDirectory
             if ($doc.DocumentElement.GetAttribute('path') -ne $vpath -or $doc.DocumentElement.GetAttribute('physicalPath') -ne (Join-Path $request.root 'public')) { throw 'Invalid virtual directory in snapshot.' }
@@ -163,7 +166,45 @@ try {
     }
     Assert-LocalOwned $rules $before.rules
     Assert-LocalOwned $preconditions $before.preconditions
-    if ($request.action -eq 'check') {
+    if ($request.action -eq 'dependency-check') {
+        $dependency = [string]$request.dependencyPath
+        if (-not [IO.Path]::IsPathRooted($dependency)) { throw 'Expected absolute dependency path.' }
+        foreach ($candidate in $manager.ApplicationPools) {
+            foreach ($entry in $candidate.GetCollection('environmentVariables')) {
+                if (([string]$entry.GetAttributeValue('value')).IndexOf($dependency,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw ('OTel dependency is still referenced by application pool ' + $candidate.Name + '; refusing removal.') }
+            }
+        }
+        $globalModules = @($config.GetSection('system.webServer/globalModules').GetCollection() | ForEach-Object { [string]$_.GetAttributeValue('name') })
+        if ($globalModules -contains 'AspNetCoreModule' -or $globalModules -contains 'AspNetCoreModuleV2') {
+            foreach ($candidateSite in $manager.Sites) {
+                foreach ($candidateApp in $candidateSite.Applications) {
+                    $candidateConfig = $manager.GetWebConfiguration($candidateSite.Name,$candidateApp.Path)
+                    foreach ($entry in $candidateConfig.GetSection('system.webServer/aspNetCore').GetCollection('environmentVariables')) {
+                        if (([string]$entry.GetAttributeValue('value')).IndexOf($dependency,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw 'OTel dependency is still referenced by ASP.NET Core application environment; refusing removal.' }
+                    }
+                }
+            }
+        }
+        foreach ($value in [Environment]::GetEnvironmentVariables('Machine').Values) {
+            if (([string]$value).IndexOf($dependency,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw 'OTel dependency is still referenced by machine environment; refusing removal.' }
+        }
+        foreach ($service in @('WAS','W3SVC')) {
+            $servicePath = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $service
+            if (-not (Test-Path -LiteralPath $servicePath)) { continue }
+            foreach ($entry in @((Get-ItemProperty -LiteralPath $servicePath).Environment)) {
+                if (([string]$entry).IndexOf($dependency,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw 'OTel dependency is still referenced by WAS/W3SVC; refusing removal.' }
+            }
+        }
+        $before | ConvertTo-Json -Depth 30 -Compress
+    } elseif ($request.action -eq 'install-check') {
+        if ($null -eq $site.otel) { throw 'Configure OTel before installing the Agent.' }
+        $pool = Get-OTelPool
+        if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { throw 'IIS OTel requires Windows x64.' }
+        $users = @($manager.Sites | ForEach-Object { $_.Applications } | Where-Object { $_.ApplicationPoolName -ieq $pool.Name })
+        if ($users.Count -ne 1) { throw 'IIS OTel requires a dedicated application pool.' }
+        Assert-OTelExternalEnvironment
+        $before | ConvertTo-Json -Depth 30 -Compress
+    } elseif ($request.action -eq 'check') {
         if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
         if ($rumWanted -and $compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
         if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool -SavedCredentials:([bool]$request.restoringOTel) }

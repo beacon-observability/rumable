@@ -119,25 +119,6 @@ func TestAttachmentRejectsNamespaceOwnedByAnotherDeployment(t *testing.T) {
 	if _, _, err := c.planNginx("/state", testSite(), "", ""); err != nil {
 		t.Fatal("different site sharing an id prefix was rejected", err)
 	}
-	s := testSite()
-	s.Nginx = nil
-	s.Apache = &Apache{Binary: "httpd"}
-	name := filepath.Join(t.TempDir(), "httpd.conf")
-	for _, filter := range []string{"RUMABLE_test", "RUMABLE_other"} {
-		b := []byte("<VirtualHost *:443>\nServerName example.com\n</VirtualHost>\n<VirtualHost *:81>\nLuaOutputFilter " + filter + " /other.lua inject\n</VirtualHost>\n")
-		if err := os.WriteFile(name, b, 0644); err != nil {
-			t.Fatal(err)
-		}
-		tree, err := apacheAttachmentTree(name, b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		c := &attachConfig{root: tree, files: map[string][]byte{name: b}, uses: map[string]int{name: 1}}
-		_, _, err = c.planApache("/state", s, "", map[string]bool{name + ":1": true})
-		if (err == nil) != (filter == "RUMABLE_other") {
-			t.Fatalf("namespace isolation %s: %v", filter, err)
-		}
-	}
 }
 
 func TestAttachmentSourceAndBackupConflicts(t *testing.T) {
@@ -194,63 +175,7 @@ func TestAttachmentSourceAndBackupConflicts(t *testing.T) {
 		t.Fatal("archive conflict lost bytes")
 	}
 }
-func TestAttachmentApacheActiveVhostAndBoundedEdits(t *testing.T) {
-	name := filepath.Join(t.TempDir(), "apache.conf")
-	source := `FilterDeclare GZIP CONTENT_SET
-FilterProvider GZIP DEFLATE "%{CONTENT_TYPE} =~ m|^text/html|"
-FilterChain +GZIP
-<VirtualHost *:443>
- ServerName example.com
- ProxyPass / http://backend/
- <Location "/existing">
-  Header set X-Business "preserved"
- </Location>
-</VirtualHost>
-<VirtualHost *:81>
- ServerName other.test
- FilterDeclare GZIP CONTENT_SET
- SetOutputFilter DEFLATE
-</VirtualHost>
-`
-	if err := os.WriteFile(name, []byte(source), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tree, err := apacheAttachmentTree(name, []byte(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := &attachConfig{root: tree, files: map[string][]byte{name: []byte(source)}, uses: map[string]int{name: 1}}
-	s := testSite()
-	s.Nginx = nil
-	s.Apache = &Apache{Binary: "httpd"}
-	active := map[string]bool{}
-	for _, n := range nodeDirect(tree, "VirtualHost") {
-		active[n.key()] = true
-	}
-	files, _, err := c.planApache("/state", s, "", active)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := string(files[0].After)
-	if strings.Index(result, `ProxyPass "/__rumable__/test/" !`) > strings.Index(result, "ProxyPass / http:") {
-		t.Fatal("proxy exclusion came too late")
-	}
-	if strings.Index(result, "/apache.conf\"") < strings.Index(result, `Header set X-Business`) {
-		t.Fatal("managed Location rules came before business rules")
-	}
-	if !strings.HasSuffix(result, source[strings.Index(source, "<VirtualHost *:81>"):]) {
-		t.Fatal("other vhost changed")
-	}
-	// Without an explicit stage this DEFLATE provider defaults to RESOURCE on
-	// old Apache, compressing before injection and defeating the body filter.
-	tree.children = tree.children[1:]
-	if _, _, err = c.planApache("/state", s, "", active); err == nil {
-		t.Fatal("untyped compression chain was accepted")
-	}
-	if _, _, err = c.planApache("/state", s, "", map[string]bool{}); err == nil {
-		t.Fatal("inactive vhost selected")
-	}
-}
+
 func TestAttachmentConfirmationAndRecoveryConflict(t *testing.T) {
 	var out bytes.Buffer
 	if confirmAttachment(&out, strings.NewReader("no\n"), false, false) == nil {
@@ -281,41 +206,5 @@ func TestAttachmentConfirmationAndRecoveryConflict(t *testing.T) {
 	live, _ := os.ReadFile(name)
 	if string(live) != "business edit\n" {
 		t.Fatal("conflict changed server file")
-	}
-}
-
-func TestApacheAttachmentKeepsNativeIncludeContexts(t *testing.T) {
-	dir := t.TempDir()
-	main := filepath.Join(dir, "httpd.conf")
-	target := filepath.Join(dir, "target.conf")
-	other := filepath.Join(dir, "other.conf")
-	sources := map[string]string{
-		main:   "<VirtualHost *:443>\n Include " + apacheQuote(target) + "\n</VirtualHost>\n<VirtualHost *:444>\n ServerName other.test\n Include " + apacheQuote(other) + "\n</VirtualHost>\n",
-		target: "ServerName example.com\n",
-		other:  "SetOutputFilter DEFLATE\n",
-	}
-	for name, text := range sources {
-		if err := os.WriteFile(name, []byte(text), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	dump := []byte("Included configuration files:\n  (*) " + main + "\n    (2) " + target + "\n    (6) " + other + "\n")
-	c, aliases, err := apacheAttachmentConfig(dump)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := testSite()
-	s.Nginx = nil
-	s.Apache = &Apache{Binary: "httpd"}
-	files, selected, err := c.planApache("/state", s, "", map[string]bool{aliases[main] + ":1": true, aliases[main] + ":4": true})
-	if err != nil {
-		t.Fatal("other vhost's included filter was treated as global", err)
-	}
-	if selected != aliases[main]+":1" || len(files) != 1 || files[0].Path != aliases[main] {
-		t.Fatal("included ServerName did not select its owning vhost")
-	}
-	// A future native dump format must not silently lose inheritance context.
-	if _, _, err := apacheAttachmentConfig([]byte(strings.Replace(string(dump), "    (6)", "    (99)", 1))); err == nil {
-		t.Fatal("unresolved include context accepted")
 	}
 }

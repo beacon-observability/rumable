@@ -2,12 +2,8 @@
 # Automatic first attachment, isolated native services, and original-file recovery.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-kind=${SERVER:-nginx}
-case "$kind" in
- nginx) image=${NGINX_IMAGE:-nginx:1.28-alpine}; native=/usr/sbin/nginx;;
- apache) image=${APACHE_IMAGE:-httpd:2.4}; native=/usr/local/apache2/bin/httpd;;
- *) echo 'SERVER must be nginx or apache' >&2; exit 1;;
-esac
+image=${NGINX_IMAGE:-nginx:1.28-alpine}
+native=/usr/sbin/nginx
 work=$(mktemp -d "${TMPDIR:-/tmp}/rumable-attach.XXXXXX")
 suffix=$(basename "$work" | tr '[:upper:]' '[:lower:]')
 server="$suffix-server"; fixture="$suffix-fixture"; network="$suffix-net"
@@ -30,7 +26,7 @@ cat > "$work/wrapper" <<SH
 #!/bin/sh
 case " \$* " in
  *" -t "*) if [ -f /work/attach/fail-test ]; then rm /work/attach/fail-test; echo 'intentional config failure' >&2; exit 1; fi;;
- *" -s reload "*|*" -k graceful "*)
+ *" -s reload "*)
  echo reload >> /work/attach/reloads
  if [ -f /work/attach/fail-reload ]; then rm /work/attach/fail-reload; echo 'intentional reload failure' >&2; exit 1; fi
  if [ -f /work/attach/fail-probe-next ]; then rm /work/attach/fail-probe-next; touch /work/attach/fail-probe; else rm -f /work/attach/fail-probe; fi;;
@@ -38,8 +34,7 @@ esac
 exec $native "\$@"
 SH
 chmod 755 "$work/wrapper"
-if [ "$kind" = nginx ]; then
- cat > "$work/native.conf" <<'NGINX'
+cat > "$work/native.conf" <<'NGINX'
 pid /work/attach/nginx.pid;
 error_log /dev/stderr warn;
 events {}
@@ -64,65 +59,12 @@ http {
  server { listen 19182; server_name other.test; location / { proxy_pass http://fixture:19181; } }
 }
 NGINX
-else
- cat > "$work/native.conf" <<'APACHE'
-ServerRoot /usr/local/apache2
-PidFile /work/attach/httpd.pid
-Listen 19180
-Listen 19182
-ServerName localhost
-LoadModule mpm_event_module modules/mod_mpm_event.so
-LoadModule unixd_module modules/mod_unixd.so
-LoadModule authz_core_module modules/mod_authz_core.so
-LoadModule alias_module modules/mod_alias.so
-LoadModule mime_module modules/mod_mime.so
-LoadModule headers_module modules/mod_headers.so
-LoadModule filter_module modules/mod_filter.so
-LoadModule lua_module modules/mod_lua.so
-LoadModule proxy_module modules/mod_proxy.so
-LoadModule proxy_http_module modules/mod_proxy_http.so
-LoadModule deflate_module modules/mod_deflate.so
-User daemon
-Group daemon
-ErrorLog /proc/self/fd/2
-LogLevel warn
-TypesConfig conf/mime.types
-FilterDeclare GZIP CONTENT_SET
-FilterProvider GZIP DEFLATE "%{CONTENT_TYPE} =~ m|^text/html|"
-FilterChain +GZIP
-<VirtualHost *:19180>
- ServerName 127.0.0.1
- Include /work/attach/target.conf
- DocumentRoot /work/attach/www
- <Directory /work/attach/www>
-  AllowOverride None
-  Require all granted
- </Directory>
- ProxyPreserveHost On
- RequestHeader set X-Tenant tenant-preserved
- ProxyPass /static.html !
- ProxyPass / http://fixture:19181/
-</VirtualHost>
-<VirtualHost *:19182>
- ServerName other.test
- Include /work/attach/other.conf
- ProxyPass / http://fixture:19181/
-</VirtualHost>
-APACHE
-fi
-printf '<Location "/">\n Header set X-Target preserved\n</Location>\n' > "$work/target.conf"
-printf 'SetOutputFilter DEFLATE\n' > "$work/other.conf"
 chmod 640 "$work/native.conf"
 cp "$work/native.conf" "$work/original.conf"
 docker network create "$network" >/dev/null
 docker run -d --name "$fixture" --network "$network" --network-alias fixture -p 127.0.0.1:19181:19181 -e RUMABLE_FIXTURE_ALLOW_CDN="${CDN:-0}" -e RUMABLE_FIXTURE_FAILURE_FILE=/work/attach/fail-probe -v "$work:/work/attach" --entrypoint /work/attach/fixture "$image" >/dev/null
-if [ "$kind" = nginx ]; then
- docker run -d --name "$server" --network "$network" -p 127.0.0.1:19180:19180 -p 127.0.0.1:19182:19182 -v "$work:/work/attach" --entrypoint "$native" "$image" -c /work/attach/native.conf -g 'daemon off;' >/dev/null
- args='["-c", "/work/attach/native.conf"]'
-else
- docker run -d --name "$server" --network "$network" -p 127.0.0.1:19180:19180 -p 127.0.0.1:19182:19182 -v "$work:/work/attach" --entrypoint "$native" "$image" -f /work/attach/native.conf -DFOREGROUND >/dev/null
- args='["-f", "/work/attach/native.conf"]'
-fi
+docker run -d --name "$server" --network "$network" -p 127.0.0.1:19180:19180 -p 127.0.0.1:19182:19182 -v "$work:/work/attach" --entrypoint "$native" "$image" -c /work/attach/native.conf -g 'daemon off;' >/dev/null
+args='["-c", "/work/attach/native.conf"]'
 for i in $(seq 1 60); do if curl -fsS http://127.0.0.1:19180/static.html >/dev/null 2>&1; then break; fi; sleep 0.25; done
 cat > "$work/site.toml" <<TOML
 schemaVersion = 1
@@ -131,7 +73,7 @@ id = "smoke"
 publicURL = "http://127.0.0.1:19180/"
 probePaths = ["/", "/static.html", "/stream", "/conditional", "/cache"]
 includePaths = ["/"]
-[sites.$kind]
+[sites.nginx]
 binary = "/work/attach/wrapper"
 args = $args
 attachmentReviewed = false
@@ -145,10 +87,8 @@ cache_counter() {
  sed -n 's/^[Xx]-[Ff]ixture-[Rr]equest: *//p' "$work/cache.headers" | tr -d '\r'
 }
 cli render
-if [ "$kind" = nginx ]; then
- warm=$(cache_counter); test -n "$warm" || fail 'missing cache counter'
- test "$(cache_counter)" = "$warm" || fail 'original cache did not warm'
-fi
+warm=$(cache_counter); test -n "$warm" || fail 'missing cache counter'
+test "$(cache_counter)" = "$warm" || fail 'original cache did not warm'
 cli attach --dry-run
 cmp "$work/native.conf" "$work/original.conf" || fail 'preview mutated server'
 expect_failure 'cancelled' cli attach < /dev/null
@@ -171,7 +111,7 @@ if (
 grep 'external backup' "$work/state/sites/smoke/attachment.json" >/dev/null || fail 'backup race lost bytes'
 cmp "$work/native.conf" "$work/original.conf" || fail 'backup conflict changed config'
 docker exec "$server" rm /work/attach/state/sites/smoke/attachment.json
-if [ "$kind" = nginx ] && docker exec "$server" "$native" -v 2>&1 | grep -q 'nginx/1.9.4$'; then
+if docker exec "$server" "$native" -v 2>&1 | grep -q 'nginx/1.9.4$'; then
  awk '{print; if ($0 == "http {") print " sub_filter unsafe replacement;"}' "$work/original.conf" > "$work/risky.conf"
  docker exec "$server" cp /work/attach/risky.conf /work/attach/native.conf
  expect_failure 'http-level sub_filter' cli attach --yes
@@ -180,7 +120,7 @@ if [ "$kind" = nginx ] && docker exec "$server" "$native" -v 2>&1 | grep -q 'ngi
  docker exec "$server" cp /work/attach/original.conf /work/attach/native.conf
 fi
 # Faults happen at candidate configtest/reload, after discovery has passed.
-# Nginx discovery uses -T; Apache uses -t DUMP_INCLUDES, so arm the wrapper only
+# Nginx discovery uses -T, so arm the wrapper only
 # when a managed marker is visible in the candidate.
 sed 's/if \[ -f \/work\/attach\/fail-test \];/if [ -f \/work\/attach\/fail-test ] \&\& grep -q "# BEGIN rumable-smoke" \/work\/attach\/native.conf;/' "$work/wrapper" > "$work/wrapper.next"
 docker exec "$server" cp /work/attach/wrapper.next /work/attach/wrapper
@@ -200,7 +140,7 @@ count=$(wc -l < "$work/reloads")
 cli attach --yes
 test "$(wc -l < "$work/reloads")" = "$count" || fail 'repeat attach reloaded'
 cli enable
-if [ "$kind" = nginx ]; then first=$(cache_counter); test "$(cache_counter)" != "$first" || fail 'automatic hook did not bypass warm cache'; fi
+first=$(cache_counter); test "$(cache_counter)" != "$first" || fail 'automatic hook did not bypass warm cache'
 cli probe
 curl -fsS --compressed http://127.0.0.1:19180/static.html | grep 'data-rumable="smoke"' >/dev/null || fail 'gzip static not injected'
 if curl -fsS http://127.0.0.1:19182/ | grep -q 'data-rumable='; then fail 'other site changed'; fi
@@ -243,15 +183,13 @@ cli enable
 cli disable
 cli rollback --attachment --yes
 cmp "$work/native.conf" "$work/original.conf" || fail 'reattach undo failed'
-if [ "$kind" = nginx ]; then
- # Graceful reloads acknowledge the signal before the new workers accept every
- # connection; old disabled workers and new cache-enabled workers may overlap.
- restored_ok=0
- for i in $(seq 1 30); do restored=$(cache_counter); if [ "$(cache_counter)" = "$restored" ]; then restored_ok=1; break; fi; sleep 0.1; done
- test "$restored_ok" = 1 || fail 'original cache behavior not restored by attachment undo'
-fi
+# Graceful reloads acknowledge the signal before the new workers accept every
+# connection; old disabled workers and new cache-enabled workers may overlap.
+restored_ok=0
+for i in $(seq 1 30); do restored=$(cache_counter); if [ "$(cache_counter)" = "$restored" ]; then restored_ok=1; break; fi; sleep 0.1; done
+test "$restored_ok" = 1 || fail 'original cache behavior not restored by attachment undo'
 if [ "${KEEP:-0}" = 1 ]; then
  if [ "${CDN:-0}" = 1 ]; then printf '\n[sites.sdk]\nsource = "cdn"\n' >> "$work/site.toml"; fi
  cli attach --yes; cli enable
 fi
-echo "PASS: automatic $kind attachment, consent, idempotence, compression, isolation, failure recovery, enable/disable/rollback, external-edit conflict, exact undo and retained backups ($image)"
+echo "PASS: automatic nginx attachment, consent, idempotence, compression, isolation, failure recovery, enable/disable/rollback, external-edit conflict, exact undo and retained backups ($image)"

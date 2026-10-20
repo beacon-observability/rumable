@@ -111,6 +111,9 @@ var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var initPattern = regexp.MustCompile(`^init\.[a-f0-9]{64}\.js$`)
 
 func validateSnapshot(n Snapshot, id string) error {
+	if n.Uninstall && (n.active() || n.Site.IIS == nil) {
+		return errors.New("invalid uninstall snapshot")
+	}
 	if n.Site.ID != id {
 		return errors.New("snapshot site mismatch")
 	}
@@ -147,33 +150,20 @@ func validateSnapshot(n Snapshot, id string) error {
 				return errors.New("incomplete Nginx snapshot")
 			}
 		}
-	} else if n.Site.Apache != nil {
-		if len(n.Files) != 1 || n.Files["apache.conf"] == nil {
-			return errors.New("invalid Apache snapshot files")
-		}
 	} else if len(n.Files) != 0 {
 		return errors.New("unexpected IIS snapshot files")
 	}
-	privateFilters := 0
 	for name, digest := range n.Assets {
 		allowed := strings.HasPrefix(name, "public/"+id+"/")
 		if n.Site.OTel != nil && name == "collector/"+id+"/otel."+digest+".json" && n.OTelCollector == name {
 			allowed = true
 		}
-		if n.Site.Apache != nil && name == "filters/"+id+"/filter."+digest+".lua" {
-			allowed = true
-			privateFilters++
-			if n.Enabled && !bytes.Contains(n.Files["apache.conf"], []byte("/"+name+"\" inject")) {
-				return errors.New("Apache filter reference does not match asset digest")
-			}
-		}
+
 		if path.Clean(name) != name || !allowed || strings.ContainsAny(name, "\\\x00") || !digestPattern.MatchString(digest) {
 			return errors.New("invalid asset path or digest in snapshot")
 		}
 	}
-	if n.Site.Apache != nil && n.Enabled && privateFilters != 1 {
-		return errors.New("enabled Apache snapshot requires its immutable filter")
-	}
+
 	if len(n.Assets) < 2 {
 		return errors.New("incomplete assets in snapshot")
 	}

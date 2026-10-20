@@ -11,7 +11,7 @@ import (
 )
 
 func TestInitialConfigurations(t *testing.T) {
-	for _, server := range []string{"nginx", "apache", "iis"} {
+	for _, server := range []string{"nginx", "iis"} {
 		for _, reporting := range []string{"openway", "datakit"} {
 			for _, full := range []bool{false, true} {
 				name := filepath.Join(t.TempDir(), "site.toml")

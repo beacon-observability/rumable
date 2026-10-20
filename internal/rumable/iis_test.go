@@ -8,9 +8,236 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+func TestOTelComponentKeepsDeployedBrowserVersion(t *testing.T) {
+	for _, cdn := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cdn=%t", cdn), func(t *testing.T) {
+			root := t.TempDir()
+			s := otelSite()
+			s.Nginx = nil
+			s.IIS = &IIS{Site: "Orders", Application: "/"}
+			s.OTel.ModulePath, s.OTel.AgentPath, s.OTel.Runtime = "", `C:\otel`, "netframework"
+			s.OTel.Enabled = false
+			oldSDK, oldBoot := []byte("/* previous SDK */"), []byte("/* previous bootstrap */")
+			var liveScript atomic.Value
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/old-sdk.js" {
+					w.Header().Set("Content-Type", "application/javascript")
+					_, _ = w.Write(oldSDK)
+					return
+				}
+				if strings.HasPrefix(r.URL.Path, s.assetPrefix()) {
+					w.Header().Set("Content-Type", "application/javascript")
+					data, err := os.ReadFile(filepath.Join(siteDir(root, s), "public", s.ID, filepath.Base(r.URL.Path)))
+					if err != nil {
+						http.NotFound(w, r)
+						return
+					}
+					_, _ = w.Write(data)
+					return
+				}
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = fmt.Fprint(w, "<html><head>"+scriptTag(s, liveScript.Load().(string))+"</head></html>")
+			}))
+			defer server.Close()
+			savedClient := httpClient
+			httpClient = server.Client()
+			t.Cleanup(func() { httpClient = savedClient })
+			if cdn {
+				s.SDK = SDKConfig{Source: "cdn", URL: server.URL + "/old-sdk.js"}
+			}
+			s.PublicURL, s.OTel.Endpoint = server.URL+"/", server.URL
+			st, err := prepare(root, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Model a deployment made by a previous CLI/SDK release, with different bytes.
+			st.Current.SDK = SDKInfo{Version: "3.0.0", Source: "https://cdn.example.com/3.0.0.js", SHA256: hash(oldSDK)}
+			st.Current.Script = s.assetPrefix() + "init." + hash(oldBoot) + ".js"
+			if cdn {
+				st.Current.SDKURL = s.SDK.URL
+			}
+			files := map[string][]byte{
+				"public/" + s.ID + "/sdk." + hash(oldSDK) + ".js":   oldSDK,
+				"public/" + s.ID + "/init." + hash(oldBoot) + ".js": oldBoot,
+			}
+			st.Current.Assets = map[string]string{}
+			for name, data := range files {
+				st.Current.Assets[name] = hash(data)
+			}
+			st.Current.Enabled = true
+			st.Current.Native = json.RawMessage(`{"otel":{"pool":"Dedicated","environment":{}}}`)
+			st.OriginalIIS = st.Current.Native
+			liveScript.Store(st.Current.Script)
+			if err = deployAssets(root, s, files); err != nil {
+				t.Fatal(err)
+			}
+			if err = saveState(root, st); err != nil {
+				t.Fatal(err)
+			}
+			live := st.Current.Native
+			saved := iisCommand
+			t.Cleanup(func() { iisCommand = saved })
+			iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
+				if action == "apply" {
+					liveScript.Store(extra["script"].(string))
+					live = json.RawMessage(`{"otel":{"pool":"Dedicated","environment":{"OTEL_SERVICE_NAME":"web"}}}`)
+				}
+				return live, nil
+			}
+			desired, active, err := componentSite(s, st.Current, "otel", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = apply(root, st, desired, active, "otel", io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			next, err := loadState(root, s.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !next.Current.OTelEnabled || !next.Current.Enabled || next.Current.Script != st.Current.Script || next.Current.SDK != st.Current.SDK || next.Current.SDKURL != st.Current.SDKURL {
+				t.Fatal("OTel-only enable silently upgraded the browser deployment")
+			}
+			for name, digest := range st.Current.Assets {
+				if next.Current.Assets[name] != digest {
+					t.Fatal("OTel-only deployment lost browser rollback assets", name)
+				}
+			}
+		})
+	}
+}
+
+func TestIISUninstallRecoveryAndArchive(t *testing.T) {
+	for _, failCleanup := range []bool{false, true} {
+		t.Run(fmt.Sprint(failCleanup), func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "state")
+			s := otelSite()
+			s.Nginx = nil
+			s.IIS = &IIS{Site: "Orders", Application: "/"}
+			s.OTel.ModulePath, s.OTel.AgentPath, s.OTel.Runtime = "", `C:\external-agent`, "netframework"
+			off := false
+			s.RUM.Enabled = &off
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+			s.PublicURL = server.URL + "/"
+			st, err := prepare(root, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":null,"compressionPresent":false,"compressionValue":null,"otel":{"pool":"Dedicated","environment":{}}}`)
+			disabled := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":"managed-mapping","compressionPresent":false,"compressionValue":null,"otel":{"pool":"Dedicated","environment":{}}}`)
+			active := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":"managed-mapping","compressionPresent":false,"compressionValue":null,"otel":{"pool":"Dedicated","environment":{"OTEL_SERVICE_NAME":"web"}}}`)
+			st.Current.OTelEnabled = true
+			st.Current.Native, st.OriginalIIS = active, original
+			if err = saveState(root, st); err != nil {
+				t.Fatal(err)
+			}
+			live := active
+			removed := false
+			saved := iisCommand
+			t.Cleanup(func() { iisCommand = saved })
+			iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
+				switch action {
+				case "inspect", "check":
+					return live, nil
+				case "apply":
+					live = disabled
+				case "restore":
+					if !sameJSON(extra["expected"].(json.RawMessage), live) {
+						t.Fatal("uninstall lost compare-before-write")
+					}
+					live = extra["snapshot"].(json.RawMessage)
+					removed = extra["removeMapping"] == true
+				case "activate":
+					if removed && failCleanup {
+						failCleanup = false
+						return nil, errors.New("cleanup activation failure")
+					}
+				default:
+					t.Fatal("unexpected action", action)
+				}
+				return live, nil
+			}
+			failure := failCleanup
+			err = uninstallSite(root, s, false, true, false, nil, io.Discard)
+			if failure {
+				if err == nil {
+					t.Fatal("cleanup failure was ignored")
+				}
+				if !sameJSON(live, disabled) {
+					t.Fatal("failed cleanup did not restore retained mapping")
+				}
+				if _, err = loadState(root, s.ID); err != nil {
+					t.Fatal("failed uninstall lost state", err)
+				}
+				err = uninstallSite(root, s, false, true, false, nil, io.Discard)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameJSON(live, original) {
+				t.Fatal("original IIS configuration not restored")
+			}
+			if _, err = loadState(root, s.ID); !os.IsNotExist(err) {
+				t.Fatal("live state not archived", err)
+			}
+			archives, _ := filepath.Glob(filepath.Join(root, "removed", s.ID+"-*", "state.json"))
+			if len(archives) != 1 {
+				t.Fatal("backup not preserved")
+			}
+			if err = uninstallSite(root, s, false, true, false, nil, io.Discard); err != nil {
+				t.Fatal("uninstall not idempotent", err)
+			}
+		})
+	}
+}
+
+func TestIISUninstallRetainsPreexistingAssetMapping(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	s := testSite()
+	s.Nginx = nil
+	s.IIS = &IIS{Site: "Existing", Application: "/"}
+	off := false
+	s.RUM.Enabled = &off
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	s.PublicURL = server.URL + "/"
+	st, err := prepare(root, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":"pre-existing mapping","compressionPresent":false,"compressionValue":null}`)
+	st.Current.Native, st.OriginalIIS = original, original
+	if err = saveState(root, st); err != nil {
+		t.Fatal(err)
+	}
+	saved := iisCommand
+	t.Cleanup(func() { iisCommand = saved })
+	iisCommand = func(_ string, _ Site, _ string, _ map[string]any) (json.RawMessage, error) { return original, nil }
+	if err = uninstallSite(root, s, false, true, false, nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loadState(root, s.ID); !os.IsNotExist(err) {
+		t.Fatal("deployment state not retired", err)
+	}
+	for name := range st.Current.Assets {
+		if _, err = os.Stat(filepath.Join(siteDir(root, s), filepath.FromSlash(name))); err != nil {
+			t.Fatal("pre-existing mapping's assets moved", err)
+		}
+	}
+}
 
 // This boundary runs the real transaction/journal code, with only the
 // Windows-only configuration API and process recycle replaced.

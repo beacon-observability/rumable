@@ -1,13 +1,13 @@
 # 部署、缓存与恢复
 
-本手册以下流程默认浏览器 RUM。服务端 OTel 的模块安装、自动加载、实例/应用池共享边界、Dataway Collector、组件启停与回滚限制见 [OTel 操作手册](otel.md)。纯 OTel 挂接不为 RUM 改写压缩、缓存或上游业务请求头。已有 OTel 表时，Linux attach 可按预览加载指定原生模块；软件安装与版本匹配仍由运维完成。
+本手册以下流程默认浏览器 RUM。服务端 OTel 的模块安装、自动加载、实例/应用池共享边界、Dataway Collector、组件启停与回滚限制见 [OTel 操作手册](otel.md)。纯 OTel 挂接不为 RUM 改写压缩、缓存或上游业务请求头。已有 OTel 表时，Linux attach 可按预览加载指定原生模块；可先执行 install-otel 自动准备并校验受管依赖；完整站点卸载使用 uninstall，详见[安装与卸载](otel-installation.md)。显式指定的外部依赖仍由运维维护。
 
 ## 首次挂接
 
 1. 创建观测云 Web 应用，取得对应上报方式的参数。只使用浏览器 Client Token，不使用管理 API Key。
 2. 明确目标站点、所有 HTML handler 与路径前缀；每个 handler 至少配置一个实际可访问的 `probePaths`。
-3. 使用 `init --server nginx|apache|iis --reporting openway|datakit` 生成精简 TOML，填写网站、服务器目标及上报值；高级参数需要时用新文件执行 init --full 或参考完整模板。`render` 到最终受管目录，终端直接列出可复制的 attach、enable 命令和人工挂接说明；该目录需在服务和工具使用的文件系统命名空间中保持同一路径。容器内应在容器内执行 CLI，或确保生成路径与挂载路径一致。
-4. Linux Nginx / Apache 执行 `attach`，预览并输入 yes 确认；复杂配置按生成的 `ATTACH.md` 人工挂接 include。Apache 先安装并加载所需模块，按 [Apache 手册](apache.md)审查输出过滤、代理路径和缓存影响。IIS 安装 URL Rewrite 2.x、准备管理员权限、静态资源读取 ACL、JavaScript MIME 和匿名访问。
+3. 使用 `init --server nginx|iis --reporting openway|datakit` 生成精简 TOML，填写网站、服务器目标及上报值；高级参数需要时用新文件执行 init --full 或参考完整模板。`render` 到最终受管目录，终端直接列出可复制的 attach、enable 命令和人工挂接说明；该目录需在服务和工具使用的文件系统命名空间中保持同一路径。容器内应在容器内执行 CLI，或确保生成路径与挂载路径一致。
+4. Linux Nginx 执行 `attach`，预览并输入 yes 确认；复杂配置按生成的 `ATTACH.md` 人工挂接 include。IIS 安装 URL Rewrite 2.x、准备管理员权限、静态资源读取 ACL、JavaScript MIME 和匿名访问。
 5. 执行 `enable`，自动完成预检、配置检查、生效和 HTTP 探测；独立 check 是可选的提前诊断步骤。自动 attach 完成后可直接启用；人工挂接须检查、加载并设置 attachmentReviewed=true。失败时按诊断解决压缩、CSP、缓存及现有规则冲突。
 6. 在 Chrome 验证 SDK 两个资源正常加载、初始化无报错，检查上报请求的 HTTPS/CORS、状态和响应，再在观测云确认入库。
 
@@ -26,21 +26,19 @@ rumable attach --target /etc/nginx/sites-available/example:12
 # 自动化流水线显式确认：attach --yes；仍打印差异，并在提交前重新识别配置。
 ```
 
-使用与服务一致的 binary、args、环境和权限，在 Linux 的实际配置命名空间执行。工具不安装软件、启用模块或猜测服务进程参数；从配置的 binary/args 调用 Nginx `-V/-T` 或 Apache `-v/-M/-t -D DUMP_INCLUDES/-S`，按 publicURL 的准确主机名和端口选择唯一 server/有效 VirtualHost。歧义时列出 FILE:LINE，要求显式 --target；这只选择候选，不能绕过安全检查。HTTPS 默认 443，HTTP 默认 80。多 IP 上同名同端口的站点也要求选择。变更后原行号可能变化，下次发现以新列表为准。
+使用与服务一致的 binary、args、环境和权限，在 Linux 的实际配置命名空间执行。工具不安装软件、启用模块或猜测服务进程参数；从配置的 binary/args 调用 Nginx `-V/-T`，按 publicURL 的准确主机名和端口选择唯一 server。歧义时列出 FILE:LINE，要求显式 --target；这只选择候选，不能绕过安全检查。HTTPS 默认 443，HTTP 默认 80。多 IP 上同名同端口的站点也要求选择。变更后原行号可能变化，下次发现以新列表为准。
 
 Nginx 在真实 http、目标 server 和现有 handler 中加入独立标记的 include，不创建竞争的业务 location。复制有效的父 proxy_set_header 列表时保留 Host、Authorization、自定义头和变量；已有局部列表保持其原来的继承边界。目标代理 handler 清除上游 Accept-Encoding、If-None-Match、If-Modified-Since 并设置 proxy_cache off；安装 gzip_static/brotli 模块时关闭目标 handler 的预压缩直出。这些首次挂接调整在普通 disable 后仍保留，完整撤销挂接才恢复原值，差异会明确展示。输出 gzip 可以继续使用。includePaths 控制注入，挂接调整作用于整个 handler，包括其中非 HTML/排除路径；需要较窄范围时使用独立业务 location 或人工挂接。
 
 自动合并支持常见静态和 proxy_pass 配置、嵌套 location 及简单 include。已有 sub_filter/局部验证头指令、if/rewrite、预压缩 try_files、FastCGI/uWSGI/SCGI/gRPC、SSI/附加正文等需要人工审查，报告文件和行号。Nginx 1.9.4 的 http 层 sub_filter 在写文件前即阻止，不能由 --yes 或 attachmentReviewed 放行。
 
-Apache 使用原生 -S 输出识别有效 VirtualHost；只在其开始加入资源 ProxyPass 排除，在末尾加入受管 include。普通前置 Location/Directory 和明确的 CONTENT_SET DEFLATE 链可以保留；需要的模块必须事先加载。已有不明过滤链、AddOutputFilterByType、SetOutputFilter、重写、.htaccess 覆盖或保留路径映射转为人工挂接。未展开的复杂配置和模块生成配置不能保证自动合并。include 按 DUMP_INCLUDES 的原生父文件、行号和递归层级展开，保持目标 VirtualHost 的实际继承关系；无法解析的上下文直接拒绝。全局 Directory/Location 或条件过滤声明仍采取保守检查，可能要求人工处理实际不影响本站的配置。
-
-同一 FILE:LINE 对应多个块时拒绝显式选择，需先将各块分行。首次挂接扫描整个有效配置中的本站 ID 标记、保留资源路径和变量/过滤器名称；发现其他目录或站点已占用相同名称时拒绝，不能用新的 state-dir 接管已有部署。
+同一 FILE:LINE 对应多个块时拒绝显式选择，需先将各块分行。首次挂接扫描整个有效配置中的本站 ID 标记、保留资源路径和 Nginx 变量名称；发现其他目录或站点已占用相同名称时拒绝，不能用新的 state-dir 接管已有部署。
 
 配置中的符号链接解析到真实文件，保留链接；被多处引用的待修改 include 拒绝自动修改，以免影响其他站点。先展示逐项增删差异和备份位置；输入 yes（或显式 --yes）后重新获取有效配置并核对全部读取文件的摘要，变化则要求重新预览。随后将完整原字节、文件模式及差异以 0600 保存到 `sites/<id>/attachment.json`，再原子替换业务配置，保留属主、组、模式和可读取的扩展属性（包括 ACL/SELinux 标签），拒绝直接替换符号链接及硬链接文件。使用同一个 state-dir 串行维护站点；外部配置工具也应在此期间停止修改配置。
 
 确认后还会核对部署状态、备份、符号链接指向及 Linux 文件身份/元数据；每次写入和重载前复查未受管输入。历史挂接备份采用排他创建，已有不同内容时停止覆盖。撤销及失败恢复重新识别有效 include 图，待恢复文件变为共享或无法确定归属时停止；未受管输入出现变化也停止并保留恢复记录。旧备份没有新增输入指纹时仍执行原字节/模式检查与已完成挂接的有效图检查。任意外部进程不遵守维护锁时不存在跨进程原子事务保证，不能在确认后继续并行发布服务器配置。
 
-候选须通过服务器配置检查，再做平滑重载并探测原页面、初始化脚本和所选 SDK 的 identity 和 gzip 版本。初始注入保持关闭，成功后才写入 attached 状态；enable 继续独立检查 CSP、注入和上报条件。配置检查、重载、HTTP/资源失败时恢复本次涉及文件并重新检查、重载、探测。中断或恢复失败保留 applying/restoring 记录，阻止普通部署操作，使用 `rollback --attachment` 重试；先按后文检查并移除确认已失效的进程锁。此命令与普通部署 rollback 相互独立。
+候选须通过服务器配置检查，再做平滑重载并探测原页面、初始化脚本和所选 SDK 的 identity 和 gzip 版本。初始注入保持关闭，成功后才写入 attached 状态；enable 继续独立检查 CSP、注入和上报条件。配置检查、重载、HTTP/资源失败时恢复本次涉及文件并重新检查、重载、探测。中断或恢复失败保留 applying/restoring 记录，阻止普通部署操作，使用 `rollback --attachment` 重试。多文件只恢复一部分时，磁盘上的临时配置可能无法通过 nginx -T；只要未受管输入未变且各受管文件仍匹配保存的 Before/After 字节，就能继续完成恢复；先按后文检查并移除确认已失效的进程锁。此命令与普通部署 rollback 相互独立。
 
 ```sh
 rumable disable
@@ -53,15 +51,9 @@ rumable rollback --attachment   # 展示撤销差异，输入 yes 后恢复首�
 
 ## 压缩与缓存
 
-Apache 采用 mod_lua 的请求级输出过滤器，在普通响应分块间保留至多 6 个待匹配字节，只插入首个脚本。Lua 文件内容寻址、独立保留，旧 worker 和旧页面不会读到升级时被原地替换的代码。源响应须未压缩，允许后续 DEFLATE；已压缩源、下载、非 HTML、非 GET/200 直接旁路。缺少锚点的正文保持不变，probe 报告未接入。
-
-Apache 启用后对 includePaths 减去 excludePaths/保留资源后的 GET/HEAD 请求清除 If-None-Match、If-Modified-Since、Range、If-Range；此时还不知道 MIME，因此范围内的非 HTML 请求也受影响，POST 等其他方法保留原条件头。选中 HTML 移除原 Content-Length、ETag、Last-Modified、Content-MD5、Digest、Accept-Ranges；HEAD 不注入正文，也会清理 HTML 的这些元数据，防止验证旧页面。原有 Host/Authorization/自定义头和安全响应头不被替换。
-
-如果 Apache 加载 mod_cache，启用时对整个目标 VirtualHost 设置 CacheQuickHandler off，并对每个 includePaths 前缀设置 CacheDisable，防止快速缓存绕过输出过滤和保存带旧脚本的页面。这项缓存绕过也涵盖前缀内的排除路径和非 HTML；停用会移除受管指令，恢复原缓存配置。外层代理/CDN/Service Worker 仍需清理 HTML。不可在后续业务配置覆盖这些缓存约束；详细挂接与验证见 [Apache 手册](apache.md)。
-
 Nginx 的过滤器处理源 HTML，然后可以由 Nginx 做输出 gzip。反代请求应清除 `Accept-Encoding`，同时保留原有 Host/认证/自定义请求头。清除上游条件请求头，防止上游 304 绕过新版本注入。静态站点不能直接选取 `.gz`/`.br` 文件；只有安装相应模块时才能写对应 `gzip_static off` / `brotli_static off` 指令。
 
-Nginx 注入同时检查实际 HTML MIME 与源响应的 Content-Encoding；父层 `sub_filter_types *` 不会让 Rumable 改写 JSON 或 JavaScript。需要保留的业务 sub_filter 必须与 location include 显式放在同一层；停用时保留一个动态空匹配规则，避免启停改变规则继承。业务规则自己的改写范围仍由原配置决定。
+Nginx 注入同时检查实际 HTML MIME 与源响应的 Content-Encoding；父层 `sub_filter_types *` 不会让 Rumable 改写 JSON 或 JavaScript。需要保留的业务 sub_filter 必须与 location include 显式放在同一层；停用时保留一个动态空匹配规则，避免启停改变规则继承；普通停用、`disable --component rum` 和修改 TOML 关闭 RUM 都遵守这一约束，缓存页面仍可获取字节未变的旧脚本。纯 OTel 首次挂接仍不添加 RUM 过滤器，也不额外要求 http_sub_module。业务规则自己的改写范围仍由原配置决定。
 
 `check` 在 identity 页面上预检源压缩和 CSP。提交后的探测及独立 `probe` 还请求 gzip 变体并解压核对注入与版本；`gzip_static on` 导致只有压缩页面未注入时，启用失败并恢复受管状态。`gzip_static always` 连 identity 页面也返回压缩内容，会在预检时直接拒绝。探测解压后的正文仍受 8 MiB 限制。Brotli 预压缩仍须人工关闭；这轮未增加 Brotli 解码器。
 
@@ -99,7 +91,7 @@ Nginx 活跃 HTML handler 关闭本地 ETag/条件日期处理；符合注入条
 
 成功后只保留当前和上一次成功快照。`rollback` 在两者之间切换；重复回滚会切回另一个快照。失败的变更不会占用成功历史。资源文件和已创建的同域资源映射保留，确保旧缓存页面仍能加载同域 SDK。CDN 快照保留实际 URL 和摘要，但外部内容由 CDN 管理，工具不能恢复被覆盖/删除的远程文件；固定版本和完整离线恢复优先使用默认 bundled，或不可变 CDN URL 加 SRI。详见[SDK 加载方式](configuration.md#sdk-加载方式)。
 
-Nginx / Apache 的 attachmentReviewed 只限制启用检查；首次 render 保存的 false 不阻止初始停用状态或回滚到该状态后的重复 disable。停用仍须通过有效 include、服务器配置和受管文件检查，不能用此绕过配置错误或漂移保护。
+Nginx 的 attachmentReviewed 只限制启用检查；首次 render 保存的 false 不阻止初始停用状态或回滚到该状态后的重复 disable。停用仍须通过有效 include、服务器配置和受管文件检查，不能用此绕过配置错误或漂移保护。
 
 工具在启停、回滚前检查受管文件与资源摘要。IIS 还比对所拥有规则、虚拟目录、局部压缩属性及 OTel 池名、身份、位数、CLR、管线、应用归属和插桩环境（含未受管 OTEL 信号覆盖项）。发现外部修改时拒绝覆盖；只修改业务无关配置不会被恢复流程回滚。
 
@@ -116,7 +108,7 @@ Nginx / Apache 的 attachmentReviewed 只限制启用检查；首次 render 保�
 
 IIS 没有跨配置提交与本地日志的分布式事务；遇到无法确认归属的状态，采用停止覆盖的保守恢复策略。备份中若存在旧 SDK 版本，使用对应发布包恢复，且保留版本化资源。
 
-IIS OTel 源码加固版本先提交配置、持久化快照，再以独立调用校验并回收目标池。重复启停或单独操作 RUM 不改变已部署 OTel 环境时，不回收。变更需等待旧 worker 退出（最多 15 秒）；回收/HTTP 失败时恢复原配置并重试原池代次。恢复尚未完成时保留事务，后续 rollback 会重试进程恢复，不以“配置值已经相同”认定成功。池未 Started、长请求阻止旧 worker 退出或存在外部修改时应先解决对应条件，不强制结束业务进程。详细条件和未重打 dist 的范围见 [OTel 手册](otel.md)。
+IIS OTel 先提交配置、持久化快照，再以独立调用校验并回收目标池。重复启停或单独操作 RUM 不改变已部署 OTel 环境时，不回收。变更需等待旧 worker 退出（最多 15 秒）；回收/HTTP 失败时恢复原配置并重试原池代次。恢复尚未完成时保留事务，后续 rollback 会重试进程恢复，不以“配置值已经相同”认定成功。池未 Started、长请求阻止旧 worker 退出或存在外部修改时应先解决对应条件，不强制结束业务进程。详细条件和发布包范围见 [OTel 手册](otel.md)。
 
 部署前可在独立 Windows VM 按 [Windows/IIS 验收手册](windows-acceptance.md)运行完整流程。脚本创建自己的站点、应用池及父子规则，模拟提交后的 HTTP 探测失败并验证恢复；不对整台 IIS 恢复配置备份。Keep 现场使用配套 windows-cleanup.ps1 按报告归属清理。
 

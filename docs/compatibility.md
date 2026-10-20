@@ -1,8 +1,8 @@
 # 平台与版本兼容性
 
-服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；Apache 为 Linux x64 并要求包含请求隔离修复的模块；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。安装原生模块不等于旧系统已经通过 OTel 运行验收。
+服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。安装原生模块不等于旧系统已经通过 OTel 运行验收。
 
-IIS 源码加固版本要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。已发布 preview.2 未包含本轮修复，见[验证记录](verification.md)。
+IIS OTel 要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。preview.3 包含对应修复；实际验收范围见[验证记录](verification.md)。
 
 ## 编译器与操作系统是两个独立约束
 
@@ -43,17 +43,6 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 
 符合注入条件的 HTML HEAD 使用与 GET 相同的过滤头部清理，不发送正文。方法 map 使用正则项，兼容旧版默认 map_hash_bucket_size。脚本探测同时验证 identity / gzip，旧的 .gz 资源或压缩缓存不能仅凭 identity 校验通过验收。
 
-## Apache
-
-- Linux **Apache 2.4.23+**，加载 lua_module、filter_module、alias_module、authz_core_module、headers_module；代理、gzip、缓存场景还需站点本身使用的模块。
-- 2.4.5 引入 LuaOutputFilter；2.4.23 提供用于确认有效挂接的 DUMP_INCLUDES。CLI 同时检查版本、已加载模块和受管 include 恰好一次；不因为 attachmentReviewed=true 放过缺失能力。
-- Apache 2.2、上游版本号低于 2.4.23 的发行版回移补丁包和 Windows Apache 不支持。最低能力版本不代表生产版本建议；CLI 的 Go/内核兼容性仍按上表单独判断。
-- 不依赖进程外过滤服务或修改业务代码。`mod_lua` 必须由运维预先安装、启用，工具不会自动安装系统模块。
-- 挂接仅限目标 VirtualHost，使用命名 RESOURCE smart filter；输出压缩须在 CONTENT_SET。旧版继承的 AddOutputFilterByType DEFLATE 可能先压缩，需按生成说明改为显式阶段的压缩链；gzip 注入缺失会使启用失败并恢复。其他输出过滤器和晚于 include 的 Location/.htaccess 可能改变顺序，必须覆盖所有 handler 进行探测。编码源响应不改写，UTF-16/32 和流式 SSR 不支持。
-- 启用时对目标路径绕过 mod_cache、清除 GET/HEAD 条件请求及 Range；HTML 的 HEAD 也清理原文验证头与长度。影响范围和停用恢复见 [Apache 手册](apache.md)。
-
-依据：[Lua 输出过滤器与分块接口](https://httpd.apache.org/docs/2.4/mod/mod_lua.html#luaoutputfilter)、[2.4.23 官方变更记录](https://archive.apache.org/dist/httpd/CHANGES_2.4.23)、[smart filter](https://httpd.apache.org/docs/2.4/mod/mod_filter.html)。实际运行版本、环境和限制见 [verification.md](verification.md)。
-
 ## IIS 与 PowerShell
 
 - 技术基线 **IIS 7.5+**，需要 **URL Rewrite 2.x**。IIS 10 是现代验收目标，7.5/8/8.5 是旧系统兼容目标，均需实际 Windows 验证。
@@ -71,7 +60,7 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 
 旧 Windows CLI 可运行，不意味着 IE 或旧版浏览器能运行当前 SDK。浏览器兼容性以官方 SDK 版本的要求为准；首版在本机 Chrome 验证，不承诺未经验证的 IE 支持。
 
-可选 CDN 加载不改变 Nginx/Apache/IIS 的最低版本或 CLI 的 Go 基线。浏览器另须能访问 HTTPS CDN，CSP 允许实际脚本地址；开启 integrity 还要求浏览器支持 SRI、跨域 CDN 支持 CORS。CDN 模式已在本机 Chrome 验证，不能据此扩展旧浏览器或 Windows/IIS 实机的验收结论。
+可选 CDN 加载不改变 Nginx/IIS 的最低版本或 CLI 的 Go 基线。浏览器另须能访问 HTTPS CDN，CSP 允许实际脚本地址；开启 integrity 还要求浏览器支持 SRI、跨域 CDN 支持 CORS。CDN 模式已在本机 Chrome 验证，不能据此扩展旧浏览器或 Windows/IIS 实机的验收结论。
 
 ## 验证状态
 
@@ -81,4 +70,8 @@ Windows 的可执行步骤和逐系统验收矩阵见 [windows-acceptance.md](wi
 
 ## 自动首次挂接
 
-仅 Linux 执行 `attach` / `rollback --attachment`，沿用 Nginx 1.9.4+ / Apache 2.4.23+ 和 Go 1.20 基线。macOS 可生成配置，Windows/IIS 接入流程保持原样。自动范围、压缩和缓存的持续影响、符号链接/共享 include、确认及外部编辑冲突见[操作手册](operations.md#自动首次挂接linux)。不能安全识别的模块/继承语义使用人工 ATTACH.md，不以自动化承诺支持任意配置。
+仅 Linux 执行 `attach` / `rollback --attachment`，沿用 Nginx 1.9.4+ 和 Go 1.20 基线。macOS 可生成配置，Windows/IIS 接入流程保持原样。自动范围、压缩和缓存的持续影响、符号链接/共享 include、确认及外部编辑冲突见[操作手册](operations.md#自动首次挂接linux)。不能安全识别的模块/继承语义使用人工 ATTACH.md，不以自动化承诺支持任意配置。
+
+### 自动依赖安装
+
+install-otel 在 Linux 支持 Nginx x64/ARM64 的准确版本 APT 包或校验过的离线包。Windows 安装固定 .NET Agent v1.17.0，仅 IIS 10 的 x64 Windows / x64、x86 池；不放宽旧 Windows/IIS 的 OTel 限制。CLI 的其他架构仍可用于 RUM/配置生成。平台矩阵和离线格式见[安装与卸载](otel-installation.md)。

@@ -13,7 +13,7 @@ import (
 
 func Run(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "rumable init|render|attach|check|enable|disable|status|rollback|probe|version\nStart: init --server nginx|apache|iis --reporting openway|datakit; edit TOML; render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach: --dry-run previews; --target FILE:LINE selects; --yes confirms without a prompt\nrollback --attachment: undo first attachment after disable\nenable/disable: --component all|rum|otel (default all)\nrender --collector-config: print Dataway Collector JSON without deployment changes\ninit: --full lists advanced SDK options; probe: --path / (optional)")
+		fmt.Fprintln(out, "rumable init|install-otel|render|attach|check|enable|disable|uninstall|status|rollback|probe|version\nStart: init --server nginx|iis --reporting openway|datakit; edit TOML; install-otel (optional); render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach/install-otel/uninstall: --dry-run previews; --yes confirms without a prompt\nattach: --target FILE:LINE selects a candidate\nuninstall: detach the whole site; --remove-dependencies also removes unchanged, unshared managed dependencies\nrollback --attachment: undo first attachment after disable\nenable/disable: --component all|rum|otel (default all)\nrender --collector-config: print Dataway Collector JSON without deployment changes\ninit: --full lists advanced SDK options; probe: --path / (optional)")
 		return nil
 	}
 	if args[0] == "version" {
@@ -25,7 +25,7 @@ func Run(args []string, out io.Writer) error {
 	}
 	cmd := args[0]
 	switch cmd {
-	case "init", "render", "attach", "check", "enable", "disable", "status", "rollback", "probe":
+	case "init", "install-otel", "uninstall", "render", "attach", "check", "enable", "disable", "status", "rollback", "probe":
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
@@ -47,9 +47,13 @@ func Run(args []string, out io.Writer) error {
 	}
 	var target *string
 	var yes, dry, attachmentUndo *bool
-	if cmd == "attach" || cmd == "rollback" {
-		yes = f.Bool("yes", false, "confirm the displayed attachment changes (noninteractive)")
-		dry = f.Bool("dry-run", false, "preview attachment changes without applying")
+	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" {
+		yes = f.Bool("yes", false, "confirm the displayed changes (noninteractive)")
+		dry = f.Bool("dry-run", false, "preview changes without applying")
+	}
+	var removeDependencies *bool
+	if cmd == "uninstall" {
+		removeDependencies = f.Bool("remove-dependencies", false, "also remove unchanged, unshared dependencies installed by Rumable")
 	}
 	if cmd == "attach" {
 		target = f.String("target", "", "candidate FILE:LINE when automatic site selection is ambiguous")
@@ -58,7 +62,7 @@ func Run(args []string, out io.Writer) error {
 		attachmentUndo = f.Bool("attachment", false, "undo/recover first attachment (disable first)")
 	}
 	if cmd == "init" {
-		server = f.String("server", "nginx", "nginx, apache or iis")
+		server = f.String("server", "nginx", "nginx or iis")
 		reporting = f.String("reporting", "openway", "openway or datakit")
 		full = f.Bool("full", false, "include advanced SDK settings")
 	}
@@ -99,7 +103,7 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	if *id == "" {
-		*id, err = selectSite(root, *config, cmd == "status" || cmd == "disable" || cmd == "rollback" || cmd == "probe" || cmd == "attach")
+		*id, err = selectSite(root, *config, cmd == "status" || cmd == "disable" || cmd == "rollback" || cmd == "probe" || cmd == "attach" || cmd == "uninstall")
 		if err != nil {
 			return err
 		}
@@ -179,6 +183,20 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	defer unlock()
+	if cmd == "uninstall" {
+		st, e := loadState(root, *id)
+		s := st.Current.Site
+		if os.IsNotExist(e) {
+			s, e = uninstalledSite(root, *id)
+			if os.IsNotExist(e) {
+				s, e = loadConfig(*config, *id)
+			}
+		}
+		if e != nil {
+			return e
+		}
+		return uninstallSite(root, s, *removeDependencies, *yes, *dry, os.Stdin, out)
+	}
 	if cmd == "rollback" {
 		st, err := loadState(root, *id)
 		if err != nil {
@@ -217,13 +235,17 @@ func Run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cmd == "install-otel" {
+		return installOTel(root, s, *yes, *dry, os.Stdin, out)
+	}
+	s = resolveOTelPaths(root, s)
 	if cmd == "render" {
 		if *collectorConfig {
 			n := Snapshot{}
 			files := map[string][]byte{}
 			renderOTelCollector(s, &n, files)
 			if n.OTelCollector == "" {
-				return errors.New("--collector-config requires Linux Nginx/Apache otel.backend=dataway")
+				return errors.New("--collector-config requires Linux Nginx otel.backend=dataway")
 			}
 			_, err := fmt.Fprintln(out, string(files[n.OTelCollector]))
 			return err

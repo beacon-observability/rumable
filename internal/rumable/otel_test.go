@@ -57,37 +57,25 @@ func TestOTelOnlyProbeDoesNotTreatJSONDocumentationAsInjection(t *testing.T) {
 }
 
 func TestOTelReloadProbeRequiresNewWorkerConfiguration(t *testing.T) {
-	for _, kind := range []string{"nginx", "apache"} {
-		t.Run(kind, func(t *testing.T) {
-			generation := "old-worker-generation"
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if kind == "nginx" {
-					_, _ = w.Write([]byte(generation))
-				} else {
-					w.Header().Set("X-Rumable-OTel", generation)
-					_, _ = w.Write([]byte("{}"))
-				}
-			}))
-			defer server.Close()
-			s := otelSite()
-			s.PublicURL = server.URL + "/"
-			if kind == "apache" {
-				s.Nginx = nil
-				s.Apache = &Apache{Binary: "httpd"}
-			}
-			n := Snapshot{Site: s, OTelEnabled: true}
-			if probeOTelState(n) == nil {
-				t.Fatal("old worker accepted after OTel-only change")
-			}
-			generation = n.otelGeneration()
-			if err := probeOTelState(n); err != nil {
-				t.Fatal("active worker not recognized", err)
-			}
-			n.OTelEnabled = false
-			if probeOTelState(n) == nil {
-				t.Fatal("enable and disable share a deployment marker")
-			}
-		})
+	generation := "old-worker-generation"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(generation))
+	}))
+	defer server.Close()
+	s := otelSite()
+	s.PublicURL = server.URL + "/"
+
+	n := Snapshot{Site: s, OTelEnabled: true}
+	if probeOTelState(n) == nil {
+		t.Fatal("old worker accepted after OTel-only change")
+	}
+	generation = n.otelGeneration()
+	if err := probeOTelState(n); err != nil {
+		t.Fatal("active worker not recognized", err)
+	}
+	n.OTelEnabled = false
+	if probeOTelState(n) == nil {
+		t.Fatal("enable and disable share a deployment marker")
 	}
 }
 
@@ -120,7 +108,7 @@ func TestOTelActivationRequiresStableWorkerGeneration(t *testing.T) {
 }
 
 func TestOTelExamplesLoadAndCollectorPreviewIsReadOnly(t *testing.T) {
-	for _, kind := range []string{"nginx", "apache", "iis"} {
+	for _, kind := range []string{"nginx", "iis"} {
 		s, err := loadConfig(filepath.Join("..", "..", "examples", "otel-"+kind+".toml"), "")
 		if err != nil || s.RUM.isEnabled() || !s.OTel.Enabled {
 			t.Fatalf("%s example: %v", kind, err)
@@ -165,15 +153,11 @@ modulePath="/opt/otel/module.so"
 }
 
 func TestOTelConfigurationBoundaries(t *testing.T) {
-	for _, platform := range []string{"nginx", "apache", "iis"} {
+	for _, platform := range []string{"nginx", "iis"} {
 		for _, backend := range []string{"datakit", "dataway"} {
 			t.Run(platform+"/"+backend, func(t *testing.T) {
 				s := otelSite()
-				if platform == "apache" {
-					s.Nginx = nil
-					s.Apache = &Apache{Binary: "httpd"}
-					s.OTel.ModulePath = "/opt/otel/libmod_apache_otel.so"
-				}
+
 				if platform == "iis" {
 					s.Nginx = nil
 					s.IIS = &IIS{Site: "Default Web Site", Application: "/"}
@@ -430,52 +414,6 @@ func TestOTelDetachedSiteReleasesExporterReservation(t *testing.T) {
 	n, _, err := render(root, next, false)
 	if err != nil || n.OTelOwner != next.ID || !strings.Contains(string(n.Files["http.conf"]), "otel_exporter {") {
 		t.Fatal("detached site stranded the previous exporter reservation", err)
-	}
-}
-
-func TestApacheOTelSharedModuleOwnership(t *testing.T) {
-	root := t.TempDir()
-	first := otelSite()
-	first.Nginx = nil
-	first.Apache = &Apache{Binary: "httpd"}
-	if _, err := prepare(root, first); err != nil {
-		t.Fatal(err)
-	}
-	second := first
-	second.ID = "second"
-	second.PublicURL = "https://second.example.com/"
-	name := filepath.Join(t.TempDir(), "httpd.conf")
-	block := insertBlock(first, "otel-module", "LoadModule otel_apache_module "+apacheQuote(first.OTel.ModulePath)+"\nApacheModuleEnabled OFF\n")
-	backup := attachmentRecord{SchemaVersion: 1, Site: first, Phase: "attached", Files: []attachmentFile{{Path: name, Before: []byte("# Original\n"), After: []byte(block), Mode: 0644}}}
-	if err := writeAttachment(attachmentPath(root, first), backup); err != nil {
-		t.Fatal(err)
-	}
-	check := func(file, text string) error {
-		tree, err := apacheAttachmentTree(file, []byte(text))
-		if err != nil {
-			return err
-		}
-		c := &attachConfig{root: tree, files: map[string][]byte{file: []byte(text)}}
-		loaded, err := c.checkApacheOTel(root, second)
-		if err == nil && !loaded {
-			t.Fatal("shared module was not reused")
-		}
-		return err
-	}
-	if err := check(name, block); err != nil {
-		t.Fatal("second site rejected the owner's exact backed-up module block", err)
-	}
-	for _, text := range []string{
-		block + "ApacheModuleEnabled ON\n",
-		strings.Replace(block, "ApacheModuleEnabled OFF", "ApacheModuleEnabled ON", 1),
-		strings.Replace(block, first.OTel.ModulePath, "/another/module.so", 1),
-	} {
-		if check(name, text) == nil {
-			t.Fatal("external instrumentation accepted", text)
-		}
-	}
-	if check(filepath.Join(root, "sites", "foreign.conf"), block) == nil {
-		t.Fatal("unmanaged /sites/ path was trusted without an ownership record")
 	}
 }
 

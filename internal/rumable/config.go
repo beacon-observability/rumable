@@ -13,7 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-var Version = "0.1.0-preview.1"
+var Version = "0.1.0-preview.3"
 
 type Config struct {
 	SchemaVersion int    `json:"schemaVersion" toml:"schemaVersion"`
@@ -27,7 +27,6 @@ type Site struct {
 	Include    []string  `json:"includePaths" toml:"includePaths"`
 	Exclude    []string  `json:"excludePaths,omitempty" toml:"excludePaths"`
 	Nginx      *Nginx    `json:"nginx,omitempty" toml:"nginx"`
-	Apache     *Apache   `json:"apache,omitempty" toml:"apache"`
 	IIS        *IIS      `json:"iis,omitempty" toml:"iis"`
 	RUM        RUM       `json:"rum" toml:"rum"`
 	SDK        SDKConfig `json:"sdk,omitempty" toml:"sdk"`
@@ -69,12 +68,6 @@ type IIS struct {
 	Site                    string `json:"site" toml:"site"`
 	Application             string `json:"application" toml:"application"`
 	AllowCompressionChanges bool   `json:"allowCompressionChanges" toml:"allowCompressionChanges"`
-}
-
-type Apache struct {
-	Binary   string   `json:"binary" toml:"binary"`
-	Args     []string `json:"args,omitempty" toml:"args"`
-	Reviewed bool     `json:"attachmentReviewed" toml:"attachmentReviewed"`
 }
 
 func loadConfig(name, id string) (Site, error) {
@@ -152,13 +145,13 @@ func (s Site) validateTarget() error {
 		return errors.New("id must start with a lowercase letter and contain at most 48 lowercase letters, digits or hyphens")
 	}
 	servers := 0
-	for _, present := range []bool{s.Nginx != nil, s.Apache != nil, s.IIS != nil} {
+	for _, present := range []bool{s.Nginx != nil, s.IIS != nil} {
 		if present {
 			servers++
 		}
 	}
 	if servers != 1 {
-		return errors.New("configure exactly one of nginx, apache and iis")
+		return errors.New("configure exactly one of nginx or iis")
 	}
 	u, err := endpoint(s.PublicURL)
 	if err != nil {
@@ -207,20 +200,7 @@ func (s Site) validateTarget() error {
 			return errors.New("publicURL path must equal iis.application followed by /")
 		}
 	}
-	if s.Apache != nil {
-		if s.Apache.Binary == "" {
-			return errors.New("apache.binary is required")
-		}
-		for i := 0; i < len(s.Apache.Args); i += 2 {
-			if i+1 >= len(s.Apache.Args) || (s.Apache.Args[i] != "-f" && s.Apache.Args[i] != "-d" && s.Apache.Args[i] != "-D") || s.Apache.Args[i+1] == "" || strings.HasPrefix(s.Apache.Args[i+1], "-") {
-				return errors.New("apache.args must be option/value pairs using -f, -d, -D")
-			}
-			define := strings.ToUpper(strings.SplitN(s.Apache.Args[i+1], "=", 2)[0])
-			if s.Apache.Args[i] == "-D" && (contains([]string{"FOREGROUND", "NO_DETACH", "SINGLE_PROCESS", "ONE_PROCESS", "DEBUG"}, define) || strings.HasPrefix(define, "DUMP_")) {
-				return errors.New("apache.args cannot change the server process or diagnostic mode")
-			}
-		}
-	}
+
 	return nil
 }
 
@@ -249,9 +229,6 @@ func (s Site) reportURL() string {
 func (s Site) platform() string {
 	if s.Nginx != nil {
 		return "nginx"
-	}
-	if s.Apache != nil {
-		return "apache"
 	}
 	return "iis"
 }

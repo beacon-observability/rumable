@@ -41,9 +41,6 @@ func commandOutput(binary string, args ...string) ([]byte, []byte, error) {
 var nginxVersion = regexp.MustCompile(`nginx/(\d+)\.(\d+)\.(\d+)`)
 
 func nativeCheck(root string, s Site, enabling bool) error {
-	if s.Apache != nil {
-		return apacheCheck(root, s, enabling)
-	}
 	if s.Nginx == nil {
 		_, err := iisCommand(root, s, "check", map[string]any{"checkingEnabled": enabling})
 		return err
@@ -98,14 +95,6 @@ func nginxInspect(s Site) ([]byte, []byte, error) {
 }
 
 func nativeApply(root string, n *Snapshot, original, expected json.RawMessage) error {
-	if n.Site.Apache != nil {
-		if err := apacheCheck(root, n.Site, n.active()); err != nil {
-			return err
-		}
-		x := n.Site.Apache
-		_, err := command(x.Binary, append(append([]string{}, x.Args...), "-k", "graceful")...)
-		return err
-	}
 	if n.Site.Nginx != nil {
 		x := n.Site.Nginx
 		if n.active() {
@@ -137,7 +126,7 @@ func nativeRestore(root string, n *Snapshot, expected json.RawMessage) error {
 	if n.Site.IIS == nil {
 		return nativeApply(root, n, nil, nil)
 	}
-	data, err := iisCommand(root, n.Site, "restore", map[string]any{"snapshot": n.Native, "expected": expected})
+	data, err := iisCommand(root, n.Site, "restore", map[string]any{"snapshot": n.Native, "expected": expected, "removeMapping": n.Uninstall})
 	if err == nil {
 		n.Native = data
 	}

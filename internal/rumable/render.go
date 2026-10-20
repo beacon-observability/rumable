@@ -12,6 +12,7 @@ import (
 )
 
 type Snapshot struct {
+	Uninstall     bool              `json:"uninstall,omitempty"`
 	Enabled       bool              `json:"enabled"`
 	OTelEnabled   bool              `json:"otelEnabled,omitempty"`
 	OTelOwner     string            `json:"otelOwner,omitempty"`
@@ -27,45 +28,63 @@ type Snapshot struct {
 }
 
 func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, error) {
+	return renderDeployment(root, s, enabled, nil, false)
+}
+
+func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, preserveBrowser bool) (Snapshot, map[string][]byte, error) {
+	s = resolveOTelPaths(root, s)
 	active := enabled
 	enabled = enabled && s.RUM.isEnabled()
-	b, info, err := sdk()
-	if err != nil {
-		return Snapshot{}, nil, err
+	n := Snapshot{Enabled: enabled, Site: s, Files: map[string][]byte{}, Assets: map[string]string{}}
+	public := map[string][]byte{}
+	if preserveBrowser {
+		// OTel-only operations keep the exact browser release, including a saved
+		// CDN URL or bootstrap produced by an older CLI. Its assets already exist.
+		n.Script, n.SDK, n.SDKURL = previous.Script, previous.SDK, previous.SDKURL
+		for name, digest := range previous.Assets {
+			if strings.HasPrefix(name, "public/"+s.ID+"/") {
+				n.Assets[name] = digest
+			}
+		}
+	} else {
+		b, info, err := sdk()
+		if err != nil {
+			return Snapshot{}, nil, err
+		}
+		sdkName := "sdk." + info.SHA256 + ".js"
+		sdkURL := sdkLocation(s, info)
+		boot := bootstrap(s, sdkURL, info)
+		bootName := "init." + hash(boot) + ".js"
+		public[filepath.Join("public", s.ID, sdkName)] = b
+		public[filepath.Join("public", s.ID, bootName)] = boot
+		lic, _ := assets.ReadFile("assets/SDK-LICENSE")
+		public[filepath.Join("public", s.ID, "SDK-LICENSE."+hash(lic)+".txt")] = lic
+		manifest, _ := json.MarshalIndent(info, "", "  ")
+		public[filepath.Join("public", s.ID, "sdk."+info.SHA256+".json")] = manifest
+		n.Script, n.SDK = s.assetPrefix()+bootName, info
+		if s.SDK.Source == "cdn" {
+			n.SDKURL = sdkURL
+		}
 	}
-	sdkName := "sdk." + info.SHA256 + ".js"
-	sdkURL := sdkLocation(s, info)
-	boot := bootstrap(s, sdkURL, info)
-	bootName := "init." + hash(boot) + ".js"
-	public := map[string][]byte{filepath.Join("public", s.ID, sdkName): b, filepath.Join("public", s.ID, bootName): boot}
-	lic, _ := assets.ReadFile("assets/SDK-LICENSE")
-	public[filepath.Join("public", s.ID, "SDK-LICENSE."+hash(lic)+".txt")] = lic
-	manifest, _ := json.MarshalIndent(info, "", "  ")
-	public[filepath.Join("public", s.ID, "sdk."+info.SHA256+".json")] = manifest
-	n := Snapshot{Enabled: enabled, Site: s, Files: map[string][]byte{}, Assets: map[string]string{}, Script: s.assetPrefix() + bootName, SDK: info}
 	if s.OTel != nil {
 		n.OTelEnabled = active && s.OTel.Enabled
 		if n.OTelEnabled && s.IIS != nil && s.OTel.Backend == "dataway" {
 			n.OTelTokenHash = hash([]byte(os.Getenv(s.OTel.TokenEnv)))
 		}
-		n.OTelOwner, err = otelOwner(root, s)
+		owner, err := otelOwner(root, s)
 		if err != nil {
 			return Snapshot{}, nil, err
 		}
+		n.OTelOwner = owner
 		renderOTelCollector(s, &n, public)
-	}
-	if s.SDK.Source == "cdn" {
-		n.SDKURL = sdkURL
-	}
-	if s.Apache != nil {
-		if err := renderApache(root, &n, public); err != nil {
-			return Snapshot{}, nil, err
-		}
 	}
 	for name, data := range public {
 		n.Assets[filepath.ToSlash(name)] = hash(data)
 	}
 	if s.Nginx != nil {
+		// Once RUM handlers were attached, keep their inactive filter on disable.
+		// Removing it would revive parent filters on cached-page SDK requests.
+		rumPrepared := s.RUM.isEnabled() || previous != nil && bytes.Contains(previous.Files["location.conf"], []byte("sub_filter "))
 		v := "rumable_" + strings.ReplaceAll(s.ID, "-", "_")
 		var h bytes.Buffer
 		fmt.Fprintf(&h, "# Managed by Rumable. Do not edit.\nmap $uri $%s_path {\n    default 0;\n", v)
@@ -97,7 +116,7 @@ func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, err
 		// inherited http-level filters on Nginx 1.9.4. Retained business rules are
 		// attached explicitly alongside this include during first attachment.
 		filter := fmt.Sprintf("# Managed by Rumable. Injection disabled; empty dynamic anchor.\nsub_filter '$%s_anchor' '';\n", v)
-		if !s.RUM.isEnabled() {
+		if !rumPrepared {
 			filter = "# RUM disabled in TOML.\n"
 			n.Files["server.conf"] = []byte(strings.ReplaceAll(string(n.Files["server.conf"]), fmt.Sprintf("    sub_filter '$%s_anchor' '';\n", v), ""))
 		}
@@ -119,7 +138,7 @@ func nginxQuote(s string) string {
 
 func attachment(root string, s Site) string {
 	if s.OTel != nil {
-		guide := "# Server OTel attachment\n\nUse docs/otel.md shipped with Rumable for native module/Agent requirements, DataKit/Dataway and Collector lifecycle.\n"
+		guide := "# Server OTel attachment\n\nUse install-otel to prepare managed dependencies when modulePath/agentPath is omitted. See docs/otel-installation.md and docs/otel.md for native requirements, DataKit/Dataway and Collector lifecycle. Full site removal: uninstall; optionally --remove-dependencies for unchanged, unshared managed packages.\n"
 		if s.IIS != nil {
 			guide += "IIS OTel requires IIS 10 / Windows 10 or Server 2016+, Windows PowerShell 5.1, an installed .NET Agent and a dedicated application pool. Run enable as Administrator; only that pool is configured/recycled.\n"
 		} else {
@@ -135,9 +154,6 @@ func attachment(root string, s Site) string {
 
 func rumAttachment(root string, s Site) string {
 	d := filepath.ToSlash(siteDir(root, s))
-	if s.Apache != nil {
-		return apacheAttachment(root, s)
-	}
 	if s.Nginx == nil {
 		return fmt.Sprintf("# IIS attachment\n\nTarget: %s%s\n\nRun enable (includes preflight) as Administrator using 64-bit PowerShell 3+ and URL Rewrite 2.0.\nThe tool manages only rumable-%s-* rules/preconditions, the application /__rumable__ virtual directory, and the local doStaticCompression attribute. Static assets must be anonymously readable with JavaScript MIME types; configure that in IIS before enable.\nReview compression impact before enabling: all static resources in the selected application may lose static compression.\n", s.IIS.Site, s.IIS.Application, s.ID)
 	}

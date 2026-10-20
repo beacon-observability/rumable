@@ -1,14 +1,14 @@
 # Rumable
 
-当前版本：**0.1.0-preview.2**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[本地交付校验记录](docs/preview-0.1.0-preview.2.md)包含构建来源、分包摘要与实际验收边界。
+当前版本：**0.1.0-preview.3**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[验证记录](docs/verification.md)区分编译、本地运行与实际入库验收。
 
-通过 Nginx / Apache / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
+通过 Nginx / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
 
 自动挂接、差异预览、备份及恢复的范围见[操作手册](docs/operations.md#自动首次挂接linux)。
 
 Go 实现，TOML 解析器编译进单个可执行文件，无常驻进程、数据库或 Node.js 运行依赖。内嵌官方 SDK **3.3.21**，校验信息见 [sdk.json](internal/rumable/assets/sdk.json)，第三方许可随发布包提供。
 
-本版包含 **Nginx / Apache / IIS/.NET 服务端 OTel 请求 Trace**：`[sites.otel]` 与 `[sites.rum].enabled` 独立配置，支持 DataKit、Dataway、自动挂接及受管配置回滚。Dataway 在 Linux 通过已有 Collector 转换协议，IIS/.NET 可直连；原生模块/Agent 有独立兼容范围。安装、示例和验收见 [OTel 使用手册](docs/otel.md)。0.1.0-preview.2 包含 OTel 支持；原 0.1.0-preview.1 包保持不变。
+本版包含 **Nginx / IIS/.NET 服务端 OTel 请求 Trace**：`[sites.otel]` 与 `[sites.rum].enabled` 独立配置，支持 DataKit、Dataway、自动挂接及受管配置回滚。Dataway 在 Linux 通过已有 Collector 转换协议，IIS/.NET 可直连；原生模块/Agent 有独立兼容范围。安装、示例和验收见 [OTel 使用手册](docs/otel.md)。本版提供 `install-otel` 自动准备模块/Agent，以及 `uninstall` 安全移除站点，见[安装与卸载](docs/otel-installation.md)。本版仅支持 Nginx 和 IIS，已移除 Apache；旧发布包保持不变。
 
 站点使用官方 CDN 时，在 TOML 中加入以下配置，再执行 `enable`；省略此表仍使用同域内置 SDK。
 
@@ -24,7 +24,7 @@ source = "cdn"
 在服务器的固定工作目录中执行，例如 `/etc/rumable`。后续继续使用同一目录，配置和状态不要放在网站根目录或临时目录。使用有权检查、重载服务器及写入受管目录的账号。
 
 ```sh
-# 1. 生成精简 TOML；选择 nginx / apache / iis 和 openway / datakit。
+# 1. 生成精简 TOML；选择 nginx / iis 和 openway / datakit。
 rumable init --server nginx --reporting openway
 # 编辑 rumable.toml：网站地址、服务器目标、applicationId 和上报参数。
 
@@ -59,23 +59,6 @@ rumable status --state-dir /etc/rumable/.rumable
 
 Nginx 最低要求 **1.9.4 + http_sub_module**。1.9.4 的 `check`、`enable` 会自动追踪有效配置的 include 层级，发现 `http` 层 sub_filter 即拒绝；`attachmentReviewed=true` 不能绕过。先将这类业务规则移到 `server` / `location` 层，或升级到 1.9.5+。无法可靠判定配置时也会拒绝，具体支持范围见[兼容性说明](docs/compatibility.md)。
 
-## Apache
-
-支持 **Linux Apache 2.4.23+**，需要加载 `mod_lua`、`mod_filter`、`mod_alias`、`mod_authz_core`、`mod_headers`。Debian/Ubuntu 默认使用 `apache2ctl` 保留发行版 envvars；其他发行版修改生成的命令路径。也可使用 [examples/apache.toml](examples/apache.toml)。
-
-```sh
-rumable init --server apache --reporting datakit --config apache.toml
-# 填写网站、服务器目标、applicationId 和 datakitOrigin。
-rumable render --config apache.toml
-rumable attach --config apache.toml
-# 预览并输入 yes；复杂配置按 ATTACH.md 人工挂接。
-rumable enable --config apache.toml
-```
-
-使用内容哈希命名的私有 Lua 输出过滤器，跨普通响应分块处理首个 `</head>`；没有锚点时正文不变。公共 SDK 由独立 Alias 提供。启停和回滚通过配置检查后执行 `-k graceful`，复用同一事务、摘要和 HTTP 探测保护。Session Replay 仍由该站点 `[sites.rum]` 控制，默认关闭。
-
-启用期间，所选 GET/HEAD 路径会清除条件请求和 Range 头，HTML 的 HEAD 响应也会去除原文验证头和长度；存在 `mod_cache` 时，对整个 VirtualHost 关闭 quick handler，并按 includePaths 前缀绕过缓存，避免旧 HTML 绕过过滤或缓存旧脚本。停用移除这些受管设置。反代源 HTML 必须未压缩，Apache 输出 gzip 可以保留。首次挂接、权限、缓存影响与可执行验证步骤见 [Apache 接入手册](docs/apache.md)。Apache 2.2、2.4.23 之前及 Windows Apache 不在本版支持范围。
-
 ## IIS
 
 在目标 64 位 Windows 上以管理员运行匹配架构的可执行文件，IIS 接入优先使用 x64 包。需要 **IIS 7.5+、URL Rewrite 2.x、64 位 PowerShell 3.0+**；推荐 PowerShell 5.1。旧 Windows 必须选择 legacy 发布包，详见[兼容矩阵](docs/compatibility.md)。
@@ -95,8 +78,8 @@ rumable enable --config apache.toml
 
 ## 配置与命令
 
-- 配置示例：[Nginx / OpenWay](examples/nginx.toml)、[Apache / OpenWay](examples/apache.toml)、[IIS / DataKit](examples/iis.toml)。两种上报方式均可用于三个服务器；单站点自动选择，多站点通过 `--site` 定位。
-- 默认配置文件为 `rumable.toml`，使用 UTF-8 编码；每个站点使用 `[[sites]]`，其下配置 `[sites.nginx]`、`[sites.apache]`、`[sites.iis]` 三选一，以及 `[sites.rum]`。支持注释，拒绝未知字段和重复定义。`init` 默认生成精简的 Nginx / OpenWay 配置；`--server` / `--reporting` 切换目标，`--full` 列出完整静态 SDK 参数。
+- 配置示例：[Nginx / OpenWay](examples/nginx.toml)、[IIS / DataKit](examples/iis.toml)。两种上报方式均可用于两种服务器；单站点自动选择，多站点通过 `--site` 定位。
+- 默认配置文件为 `rumable.toml`，使用 UTF-8 编码；每个站点使用 `[[sites]]`，其下配置 `[sites.nginx]`、`[sites.iis]` 二选一，以及 `[sites.rum]`。支持注释，拒绝未知字段和重复定义。`init` 默认生成精简的 Nginx / OpenWay 配置；`--server` / `--reporting` 切换目标，`--full` 列出完整静态 SDK 参数。
 - Windows 路径建议使用 TOML 单引号字面量，例如 `binary = 'C:\nginx\nginx.exe'`，避免反斜杠转义。
 - 内部部署状态、事务日志及 CLI 结构化输出保持 JSON；已有受管状态可直接继续停用和回滚，用户配置需按 TOML 示例转换。
 - `id` 为稳定标识，禁止修改已挂接站点的服务器目标或 `publicURL`；迁移时使用新 ID 并重新挂接。
@@ -132,7 +115,7 @@ sessionReplaySampleRate = 20
 
 ## 注入边界
 
-默认在首个字面量 `</head>` 前插入异步外部脚本，仅改写 HTML；支持 UTF-8 等 ASCII 兼容编码。Nginx / Apache 限定 GET / HTTP 200，IIS 前置条件限定 GET / HTML。三个服务器均跳过专用资源路径、下载和非 HTML；已压缩源响应不注入。非完整 HTML、UTF-16/32、流式 SSR 不在首版范围。
+默认在首个字面量 `</head>` 前插入异步外部脚本，仅改写 HTML；支持 UTF-8 等 ASCII 兼容编码。Nginx 限定 GET / HTTP 200，IIS 前置条件限定 GET / HTML。两种服务器均跳过专用资源路径、下载和非 HTML；已压缩源响应不注入。非完整 HTML、UTF-16/32、流式 SSR 不在首版范围。
 
 异步脚本不会阻塞业务解析。初始化前的错误、请求和交互不保证采集。脚本设置页面全局防重标记；发现业务已有 `DATAFLUX_RUM` 时不接管。双层服务器重复注入会被 HTTP 探测识别，应只在最终返回 HTML 的一层启用。
 
@@ -157,7 +140,6 @@ go build -o rumable ./cmd/rumable
 
 # 已有 OrbStack Docker、Go、curl；不安装浏览器测试框架。
 scripts/smoke-nginx.sh
-scripts/smoke-apache.sh
 NGINX_IMAGE=nginx:1.14-alpine scripts/smoke-nginx.sh
 # 1.9.4 旧镜像格式不兼容当前 Docker，使用固定摘要的官方源码构建。
 docker build -f scripts/nginx-1.9.4.Dockerfile -t rumable-nginx:1.9.4 .
@@ -172,10 +154,10 @@ NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-nginx.sh
 # 同份源码，两个真实编译器；仅设置 go.mod 不会让新 Go 支持旧 Windows。
 # 默认先同步官方最新稳定 v3 SDK，再运行两套编译器的测试、vet 和打包。
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.0-preview.2
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.0-preview.3
 ```
 
-发布目录默认为 `dist/0.1.0-preview.2/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
+发布目录默认为 `dist/0.1.0-preview.3/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
 
 可单独执行 `go run scripts/sync-sdk.go` 同步并审查 SDK、版本、来源和 SHA-256；CDN 与官方 NPM 稳定版不一致、版本不是稳定 v3 或许可变更时中止。离线重建可显式使用 `release.go --skip-sdk-sync`，其含义是沿用已校验文件，不检查最新版本。站点不会自动更新；分发新二进制后执行 `enable` 升级，默认同域方式保留旧资源供缓存页面和回滚使用。
 

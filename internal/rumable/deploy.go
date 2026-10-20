@@ -31,6 +31,7 @@ func verifyNative(root string, n Snapshot) error {
 }
 
 func prepare(root string, s Site) (State, error) {
+	s = resolveOTelPaths(root, s)
 	if st, err := loadState(root, s.ID); err == nil {
 		return st, fmt.Errorf("already rendered; use enable to apply config changes")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -86,13 +87,7 @@ func compatibleTarget(a, b Site) bool {
 	if a.IIS != nil {
 		return a.IIS.Site == b.IIS.Site && a.IIS.Application == b.IIS.Application
 	}
-	var binaryA, binaryB string
-	var argsA, argsB []string
-	if a.Apache != nil {
-		binaryA, binaryB, argsA, argsB = a.Apache.Binary, b.Apache.Binary, a.Apache.Args, b.Apache.Args
-	} else {
-		binaryA, binaryB, argsA, argsB = a.Nginx.Binary, b.Nginx.Binary, a.Nginx.Args, b.Nginx.Args
-	}
+	binaryA, binaryB, argsA, argsB := a.Nginx.Binary, b.Nginx.Binary, a.Nginx.Args, b.Nginx.Args
 	if binaryA != binaryB || len(argsA) != len(argsB) {
 		return false
 	}
@@ -105,6 +100,11 @@ func compatibleTarget(a, b Site) bool {
 }
 
 func preflight(root string, s Site) error {
+	if s.OTel != nil && s.OTel.Enabled {
+		if err := checkManagedDependency(root, s); err != nil {
+			return err
+		}
+	}
 	if s.RUM.isEnabled() && s.IIS == nil {
 		if a, err := loadAttachment(root, s); err == nil && a.Phase == "attached" && !a.Site.RUM.isEnabled() {
 			return errors.New("RUM was not prepared in the original OTel-only attachment; use a new attachment with RUM prerequisites reviewed before enabling browser injection")
@@ -165,10 +165,16 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		return errors.New("unfinished transaction; use rollback first")
 	}
 	checking := s
-	if component == "rum" && s.IIS != nil && s.OTel != nil {
+	if component == "rum" && s.OTel != nil {
 		otel := *s.OTel
 		otel.Enabled = false
 		checking.OTel = &otel
+	}
+	if component == "otel" {
+		// Validate the changed component; saved browser bytes and URLs are
+		// verified after activation, without comparing them to this CLI's SDK.
+		off := false
+		checking.RUM.Enabled = &off
 	}
 	if enabled {
 		if err := preflight(root, checking); err != nil {
@@ -195,7 +201,7 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		st.Current.Native = native
 		st.OriginalIIS = native
 	}
-	n, public, err := render(root, s, enabled)
+	n, public, err := renderDeployment(root, s, enabled, &st.Current, component == "otel")
 	if err != nil {
 		return err
 	}
@@ -212,9 +218,7 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 	if s.IIS != nil && n.Enabled {
 		fmt.Fprintln(w, "IIS: static compression will be disabled for this application; original local setting is saved.")
 	}
-	if s.Apache != nil && n.Enabled {
-		fmt.Fprintln(w, "Apache: selected paths lose conditional/range request headers; mod_cache is bypassed for includePaths prefixes while enabled. See ATTACH.md.")
-	}
+
 	return transact(root, st, n, public, false)
 }
 func snapshotsEqual(a, b Snapshot) bool {

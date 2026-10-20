@@ -17,7 +17,8 @@ enabled = true
 backend = "datakit"
 endpoint = "http://127.0.0.1:4317"
 serviceName = "nginx"
-modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so"
+# Omit modulePath; run install-otel before render (exact-version APT module).
+# modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so"
 sampleRate = 100
 includePaths = ["/"]
 excludePaths = ["/health"]

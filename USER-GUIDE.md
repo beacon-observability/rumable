@@ -1,14 +1,16 @@
 # Rumable Preview 使用指南
 
-版本：**0.1.0-preview.2**。本版面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
+版本：**0.1.0-preview.3**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
 
-Rumable 在 Nginx、Apache 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
+Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
 
 本版包含服务端 OTel 自动插桩，可与 RUM 分别启停，并通过 DataKit/Dataway 上报。先按第 7 节安装外部原生模块或 .NET Agent；Linux Dataway 模式还需要已运行的 Collector。仅启用 OTel 时无需浏览器 applicationId，也不要求 HTML 页面。
 
+本版仅支持 Nginx 和 IIS。升级包含 RUM 独立启停、旧脚本继承保护、OTel 操作保留浏览器 SDK、分离 main/http 配置挂接及中断回滚修复；旧版 Apache 配置不适用于本版。
+
 ## 1. 选择下载包
 
-在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0-preview.2_` 开头。
+在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0-preview.3_` 开头。
 
 | 系统 / CPU | 文件名后缀 | 适用条件 |
 |---|---|---|
@@ -33,17 +35,17 @@ Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；�
 
 ```sh
 sha256sum -c SHA256SUMS
-mkdir rumable-0.1.0-preview.2
-tar -xzf rumable_0.1.0-preview.2_linux_amd64.tar.gz -C rumable-0.1.0-preview.2
-cd rumable-0.1.0-preview.2
+mkdir rumable-0.1.0-preview.3
+tar -xzf rumable_0.1.0-preview.3_linux_amd64.tar.gz -C rumable-0.1.0-preview.3
+cd rumable-0.1.0-preview.3
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\rumable_0.1.0-preview.2_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\rumable_0.1.0-preview.3_windows_amd64.zip -Algorithm SHA256
 # 与 SHA256SUMS 内同名文件的摘要比较，然后解压到新目录。
-Expand-Archive .\rumable_0.1.0-preview.2_windows_amd64.zip -DestinationPath C:\Tools\Rumable
+Expand-Archive .\rumable_0.1.0-preview.3_windows_amd64.zip -DestinationPath C:\Tools\Rumable
 C:\Tools\Rumable\rumable.exe version
 ```
 
@@ -62,9 +64,9 @@ C:\Tools\Rumable\rumable.exe version
 
 `site` / `datakitOrigin` 使用完整的 HTTP(S) origin，不带路径、查询、认证信息或片段；HTTPS 网站必须使用 HTTPS 上报地址。`clientToken` 是浏览器接入令牌，**不能填写管理 API Key 或服务器密钥**。上报目标必须能被最终用户的浏览器访问。
 
-## 4. Linux Nginx / Apache 接入
+## 4. Linux Nginx 接入
 
-Nginx 要求 **1.9.4+ 且编译了 http_sub_module**；Apache 要求 **2.4.23+**，加载 `lua`、`filter`、`alias`、`authz_core`、`headers` 模块。工具不会安装服务器或启用模块。Apache 详细准备步骤见 [Apache 手册](docs/apache.md)。
+Nginx 要求 **1.9.4+ 且编译了 http_sub_module**。工具不会安装服务器或启用 RUM 所需模块。
 
 先安装可执行文件，再使用管理员账号维护固定目录：
 
@@ -76,7 +78,7 @@ mkdir -p /etc/rumable /var/lib/rumable
 cd /etc/rumable
 rumable version
 rumable init --server nginx --reporting openway --site website
-# Apache 改为 --server apache；DataKit 改为 --reporting datakit。
+# DataKit 改为 --reporting datakit。
 ```
 
 用文本编辑器修改生成的 `rumable.toml`，至少替换 `publicURL`、探测路径、服务器可执行文件及上报参数。例如一个 Nginx / OpenWay 站点：
@@ -102,7 +104,7 @@ sessionSampleRate = 100
 sessionReplayEnabled = false
 ```
 
-`binary` / `args` 必须与实际运行的服务一致；自定义 Nginx 配置可加 `args = ["-c", "/etc/nginx/nginx.conf"]`。Apache 常用 `/usr/sbin/apache2ctl` 或 `/usr/local/apache2/bin/httpd`。不要填写 systemctl。
+`binary` / `args` 必须与实际运行的服务一致；自定义 Nginx 配置可加 `args = ["-c", "/etc/nginx/nginx.conf"]`。不要填写 systemctl。
 
 ```sh
 rumable render --state-dir /var/lib/rumable
@@ -188,15 +190,16 @@ source = "cdn"
 
 ## 7. 服务端 OTel
 
+本版提供 `install-otel`：省略 modulePath/agentPath，先自动安装再 render。完整卸载用 `uninstall`，按需加 `--remove-dependencies`；仅停用 OTel 继续使用 disable --component otel。Nginx 和 IIS 的可执行步骤、离线包和权限边界见[安装与卸载](docs/otel-installation.md)。无需为 CLI 安装 Go；工具按平台下载并校验依赖，外部 DataKit/Collector 仍需预先运行。
+
 | 服务器 | 启用 OTel 前的条件 |
 |---|---|
 | Linux Nginx | 1.25.3+，已安装与服务器版本、发行版和架构匹配的 ngx_otel_module |
-| Linux Apache | Linux x64、Apache 2.4.23+，使用包含 Rumable 请求隔离修复的模块；原版模块会被拒绝 |
 | Windows IIS/.NET | IIS 10 / Windows 10或Server 2016+、64 位 Windows PowerShell 5.1、官方 .NET Agent、独占应用池；不覆盖静态页、Classic ASP、纯代理 |
 
 CLI 的 x86/x64/ARM64 包可运行范围与原生模块/Agent 的兼容范围分开判断。旧 Nginx、旧 Windows/IIS 保持原有 RUM 支持，不因此获得 OTel 能力。
 
-先启用 DataKit 的 OpenTelemetry gRPC 接收，复制对应的 `examples/otel-nginx.toml`、`otel-apache.toml` 或 `otel-iis.toml`，编辑站点地址、服务器定位、模块/Agent 路径和上报地址。示例默认 `rum.enabled=false`、`otel.enabled=true`：
+先启用 DataKit 的 OpenTelemetry gRPC 接收，复制对应的 `examples/otel-nginx.toml` 或 `examples/otel-iis.toml`，编辑站点地址、服务器定位和上报地址；自动安装时省略模块/Agent 路径。示例默认 `rum.enabled=false`、`otel.enabled=true`：
 
 ```toml
 [sites.rum]
@@ -207,16 +210,17 @@ enabled = true
 backend = "datakit"
 endpoint = "http://127.0.0.1:4317"
 serviceName = "web-gateway"
-modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so" # Apache 改为已修复模块的路径
+# modulePath = "/usr/lib/nginx/modules/ngx_otel_module.so" # 已有匹配模块时填写并跳过 install-otel
 sampleRate = 100
 excludePaths = ["/health"]
 ```
 
-上述为 Linux 参数片段；IIS 改用 `agentPath` 和 `runtime`，使用 IIS 示例完整填写。Nginx/Apache 的 exporter 和 serviceName 在同一实例共享，站点的开关、路径与采样可独立设置；Apache 原生采样只接受 0/100。IIS 按整个独占池采集，采样为父级优先，不支持路径过滤。
+上述为 Linux 参数片段；IIS 改用 `agentPath` 和 `runtime`，使用 IIS 示例完整填写。Nginx 的 exporter 和 serviceName 在同一实例共享，站点的开关、路径与采样可独立设置。IIS 按整个独占池采集，采样为父级优先，不支持路径过滤。
 
 Linux 以管理员运行（以新 OTel 站点为例）：
 
 ```sh
+rumable install-otel --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
 rumable render --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
 rumable attach --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel --dry-run
 rumable attach --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumable-otel
@@ -226,9 +230,10 @@ rumable enable --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumab
 
 IIS 使用管理员的 64 位 Windows PowerShell 5.1，执行 render、check、enable；不需要 attach，不重启整台 IIS。纯 OTel 不需要 URL Rewrite，也不改变压缩或 CSP：
 
-ASP.NET Core 的应用池需设置 No Managed Code；.NET Framework 使用 v4 Integrated。WAS/W3SVC 或机器级已有全局插桩时应先处理冲突，不能用站点开关隔离未知全局设置。preview.2 之后的 IIS 加固及验收步骤见 [OTel 手册](docs/otel.md#iis-安装和操作)，现有 dist 未包含这轮源码修复。
+ASP.NET Core 的应用池需设置 No Managed Code；.NET Framework 使用 v4 Integrated。WAS/W3SVC 或机器级已有全局插桩时应先处理冲突，不能用站点开关隔离未知全局设置。本版已包含 IIS 事务恢复与池隔离修复；验收步骤见 [OTel 手册](docs/otel.md#iis-安装和操作)。
 
 ```powershell
+.\rumable.exe install-otel --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
 .\rumable.exe render --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
 .\rumable.exe check --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
 .\rumable.exe enable --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
@@ -241,6 +246,8 @@ rumable disable --component otel --state-dir /var/lib/rumable-otel
 rumable rollback --state-dir /var/lib/rumable-otel
 # 多个受管站点时加 --site ID；也可对 rum 单独启停。
 ```
+
+只操作服务端 OTel 时使用 `enable/disable --component otel`，会保留网站当前的 SDK 版本、初始化脚本和 CDN 引用。需要升级 Web SDK 时使用普通 `enable` 或 `enable --component rum`。OTel 接收端暂时不可达，不会阻止 RUM 单组件操作；服务器配置和页面仍须通过检查。
 
 如果计划以后启用两种能力，首次就准备完整 RUM 参数并保留 `rum.enabled=true`，先执行 `enable --component otel`。以纯 OTel 配置首次挂接，之后添加 RUM 需要重新审查 HTML 改写要求。原有 RUM-only 站点升级增加 OTel，也需要撤销旧挂接并按新站点重新部署；普通版本升级继续使用原状态。完整安装、Dataway、迁移和恢复步骤见 [OTel 手册](docs/otel.md)。
 
@@ -261,7 +268,20 @@ Linux 如需完全撤销首次自动挂接，先 disable，清理浏览器、CDN
 
 升级时先备份 TOML、整个状态目录和服务器配置，将新包解压到新目录，核对版本后替换可执行文件；继续使用原 TOML、站点 ID、目标和状态目录，执行 enable。不重复 init/render，不删除旧资源。
 
-## 9. 常见问题
+## 9. 完整卸载
+
+仅临时关闭采集使用 disable；需要移除指定站点的挂接和资源映射时，先清理旧 HTML 缓存，再执行：
+
+```sh
+rumable uninstall --state-dir /var/lib/rumable --site website --dry-run
+rumable uninstall --state-dir /var/lib/rumable --site website
+# 同时清理本工具安装、未修改且不被其他站点引用的模块：
+rumable uninstall --state-dir /var/lib/rumable --site website --remove-dependencies
+```
+
+Windows 将命令改为 `& $rumable`，使用原 `$state` 和站点 ID。默认保留模块/Agent；外部维护的模块、Collector、服务器和 CLI 不删除。状态与备份归档至状态目录的 removed 子目录，卸载后普通 rollback 不再恢复该站点。完整边界及可执行步骤见[安装与卸载](docs/otel-installation.md)。
+
+## 10. 常见问题
 
 | 提示 / 现象 | 处理 |
 |---|---|

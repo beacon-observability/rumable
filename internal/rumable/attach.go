@@ -148,21 +148,11 @@ func verifyAttachmentSources(root string, a attachmentRecord) error {
 var errAttachmentInspection = errors.New("native attachment inspection failed")
 
 func verifyAttachmentOwnership(a attachmentRecord) error {
-	var c *attachConfig
-	var err error
-	if a.Site.Nginx != nil {
-		_, dump, e := nginxInspect(a.Site)
-		if e != nil {
-			return fmt.Errorf("%w: %v", errAttachmentInspection, e)
-		}
-		c, err = nginxAttachmentConfig(dump)
-	} else {
-		dump, e := apacheInspect(a.Site)
-		if e != nil {
-			return fmt.Errorf("%w: %v", errAttachmentInspection, e)
-		}
-		c, _, err = apacheAttachmentConfig(dump)
+	_, dump, err := nginxInspect(a.Site)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errAttachmentInspection, err)
 	}
+	c, err := nginxAttachmentConfig(dump)
 	if err != nil {
 		return err
 	}
@@ -281,12 +271,15 @@ func confirmAttachment(out io.Writer, in io.Reader, yes, dry bool) error {
 	return nil
 }
 func attachSite(root string, st State, target string, yes, dry bool, in io.Reader, out io.Writer) error {
+	if err := checkManagedDependency(root, st.Current.Site); err != nil {
+		return err
+	}
 	if runtime.GOOS != "linux" {
-		return errors.New("automatic Nginx/Apache attachment requires Linux; use render and ATTACH.md on other OSes")
+		return errors.New("automatic Nginx attachment requires Linux; use render and ATTACH.md on other OSes")
 	}
 	s := st.Current.Site
 	if s.IIS != nil {
-		return errors.New("IIS uses enable; attach supports Nginx and Apache")
+		return errors.New("IIS uses enable; attach supports Nginx")
 	}
 	if err := verifyFiles(root, st.Current); err != nil {
 		return err
@@ -323,12 +316,7 @@ func attachSite(root string, st State, target string, yes, dry bool, in io.Reade
 	if st.Current.active() {
 		return errors.New("disable the site before changing its attachment")
 	}
-	var plan attachmentPlan
-	if s.Nginx != nil {
-		plan, err = planNginxAttachment(root, s, target)
-	} else {
-		plan, err = planApacheAttachment(root, s, target)
-	}
+	plan, err := planNginxAttachment(root, s, target)
 	if err != nil {
 		return err
 	}
@@ -338,10 +326,8 @@ func attachSite(root string, st State, target string, yes, dry bool, in io.Reade
 	fmt.Fprintln(&preview, "Selected:", selected)
 	if !s.RUM.isEnabled() {
 		fmt.Fprintln(&preview, "OTel-only attachment: native instrumentation and reserved resources; existing response compression, cache and business headers are preserved.")
-	} else if s.Nginx != nil {
-		fmt.Fprintln(&preview, "Attached handlers bypass upstream compression, conditional headers and proxy cache; static precompression is disabled until attachment undo. Output gzip is retained.")
 	} else {
-		fmt.Fprintln(&preview, "Reserved SDK resources bypass proxy. Existing compression must follow RESOURCE; enable changes HTML validators and cache handling.")
+		fmt.Fprintln(&preview, "Attached handlers bypass upstream compression, conditional headers and proxy cache; static precompression is disabled until attachment undo. Output gzip is retained.")
 	}
 	fmt.Fprintln(&preview, "Review ATTACH.md and clear external HTML caches when enabling/disabling.")
 	for _, f := range files {
@@ -355,12 +341,7 @@ func attachSite(root string, st State, target string, yes, dry bool, in io.Reade
 		return err
 	}
 	// Native discovery also catches new wildcard includes added during confirmation.
-	var current attachmentPlan
-	if s.Nginx != nil {
-		current, err = planNginxAttachment(root, s, target)
-	} else {
-		current, err = planApacheAttachment(root, s, target)
-	}
+	current, err := planNginxAttachment(root, s, target)
 	if err != nil {
 		return err
 	}
@@ -460,13 +441,7 @@ func verifyAttachmentFiles(a attachmentRecord, after, either bool) error {
 }
 func reloadAttachment(root string, a attachmentRecord, after bool) error {
 	s := a.Site
-	var binary string
-	var args []string
-	if s.Apache != nil {
-		binary, args = s.Apache.Binary, s.Apache.Args
-	} else {
-		binary, args = s.Nginx.Binary, s.Nginx.Args
-	}
+	binary, args := s.Nginx.Binary, s.Nginx.Args
 	if _, err := command(binary, append(append([]string{}, args...), "-t")...); err != nil {
 		return err
 	}
@@ -477,9 +452,6 @@ func reloadAttachment(root string, a attachmentRecord, after bool) error {
 		return err
 	}
 	action := []string{"-s", "reload"}
-	if s.Apache != nil {
-		action = []string{"-k", "graceful"}
-	}
 	_, err := command(binary, append(append([]string{}, args...), action...)...)
 	return err
 }
@@ -489,10 +461,10 @@ func restoreAttachment(root string, a attachmentRecord, n Snapshot) error {
 	}
 	if a.Phase == "attached" || len(a.Inputs) > 0 {
 		if err := verifyAttachmentOwnership(a); err != nil {
-			// A candidate with an incompatible native module can make -T/-t
-			// unusable. During this initial transaction, unchanged source inputs
-			// and exact Before/After bytes still permit restoring our own edits.
-			if a.Phase != "applying" || !errors.Is(err, errAttachmentInspection) {
+			// Initial candidates and interrupted multi-file restores can make -T
+			// unusable. Unchanged inputs and exact Before/After bytes still let us
+			// finish restoring those files after a failed or interrupted attempt.
+			if (a.Phase != "applying" && a.Phase != "restoring") || !errors.Is(err, errAttachmentInspection) {
 				return fmt.Errorf("cannot verify attachment ownership before recovery: %w", err)
 			}
 		}
@@ -571,26 +543,8 @@ func undoAttachment(root string, st State, yes, dry bool, in io.Reader, out io.W
 		fmt.Fprintln(out, "Attachment already restored; backup retained.")
 		return nil
 	}
-	if st.Current.OTelOwner == st.Current.Site.ID && st.Current.Site.OTel != nil {
-		entries, err := os.ReadDir(filepath.Join(root, "sites"))
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if entry.Name() == st.Current.Site.ID || !entry.IsDir() {
-				continue
-			}
-			x, err := loadState(root, entry.Name())
-			if err != nil {
-				return err
-			}
-			if x.Current.OTelOwner == st.Current.Site.ID && sameServer(st.Current.Site, x.Current.Site) {
-				a, err := loadAttachment(root, x.Current.Site)
-				if err != nil || a.Phase != "detached" {
-					return fmt.Errorf("site %s still depends on this OTel module/exporter attachment; detach it first", entry.Name())
-				}
-			}
-		}
+	if err = checkDetachDependents(root, st); err != nil {
+		return err
 	}
 	if err = verifyAttachmentFiles(a, true, a.Phase != "attached"); err != nil {
 		return err

@@ -150,19 +150,13 @@ func selectAttachment(s Site, candidates []*attachNode, target string, names fun
 		for _, name := range names(n) {
 			if strings.EqualFold(strings.TrimSuffix(name, "."), strings.TrimSuffix(u.Hostname(), ".")) {
 				ports := []string{}
-				if strings.EqualFold(n.words[0], "server") {
-					listeners := nodeDirect(n, "listen")
-					if len(listeners) == 0 {
-						ports = append(ports, "80")
-					}
-					for _, v := range listeners {
-						if len(v.words) > 1 {
-							ports = append(ports, configPort(v.words[1]))
-						}
-					}
-				} else {
-					for _, v := range n.words[1:] {
-						ports = append(ports, configPort(v))
+				listeners := nodeDirect(n, "listen")
+				if len(listeners) == 0 {
+					ports = append(ports, "80")
+				}
+				for _, v := range listeners {
+					if len(v.words) > 1 {
+						ports = append(ports, configPort(v.words[1]))
 					}
 				}
 				for _, p := range ports {
@@ -193,7 +187,6 @@ func (c *attachConfig) checkNamespace(s Site) error {
 		}
 	}
 	variable := "$rumable_" + strings.ReplaceAll(s.ID, "-", "_") + "_"
-	filter := "RUMABLE_" + strings.ReplaceAll(s.ID, "-", "_")
 	return visitNodes(c.root, func(n *attachNode) error {
 		for _, word := range n.words {
 			reservedVariable := false
@@ -202,7 +195,7 @@ func (c *attachConfig) checkNamespace(s Site) error {
 					reservedVariable = true
 				}
 			}
-			if reservedVariable || strings.EqualFold(word, filter) || word == s.assetPrefix() {
+			if reservedVariable || word == s.assetPrefix() {
 				return fmt.Errorf("existing Rumable namespace for %s at %s; use its original state directory or another site id", s.ID, n.key())
 			}
 		}

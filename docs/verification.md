@@ -2,6 +2,118 @@
 
 日期：2026-10-19–20（Asia/Singapore）。此记录区分代码检查、本地运行与真实观测云验收。
 
+## 0.1.0-preview.3 发行候选复验（2026-10-20）
+
+本版汇总以下历次修复、OTel 自动安装/卸载及 Apache 移除；旧 preview.1/.2 压缩包保留。此处使用发布脚本生成的 `preview3-rc1` 包内程序验证，不是另行构建的调试程序。正式 dist 在源码提交后生成，并逐个核对最终可执行文件与候选相同；最终源码提交、标签及归档摘要另存本版交付校验记录。
+
+| 实际执行范围 | 结果与限制 |
+|---|---|
+| 两套编译器 | OrbStack Linux arm64：Go 1.26.9、Go 1.20.14 均完成全量 test/vet、SDK 同步测试和发布归档契约测试 |
+| SDK 同步 | 在线同步并校验官方稳定 v3，仍为 3.3.21，SDK 字节未变；SHA-256：`67c7d58349e376864f3297e9e6d4a60453ede6ff0c6f6b1900a74c2a44d4d3b1` |
+| 10 个候选归档 | 校验 SHA256SUMS、ZIP CRC、PE/ELF 机器类型、build.json 的版本/编译器/二进制摘要、Linux 执行位、包内文档链接；均通过 |
+| 五个 Linux 包 | 现代 x86/x64/ARM64、legacy x86/x64 均实际运行 version；生成 Nginx/IIS、OpenWay/DataKit 四类配置，并对 Nginx/IIS OTel 示例执行 render/status。x86/x64 使用 OrbStack 仿真，不能证明旧内核兼容 |
+| Nginx 1.9.4 RUM | 现代 Linux x86 发布程序完整 smoke 通过：静态/反代/普通 chunked、identity/gzip、缓存验证头、HEAD、父层过滤器及业务头继承、独立停用保留旧脚本、升级/回滚、提交和重载失败恢复、文件漂移拒绝 |
+| Nginx 1.9.4 自动挂接 | legacy Linux x64 发布程序完整脚本通过：站点隔离、精确差异与确认、幂等、压缩/热缓存、确认期间并发变化拒绝、启停/回滚、失败恢复、原始配置精确撤销和备份保留 |
+| Nginx OTel | Linux ARM64 发布程序：Nginx 1.25.3/module 0.1.0 与 1.28.3/module 0.1.2 两套完整脚本通过。真实 Span 经 Collector 0.163.1 到私有 OTLP 接收器；覆盖 DataKit gRPC/Dataway protobuf 分支、采样、站点/路径隔离、共享 exporter、独立启停、接收端停机时 RUM 操作、分离 main/http 配置挂接、失败恢复、部分恢复重试、回滚和卸载 |
+| 自动安装/依赖清理 | 1.25.3 使用临时容器内 APT 测试仓库，实际下载、SHA 校验、私有解包和模块装载检查通过；重复安装、卸载及未共享受管依赖删除通过。不代表远程软件源/其他发行版 ABI 已验收 |
+| IIS PowerShell | OrbStack Linux amd64 / PowerShell 7.4：快照恢复、OTel 独占池契约 mock、脚本解析与真实 Linux x64 CLI 的可移植边界测试通过；TEMP=/tmp。未执行 Windows PowerShell 或 IIS 原生 API |
+
+本机日志位于 `/tmp/rumable-otel-research/`：`preview3-candidate-build.log`、`preview3-matrix.log`、`preview3-rum194.log`、`preview3-attach194.log`、`preview3-otel125.log`、`preview3-otel128.log`、`preview3-powershell.log`。使用仓库现有 smoke/test 脚本，RUMABLE_BINARY 指向包内程序；APT 流程另加 INSTALL_OTEL=1、NGINX_APT_FIXTURE=1。命令示例见下方各功能验证章节。
+
+Windows 的五个包仅完成交叉编译、构建元数据和 PE 格式检查；Windows/IIS/.NET Agent 实机、旧操作系统内核及真实 DataKit/Dataway/观测云入库仍未验收。私有接收器证明协议分支和 Trace 发送，不代表观测云数据已入库。SDK 本体、初始化逻辑和页面交互未改动，本轮未重复 Chrome 验收。以下“未发布源码”均为本次打包之前的历史阶段记录。
+
+## 功能缺陷复审第二轮（2026-10-20，未发布源码）
+
+本轮继续只检查功能正确性和恢复，不开展安全审查。实际复现并修复两项会阻断自动部署/恢复的问题：
+
+| 问题 | 修复前实际结果 | 修复与回归 |
+|---|---|---|
+| http 块通过主配置后部的 include 引入，OTel 模块入口插错文件 | Nginx 1.25.3 报 `load_module directive is specified too late in /work/http.conf:3`；首次挂接失败，原文件被恢复 | 保存实际主配置文件位置，将模块入口插在主文件开头。完整 OTel 脚本改用 main/http 两个文件，并在预览、安装及撤销后逐个比较原字节 |
+| 多文件恢复中断后，磁盘配置暂时不可解析，重试被永久阻止 | 先恢复 main 并保留已挂接的 http，将记录置为 restoring，真实 nginx -t 报 unknown directive otel_trace；随后 rollback --attachment 因不能执行原生配置检查而拒绝继续 | applying/restoring 两种未完成状态均可在核对原输入及 Before/After 字节后继续恢复；完整回归实际制造上述中断，再运行 rollback --attachment，恢复两文件和 detached 状态，随后卸载成功 |
+
+本轮实际验证：
+
+- 本机 Go 1.26.1、OrbStack Linux arm64 Go 1.20.14：全量 test / vet 通过；发布归档契约测试通过。
+- OrbStack Nginx 1.25.3 / ngx_otel_module 0.1.0、Collector 0.163.1：使用真实原生模块、临时 APT 测试仓库和私有 OTLP 接收器，完整 OTel 流程通过；覆盖双文件挂接、DataKit/Dataway 协议分支、Span、路径/站点隔离、独立启停、共享 exporter、重载失败恢复、部分恢复重试、卸载和依赖清理。并不表示真实 DataKit/Dataway 账户入库已验收。
+- OrbStack Nginx 1.9.4：完整自动挂接脚本通过，包含压缩、热缓存、业务头继承、确认期变更拒绝、启停/回滚、三类提交故障恢复、精确撤销及备份保留。
+- Go 1.20.14 / CGO=0：Windows/Linux x86、x64、ARM64 六个平台交叉编译通过；Windows 可执行文件未实机运行。
+
+复现日志：`/tmp/rumable-otel-research/review2-before-split-http.log`、`review2-before-restore-retry.log`。通过的完整日志：同目录 `review2-fixed-otel125.log`、`review2-fixed-attach194.log`。复验使用现有 smoke-otel.sh 与 smoke-attach.sh，RUMABLE_BINARY 指向本轮源码构建的 Linux arm64 程序。未修改浏览器 SDK/页面交互，未重复 Chrome 验收；IIS/Windows 实机及真实观测云入库仍未验收。未重新生成 dist。
+
+## 功能缺陷复审（2026-10-20，未发布源码）
+
+本轮只检查功能正确性、独立启停与部署恢复，不开展安全审查。复现并修复三项问题：
+
+| 缺陷 | 修复前证据 | 修复及回归 |
+|---|---|---|
+| Linux RUM 单组件操作依赖 OTel 接收端 | 实际停止 Collector 后，`disable --component rum` 报 `OTel receiver TCP connection failed`，尚未提交 RUM 变更 | RUM 单组件预检不重新校验未变更的 OTel 接收端；原生配置检查和 HTTP 生效探测保留。现有 OTel 全流程增加 Collector 停止期间对依赖站点开启、关闭 RUM 的断言 |
+| RUM 单独停用改变 Nginx 过滤器继承 | Nginx 1.9.4 上，单独停用后旧初始化脚本第 18 字节被父层业务过滤器改写，HTTP 200 仍成功，缓存页面可能无法初始化 | 已准备 RUM 的部署始终保留动态空匹配过滤器；纯 OTel 首次部署仍不添加 RUM 过滤器。完整 RUM 脚本新增父层规则与停用后的原始脚本字节比较，1.9.4 和 1.28.3 均通过 |
+| OTel 单组件启用意外升级浏览器 SDK | Go 真实部署事务使用模拟 IIS API，预置旧 SDK/初始化脚本后，OTel 单独启用改变其版本和 URL，回归用例失败 | 从已部署快照保留浏览器版本、脚本、资源摘要和 CDN 引用，服务器规则使用保存的脚本 URL；预检不再拿当前 CLI 的 SDK 校验未修改的旧部署。回归覆盖同域和 HTTPS CDN，执行真实 HTTP、事务落盘和状态读取 |
+
+实际完成的验证：
+
+- 本机 Go 1.26.1、OrbStack Linux arm64 Go 1.20.14：全量 test、vet 通过；发布归档契约测试通过。OrbStack Go 1.26.9 全量 race 检查通过。
+- OrbStack Nginx 1.9.4、官方 nginx:1.28-alpine（1.28.3）：完整 RUM smoke 通过，含静态/反代/chunked、identity/gzip、缓存、HEAD、继承、独立停用、升级回滚、故障恢复及漂移拒绝。
+- OrbStack Nginx 1.25.3 / ngx_otel_module 0.1.0、Collector 0.163.1：真实 Span 经 Collector 到私有 OTLP 接收器全流程通过，包括临时 APT 仓库的模块安装、Collector 不可达期间的 RUM 独立启停、共享 exporter、回滚、失败恢复和卸载。Collector 故障用例置于 Span 接收断言之后；不承诺原生 SDK 在接收端停机期间不丢弃 Span。
+- Go 1.20.14 / CGO=0：Windows/Linux 的 x86、x64、ARM64 六个平台构建通过，仅为编译验证。
+
+修复前运行日志：`/tmp/rumable-otel-research/review-before-rum.log`、`review-before-otel.log`。修复后的完整日志：同目录 `review-fixed-rum194.log`、`review-fixed-rum128.log`、`review-fixed-otel125.log`。复验使用现有 `scripts/smoke-nginx.sh`、`scripts/smoke-otel.sh`，命令与后续对应验证章节相同，RUMABLE_BINARY 指向本轮源码构建程序。
+
+Windows/IIS 实机、真实 DataKit/Dataway/观测云入库仍未验收；IIS 结果为 Go 事务与 API mock，不等于原生配置提交/进程回收实测。未修改 Web SDK 本体、初始化逻辑或页面交互，未重复 Chrome 验收。未重新生成 preview dist。
+
+## 移除 Apache 支持（2026-10-20，未发布源码）
+
+当前源码只支持 Nginx 和 IIS。已删除 Apache 的 RUM/OTel 配置类型、渲染、模块安装/构建、自动挂接、原生检查、Lua 资源、专用测试、示例和验收脚本；共享站点选择中的 VirtualHost 分支与 Lua 名称检查也已移除。不保留旧配置或状态的兼容分支。发布清单与当前使用文档同步更新；既有 preview 压缩包、标签及其历史交付记录不重写。
+
+| 本轮实际验证 | 环境与结果 |
+|---|---|
+| Go 行为测试与 vet | 本机 Go 1.26.1、OrbStack Linux arm64 Go 1.20.14 全量通过；发布归档契约测试通过 |
+| Nginx RUM | OrbStack arm64：1.9.4 完整 RUM smoke 通过，覆盖静态/反代/chunked、identity/gzip、缓存验证头和 HEAD、配置继承、启停/升级/回滚、失败恢复及漂移拒绝 |
+| Nginx 自动挂接 | 1.9.4、官方 1.28-alpine（1.28.3）完整脚本通过；覆盖站点隔离、压缩/热缓存、确认期间配置和备份并发变化拒绝、失败恢复、精确撤销、原文件模式及备份保留 |
+| Nginx OTel 安装与卸载 | 1.25.3 / 官方模块 0.1.0、Collector 0.163.1：离线 deb 与临时容器内 APT 测试仓库两种安装流程均通过；重复安装、真实 Span、DataKit gRPC/Dataway protobuf 分支、独立启停、共享 exporter、重载失败恢复、回滚、归档和依赖移除通过。不代表远程 APT 仓库签名或真实后端入库验收 |
+| IIS 保护 | PowerShell 7.4 / Linux amd64：快照、OTel 池契约 mock、脚本解析及真实 Linux CLI 的可移植边界测试通过；未执行 Windows/IIS API |
+| 六个平台编译 | Go 1.20.14 / CGO=0：Windows 与 Linux 的 x86、x64、ARM64 构建通过；Windows 程序未实机执行，未生成新 dist |
+| 文档与脚本 | 当前 Markdown 本地文件链接检查、受影响 Bash 脚本语法检查及 git diff --check 通过 |
+
+使用现有脚本复验，RUMABLE_BINARY 指向当前源码构建的 Linux arm64 程序：
+
+```sh
+NGINX_IMAGE=rumable-nginx:1.9.4 bash scripts/smoke-nginx.sh
+NGINX_IMAGE=rumable-nginx:1.9.4 bash scripts/smoke-attach.sh
+NGINX_IMAGE=nginx:1.28-alpine bash scripts/smoke-attach.sh
+INSTALL_OTEL=1 NGINX_IMAGE=rumable-nginx-otel:1.25.3 \
+  NGINX_OTEL_ARCHIVE=/absolute/path/nginx-module-otel.deb \
+  OTELCOL_BINARY=/absolute/path/otelcol PYTHON=python3.12 bash scripts/smoke-otel.sh
+# 后一命令增加 NGINX_APT_FIXTURE=1 覆盖容器内实际 APT 流程。
+```
+
+本机运行日志：`/tmp/rumable-otel-research/remove-apache-rum194.log`、`remove-apache-nginx194.log`、`remove-apache-nginx128.log`、`remove-apache-otel.log`、`remove-apache-otel-offline.log`（后四个同目录）。未改变 Web SDK、初始化和页面交互逻辑，未重复 Chrome 验收；Windows/IIS 实机、旧内核及真实观测云入库仍未验收。以下为此前各轮的验证记录，不表示本轮重新执行。
+
+## OTel 自动安装与卸载（2026-10-20，未发布源码）
+
+新增 `install-otel` 和 `uninstall`；已有 preview.2 dist 保持不变。用户步骤见[安装与卸载](otel-installation.md)。本轮实际执行：
+
+| 范围 | 结果及边界 |
+|---|---|
+| Go 行为测试 / 检查 | 本机 Go 1.26.1、OrbStack Linux Go 1.20.14 全部 Go 测试通过；vet 通过；发布脚本测试通过 |
+| 归档与文件归属 | ZIP/tar 路径穿越、Windows 路径别名、链接、重复条目、错误 SHA、未知/修改文件及新增目录拒绝；共享站点/回滚引用阻止依赖删除；模拟丢失状态但 Agent 仍有现场引用时拒绝清理；IIS 权限设置未完成会阻止预检；确认期间状态改变拒绝 |
+| Nginx 1.25.3 ARM64 | OrbStack，官方 module 0.1.0 `.deb` 的离线安装，以及真实 apt-cache / apt-get / dpkg-deb 安装路径均通过。APT 用临时容器内的本地测试仓库，不代表远端仓库配置/签名验收。识别官方 `nginx-r1.25.3` 虚拟 ABI 依赖；原生加载检查、重复安装、dry-run、真实 Span、RUM/OTel 独立启停、共享 exporter、重载失败恢复、回滚、归档及依赖移除通过，最终业务配置与原文件相同 |
+| Nginx 1.9.4 ARM64 | 实际容器执行 install-otel，下载前拒绝 OTel，未创建依赖目录；原有 RUM 支持范围不变 |
+| IIS 恢复边界 | Go 测试执行真实部署事务和日志，模拟 Windows API：卸载提交/激活失败恢复并可重试，归档保留，原先已存在的映射及资源不被移走；PE 边界拒绝错误位数的 profiler |
+| PowerShell | OrbStack Linux amd64 / PowerShell 7.4：真实 Restore-Nodes 函数验证普通 rollback 保留映射、完整卸载移除新建映射、拒绝其他部署的映射；OTel 池契约模拟及可移植脚本测试通过。可移植测试设置 TEMP=/tmp，使用 Linux legacy CLI。不能据此认定 Windows PowerShell 5.1 或 IIS API 已实测 |
+| 交叉编译 | Go 1.20.14 构建 Windows/Linux 的 386、amd64、arm64 均通过；这些是编译验证，未生成新 preview dist，Windows 可执行文件没有实机运行 |
+
+Linux 安装模式复用 `scripts/smoke-otel.sh`，并验证原生 Trace 经 Collector 发送到本地 OTLP/protobuf 接收夹具。Nginx 测试 `.deb` SHA-256 为 `7a39abec8ac3b0f3f00f03d26c2264915bb9c48ce1e1a638f41a8407dd8bcf74`。可在已有匹配测试镜像和 Collector 的 OrbStack 环境执行：
+
+```sh
+# Nginx 离线安装；加 NGINX_APT_FIXTURE=1 覆盖实际 APT 流程（仅临时容器内添加测试源）。
+INSTALL_OTEL=1 NGINX_IMAGE=rumable-nginx-otel:1.25.3 \
+  NGINX_OTEL_ARCHIVE=/absolute/path/nginx-module-otel.deb \
+  OTELCOL_BINARY=/absolute/path/otelcol PYTHON=python3.12 bash scripts/smoke-otel.sh
+```
+
+仍待目标环境验收：Windows 官方 Agent 下载、解包、IIS_IUSRS ACL、锁定 DLL 清理、IIS 实际应用池与 .NET 运行；非 Debian/APT 的自定义模块分发；真实 DataKit/Dataway 鉴权和观测云入库。本次没有修改浏览器 SDK 或初始化逻辑，未重复执行浏览器验收。
+
 ## 首次挂接自动化（2026-10-20）
 
 新增 `attach`（检测、差异、确认、挂接）及 `rollback --attachment`（独立撤销/恢复），保留原来的人工挂接与部署 rollback。实际验证：
@@ -10,25 +122,21 @@
 |---|---|
 | Go 与文件边界 | OrbStack Linux arm64，Go 1.20.14 / 1.26.8 test、vet，1.26.8 race 全部通过；原子替换保留模式、属主/组和 user xattr，先清除临时文件继承的默认 ACL，防止扩大读取权限；拒绝直接替换符号链接/硬链接及外部内容；两文件只写完一个时可恢复 |
 | Nginx 最低 / 现代版 | 1.9.4 原始源码镜像、官方 1.28.3，自动挂接完整脚本通过；包括静态预压缩、输出 gzip、静态/反代/chunked、上游业务请求头保留、热缓存绕过和撤销后恢复缓存行为 |
-| Apache 最低 / 现代版 | 2.4.23 原始源码镜像、官方 2.4.69，自动挂接完整脚本通过；包括原生有效站点识别、CONTENT_SET gzip、代理资源排除、目标 include 的 Location 及其他 VirtualHost include 的过滤规则隔离 |
 | Legacy CLI | Go 1.20.14 Linux amd64 包在 OrbStack amd64 仿真下对 Nginx 1.28.3 完整自动挂接脚本通过；不代表旧 Linux 内核已运行验证 |
-| 原有流程回归 | `smoke-nginx.sh` 在 1.9.4、`smoke-apache.sh` 在 2.4.23 通过，人工挂接、业务过滤规则、压缩、缓存、继承、升级及恢复流程保留 |
+| 原有流程回归 | `smoke-nginx.sh` 在 1.9.4 通过，人工挂接、业务过滤规则、压缩、缓存、继承、升级及恢复流程保留 |
 | Chrome | 本机真实页面初始化一次；DOM 中一个 Rumable 初始化脚本、一个 SDK；交互正常，控制台仅主动触发的测试异常。默认 replay 关闭，本地接收端记录 View 2 / Resource 6 / Action 1 / Error 1，无 replay；这是本地接收，不是观测云入库 |
 
 自动挂接脚本同时覆盖：dry-run 不改业务文件、取消不提交、确认期间业务文件变更即拒绝、配置检查/重载/提交后 HTTP 三类失败恢复原字节、重复挂接不重载、站点隔离、启停/普通 rollback/完整撤销、外部编辑时停止覆盖、原始文件模式保留、备份保留及再次挂接。Nginx 1.9.4 还验证 http 层 sub_filter 在创建挂接备份/写业务文件之前即被阻止。
 
-原生 include 回归覆盖 Nginx 共享源文件拒绝编辑、父/局部 proxy_set_header 列表、同内容 handler 的独立标记，以及 Apache DUMP_INCLUDES 父文件行号/层级展开；其他 VirtualHost 的 CONTENT_SET 声明不能放行本站未声明阶段的压缩链。未知 include 上下文和不安全合并拒绝。缓存恢复验证等待平滑重载的新旧 worker 交替完成，检查恢复缓存命中行为，不要求保留某一条旧缓存项。
+原生 include 回归覆盖 Nginx 共享源文件拒绝编辑、父/局部 proxy_set_header 列表、同内容 handler 的独立标记。未知 include 上下文和不安全合并拒绝。缓存恢复验证等待平滑重载的新旧 worker 交替完成，检查恢复缓存命中行为，不要求保留某一条旧缓存项。
 
 可复现步骤（本机已安装 Go、OrbStack Docker；脚本创建并清理自己的容器）：
 
 ```sh
 # 最低版本镜像只需构建一次；使用仓库固定来源/校验的 Dockerfile。
 docker build -t rumable-nginx:1.9.4 -f scripts/nginx-1.9.4.Dockerfile .
-docker build -t rumable-apache:2.4.23 -f scripts/apache-2.4.23.Dockerfile .
-SERVER=nginx NGINX_IMAGE=rumable-nginx:1.9.4 bash scripts/smoke-attach.sh
-SERVER=nginx NGINX_IMAGE=nginx:1.28-alpine bash scripts/smoke-attach.sh
-SERVER=apache APACHE_IMAGE=rumable-apache:2.4.23 bash scripts/smoke-attach.sh
-SERVER=apache APACHE_IMAGE=httpd:2.4 bash scripts/smoke-attach.sh
+NGINX_IMAGE=rumable-nginx:1.9.4 bash scripts/smoke-attach.sh
+NGINX_IMAGE=nginx:1.28-alpine bash scripts/smoke-attach.sh
 # 验证指定发布二进制时，额外设置 RUMABLE_BINARY=/绝对路径/rumable。
 ```
 
@@ -198,46 +306,13 @@ DOM 中只有一个 Rumable 初始化标签、一个同域官方 SDK 标签。SD
 - 本机 Chrome 复验默认回放关闭、唯一初始化；开启后实际 `isRecording()=true`，压缩、mask-user-input、localStorage、关闭自动操作及名称隐私选项进入 SDK，Fetch 请求带 Trace / Visitor ID Header。停用后页面只有业务脚本，回滚并排除旧 HTML 缓存后恢复。Console 仅有主动触发的测试错误。
 - 该轮本地接收端收到 View 8 / Resource 18 / Action 2 / Error 1，成功解压 3 个普通 RUM 请求，收到 4 个回放片段、4,165 字节。Action 包含默认开启阶段的操作；这些累计计数证明本地发送，不代表真实观测云验收。实际生成脚本的 Node VM 防重、参数传递与失败隔离也通过。
 
-## Linux / Apache 支持验收（2026-10-19–20）
-
-新增独立 `[sites.apache]` TOML 目标、受管 apache.conf、私有内容哈希 Lua 文件及公共 SDK Alias，复用既有 SDK、CSP、双编码探测与事务恢复。此次实际运行环境如下，均为 OrbStack 的现代 Linux 内核，不代表旧发行版/内核真机验收：
-
-| 服务器 | CLI / 环境 | 结果 |
-|---|---|---|
-| Apache 2.4.69 | 官方 httpd:2.4，Linux arm64，Go 1.26.8 的发布构建参数二进制 | 完整 smoke 通过 |
-| Apache 2.4.23 | 官方原始源码，Debian 12 / GCC 12 / Lua 5.2，Linux arm64；Go 1.26.8 的发布构建参数二进制 | 完整 smoke 通过 |
-| Apache 2.4.23 | 同上服务器，Go 1.20.14 / CGO=0 / GOAMD64=v1 的 Linux amd64 CLI，OrbStack 仿真执行 | 同一完整 smoke 通过 |
-| Nginx 回归 | Go 1.26.8 Linux arm64 CLI，Nginx 1.9.4 与 1.28.3 | 原有完整脚本通过，含 1.9.4 http 层自动阻断 |
-| 源码检查 | OrbStack Go 1.20.14 与 1.26.8 test / vet；Go 1.26.8 race | 通过 |
-
-Apache 两个版本共用 `scripts/smoke-apache.sh`，覆盖静态/反代、普通 chunked 与跨块混合大小写锚点、第一处 head、无锚点正文逐字节保留、下载/API、已压缩源跳过、identity/gzip、真实静态 ETag/未来条件日期/Range、POST 条件头保留、Host/Authorization/X-Tenant、父业务过滤器与安全头、mod_cache 绕过及停用恢复、独立 VirtualHost 状态和脚本隔离。
-
-补齐 HEAD 缓存边界：修复前实测选中静态 HTML 的 HEAD 仍带原强 ETag、Last-Modified 和原长度 86，可能验证旧 GET 表示；只 unset Content-Length 还会被 Apache 从内部临时正文重新计算。现在清理 GET/HEAD 条件请求，对 HTML HEAD 清理验证元数据，并丢弃其内部临时正文；HTTP HEAD 本来就不发送正文。静态与反代 HEAD 在 identity/gzip 两种请求中都返回 200，不带原验证头和长度；停用后条件 HEAD 恢复 304。现代/legacy CLI 的上述完整 Apache 流程均包含这一回归。复现日志 `/tmp/rumable-apache-head-regression-before.log`，修复后的源码验证日志 `/tmp/rumable-apache-head-fixed-source.log`，最终构建使用下列完整日志。
-
-同时验证：模块缺失、include 未挂/重复、低版本阻止；首次 render 的 attachmentReviewed=false 停用快照可回滚；重复启停不改变历史；升级改变脚本 URL且保留旧资源；候选 configtest、graceful、提交后 HTTP 503 故障均恢复原状态且不留下事务；受管配置和私有 Lua 摘要漂移时启用/停用/回滚拒绝覆盖。最终流程无 Apache error/crit/alert/emerg 或未知过滤器运行日志。
-
-最低版本实测修复了两个兼容点：旧 mod_lua 对响应头赋 nil 会在过滤器初次执行时报错，因此改用 mod_headers，按 Lua 标记清除两张响应头表；旧 mod_filter 的继承 AddOutputFilterByType DEFLATE 可能按 RESOURCE 执行，先压缩而错过注入。实际通过的挂接采用显式 CONTENT_SET 压缩链，保留原业务过滤链；生成 ATTACH.md 给出配置与影响。2.4.23 的回归还故意恢复不兼容压缩顺序，确认 gzip 探测阻止成功提交并恢复原受管部署，不能将通过结果推广为任意过滤顺序均兼容。
-
-源码构建入口：`scripts/apache-2.4.23.Dockerfile`，使用未修改官方源码，SHA-256 与镜像记录：
-
-```text
-source: https://archive.apache.org/dist/httpd/httpd-2.4.23.tar.gz
-source SHA-256: b71a13f56b8061c6b4086fdcc9ffdddd904449735eadec0f0e2947e33eec91d7
-rumable-apache:2.4.23 image ID: sha256:0376e4b7c6e6e5bac61c7897c61e1ec1870cb15237ffa3394a6cc728156ad05b
-httpd:2.4 image ID: sha256:c842ac797bd1fe8b3cd26d002ac9d948aa2814097544600600b35aef42e6785a
-```
-
-本机 Chrome 155 在最终 Apache 2.4.69 / Go 1.26.8 部署上复验：Rumable 与 SDK 标签各 1 个，默认 recording=false；通过 TOML 开启回放并 New session 后，SDK 显示采样率 100、recording=true。Fetch 交互正常；Console 只有主动触发的测试错误，无 SDK/CSP/CORS 警告。此前同一 Apache 版本的开发者工具检查另行确认初始化脚本、SDK、RUM 与回放请求返回 200。最终这一轮接收端快照：View 5、Resource 11、Action 4、Error 1，3 个回放片段，共 2281 个片段字节、8 次接收请求。证据为本机 `/tmp/rumable-apache-chrome.png` 和 `/tmp/rumable-apache-chrome-stats.json`；这些只证明本地发送，不证明观测云入库。
-
-复跑命令与首次挂接步骤见 [Apache 手册](apache.md)。日志：`/tmp/rumable-apache-final-modern.log`、`/tmp/rumable-apache-minimum-modern.log`、`/tmp/rumable-apache-minimum.log`、`/tmp/rumable-apache-final-legacy.log`、`/tmp/rumable-apache-final-go.log`、`/tmp/rumable-apache-nginx194-regression.log`、`/tmp/rumable-apache-nginx128-regression.log`。未验证 Windows Apache、Apache 2.2、真实 TLS 终结、Brotli、任意自定义过滤/重写及发行版 apache2ctl/envvars/SELinux 组合；不据此宣称这些组合已经通过。
-
 ## 2026-10-20 优化复验
 
 修复 Nginx 初始停用快照保留 attachmentReviewed=false 时重复 disable 被拒绝的问题：只在启用检查中要求人工挂接确认，停用仍检查模块、有效 include、配置和文件归属。旧二进制在 OrbStack / Nginx 1.9.4 上已复现该失败；扩展 scripts/smoke-nginx.sh，覆盖首次 false 拒绝 check/enable 且不创建事务或 reload、初始重复停用、首次启用后回滚到 false 快照、再次停用，以及候选配置失败后恢复该快照。
 
 多页面探测改为每轮对相同脚本和 Worker 只检查一次，HTML 的 identity / gzip、注入版本及 CSP 仍逐页检查，不跨轮缓存。扩展现有 HTTP 边界测试：两个页面和一个共用 Worker 的请求由 10 次减少到 7 次；第二页 gzip 注入缺失、后续轮次脚本 MIME 改变、重复注入及历史 SDK 引用仍被正确处理。这个计数是脚本 gzip 校验扩展前的阶段结果，不代表端到端耗时测量；当前请求组成见下一节。
 
-OrbStack 的 Go 1.20.14、1.26.8 全量 test / vet 与 Go 1.26.8 race 通过。使用此次 Go 1.26.8 Linux arm64 二进制完成 Nginx 1.9.4、1.28.3 和 Apache 2.4.23、2.4.69 的完整 smoke，含压缩、缓存、配置继承、幂等、升级/回滚、提交失败及漂移拒绝。日志：`/tmp/rumable-optimize-before.log`、`/tmp/rumable-optimize-go.log`、`/tmp/rumable-optimize-nginx194.log`、`/tmp/rumable-optimize-nginx128.log`、`/tmp/rumable-optimize-apache2423.log`、`/tmp/rumable-optimize-apache2469.log`。
+OrbStack 的 Go 1.20.14、1.26.8 全量 test / vet 与 Go 1.26.8 race 通过。使用此次 Go 1.26.8 Linux arm64 二进制完成 Nginx 1.9.4、1.28.3 的完整 smoke，含压缩、缓存、配置继承、幂等、升级/回滚、提交失败及漂移拒绝。日志：`/tmp/rumable-optimize-before.log`、`/tmp/rumable-optimize-go.log`、`/tmp/rumable-optimize-nginx194.log`、`/tmp/rumable-optimize-nginx128.log`。
 
 Go 1.20.14 / CGO=0 / GOAMD64=v1 的 Linux amd64 legacy 二进制在 OrbStack 仿真下也完成 Nginx 1.9.4 同一完整 smoke（`/tmp/rumable-optimize-legacy.log`）。该结果验证旧编译器产物与最低 Nginx 的组合，不代表旧内核实机。
 
@@ -250,7 +325,7 @@ Go 1.20.14 / CGO=0 / GOAMD64=v1 的 Linux amd64 legacy 二进制在 OrbStack 仿
 1. Nginx 的注入 map 只激活 GET，HEAD 可能沿用原文 Last-Modified、Content-Length。旧二进制在 1.9.4 上返回原静态 HTML 长度 87；现将 GET/HEAD 一并激活原生过滤器的头部清理，HEAD 仍无正文。使用正则 map 项避免较长 HEAD 键超过旧构建默认的 32 字节 hash bucket，不要求改全局 map_hash_bucket_size。
 2. 初始化脚本、SDK 和外置 Worker 之前只验 identity，过期 gzip 脚本可能通过验收。现检查两种编码的 MIME，受管脚本解压后都须匹配快照摘要；外置 Worker 的解码内容须一致，不据此证明其 SDK 版本或业务正确性。共享资源仍按每种编码每轮一次检查，不跨轮复用。两页加一个 Worker 的边界用例现在为 10 次请求：两页、初始化脚本、SDK、Worker 各两种编码。
 
-新增回归覆盖静态、反代及已热 proxy_cache 的 HEAD identity/gzip 元数据，停用后的 HEAD 条件请求恢复；Nginx 真实 gzip_static 过期初始化/SDK 文件触发启用失败后，原状态逐字节恢复且不遗留事务。Apache 新增继承 SetOutputFilter DEFLATE 的脚本路径，验证 gzip 确实生效、解压字节与受管文件一致。HTTP 边界测试分别构造 gzip 初始化脚本、SDK、Worker 不一致，并保持第二页压缩缺失、重复注入、后续轮次重新检查和历史 SDK 引用覆盖。
+新增回归覆盖静态、反代及已热 proxy_cache 的 HEAD identity/gzip 元数据，停用后的 HEAD 条件请求恢复；Nginx 真实 gzip_static 过期初始化/SDK 文件触发启用失败后，原状态逐字节恢复且不遗留事务。HTTP 边界测试分别构造 gzip 初始化脚本、SDK、Worker 不一致，并保持第二页压缩缺失、重复注入、后续轮次重新检查和历史 SDK 引用覆盖。
 
 | 本轮验证 | 环境与结果 |
 |---|---|
@@ -258,18 +333,17 @@ Go 1.20.14 / CGO=0 / GOAMD64=v1 的 Linux amd64 legacy 二进制在 OrbStack 仿
 | Race | Go 1.26.8 全量通过 |
 | Nginx | 1.9.4、1.28.3，Go 1.26.8 Linux arm64，完整 smoke 通过 |
 | Legacy CLI | Go 1.20.14 / CGO=0 / GOAMD64=v1 的 Linux amd64 CLI，OrbStack 仿真执行 Nginx 1.9.4 完整 smoke 通过 |
-| Apache | 2.4.23、2.4.69，Go 1.26.8 Linux arm64，完整 smoke 通过 |
 | Chrome | 本机 Nginx 1.28.3 页面，初始化与 SDK 标签各 1 个，initialized、recording=false；Fetch 显示 Fetched；Console 只有预期测试错误，无 SDK/CSP/CORS 警告 |
 
 完整 smoke 还覆盖压缩 HTML、普通 chunked、缓存启停恢复、继承业务过滤器/请求头/安全响应头、多站点隔离、幂等、升级回滚、配置测试/重载/HTTP 故障恢复及受管项漂移拒绝。没有对业务配置自动放宽或覆盖，也未改动 SDK、RUM 参数或状态格式。历史快照仍按原字节恢复，需用新包重新 enable 才会生成新的 Nginx HEAD 规则。
 
-Chrome 本地接收端最终统计为 View 3、Resource 6、Action 3、Error 1，共 3 次接收请求；回放默认关闭，无回放片段。证据：`/tmp/rumable-linux-review-chrome.png`、`/tmp/rumable-linux-review-chrome-stats.json`，只证明本地发送。日志：`/tmp/rumable-linux-review-head-before.log`、`/tmp/rumable-linux-review-gzip-before.log`、`/tmp/rumable-linux-review-go.log`、`/tmp/rumable-linux-review-nginx194.log`、`/tmp/rumable-linux-review-nginx128.log`、`/tmp/rumable-linux-review-apache2423.log`、`/tmp/rumable-linux-review-apache2469.log`、`/tmp/rumable-linux-review-legacy.log`。
+Chrome 本地接收端最终统计为 View 3、Resource 6、Action 3、Error 1，共 3 次接收请求；回放默认关闭，无回放片段。证据：`/tmp/rumable-linux-review-chrome.png`、`/tmp/rumable-linux-review-chrome-stats.json`，只证明本地发送。日志：`/tmp/rumable-linux-review-head-before.log`、`/tmp/rumable-linux-review-gzip-before.log`、`/tmp/rumable-linux-review-go.log`、`/tmp/rumable-linux-review-nginx194.log`、`/tmp/rumable-linux-review-nginx128.log`、`/tmp/rumable-linux-review-legacy.log`。
 
 本轮未执行旧内核、真实 TLS/Brotli、任意第三方过滤器、Windows/IIS 实机和真实 OpenWay/DataKit 入库验收。
 
 ## 2026-10-20 精简接入流程
 
-首次接入统一为 init → 填精简 TOML → render/首次挂接 → enable；enable 已包含预检、服务器配置检查、生效和 HTTP 探测，独立 check 作为可选诊断。init 默认生成约二十行配置；--server 支持 nginx/apache/iis，--reporting 支持 openway/datakit，--site 可设置初始 ID，--full 保留全部静态 SDK 选项。回放仍默认关闭，IIS 模板不预先允许压缩调整。
+首次接入统一为 init → 填精简 TOML → render/首次挂接 → enable；enable 已包含预检、服务器配置检查、生效和 HTTP 探测，独立 check 作为可选诊断。init 默认生成约二十行配置；--server 支持 nginx/iis，--reporting 支持 openway/datakit，--site 可设置初始 ID，--full 保留全部静态 SDK 选项。回放仍默认关闭，IIS 模板不预先允许压缩调整。
 
 配置只有一个站点时 render/check/enable 自动选择；status/disable/rollback/probe 从单个受管站点选择，不依赖原始 TOML。配置或受管目录存在多个候选时要求 --site，不猜测站点。render 直接打印实际挂接位置、检查/首次重载命令和完整 enable 命令；完整 ATTACH.md 保留压缩、继承、权限与缓存说明。终端命令的参数按宿主 shell 转义，Nginx ATTACH 中 include 路径也加引号。
 
@@ -278,9 +352,9 @@ Chrome 本地接收端最终统计为 View 3、Resource 6、Action 3、Error 1�
 - Go 1.20.14 / 1.26.8 全量 test、vet 和 Go 1.26.8 race。12 种服务器/上报方式/精简或完整模板组合均经真实 CLI Run 写盘并按严格 TOML 解析，验证自定义 ID、正确平台与上报模式、默认关闭回放及 IIS 压缩权限；无效选项不创建文件。
 - 单站点 render、缺失源 TOML 时的 status、多站点配置及受管目录歧义拒绝，拒绝后文件、历史、事务不被修改。POSIX shell 实际执行含空格、引号、美元符号及命令替换字面量的参数，内容保持一致。
 - OrbStack Nginx 1.9.4 / Go 1.26.8 Linux arm64 完整 smoke；夹具由真实 init 生成精简 DataKit 配置再填写站点值，后续所有命令省略 --site。覆盖首次挂接、压缩、缓存、继承、启停、升级回滚、提交失败、漂移及 1.9.4 风险阻断。
-- OrbStack Apache 2.4.23 / Go 1.26.8 Linux arm64 完整 smoke，以及 Go 1.20.14 Linux amd64 legacy CLI 在 OrbStack 仿真下执行 Nginx 1.28.3 同一精简接入/恢复流程。
+- Go 1.20.14 Linux amd64 legacy CLI 在 OrbStack 仿真下执行 Nginx 1.28.3 同一精简接入/恢复流程。
 
-验收脚本在容器命名空间内原子替换配置，避免 macOS bind mount 观察到宿主截断写入中的半份 TOML；工具对这类不完整配置继续拒绝操作，不自动忽略解析错误。日志：`/tmp/rumable-onboarding-go-final.log`、`/tmp/rumable-onboarding-final-nginx194.log`、`/tmp/rumable-onboarding-final-apache2423.log`、`/tmp/rumable-onboarding-final-legacy.log`。
+验收脚本在容器命名空间内原子替换配置，避免 macOS bind mount 观察到宿主截断写入中的半份 TOML；工具对这类不完整配置继续拒绝操作，不自动忽略解析错误。日志：`/tmp/rumable-onboarding-go-final.log`、`/tmp/rumable-onboarding-final-nginx194.log`、`/tmp/rumable-onboarding-final-legacy.log`。
 
 本轮为 CLI、模板及挂接提示变更，未重复 Chrome、Windows/IIS 实机或真实观测云入库验收。SDK、注入过滤算法、事务格式与服务器最低版本保持原有约束；之前的浏览器与 Linux 审查证据见前文，不能将模板验证算作 Windows/IIS 运行通过。
 
@@ -288,7 +362,7 @@ Chrome 本地接收端最终统计为 View 3、Resource 6、Action 3、Error 1�
 
 本轮直接修复并补充回归：
 
-- FILE:LINE 对应同一行内多个 server 块时，显式 target 不再选第一个；全局扫描本站 ID 标记、保留路径与 Nginx 变量/Apache Lua 过滤器，阻止新状态目录复用其他部署的名称，同时允许不同 ID 共享名称前缀。
+- FILE:LINE 对应同一行内多个 server 块时，显式 target 不再选第一个；全局扫描本站 ID 标记、保留路径与 Nginx 变量，阻止新状态目录复用其他部署的名称，同时允许不同 ID 共享名称前缀。
 - 确认后复查部署状态、备份、全部源配置、符号链接绑定与 Linux 文件身份；提交期间复查未受管输入，原子替换检查属主/组、ctime 和权限变化。历史备份排他创建，已有不同内容时停止覆盖。
 - 撤销和失败恢复先重新读取有效 include 图；目标文件后来被其他站点复用、源文件或链接漂移、无法确定配置归属时停止并保留记录。具体回归构造了新 include 引用同一 handler，验证拒绝撤销且原文件保持。普通启停仍只修改受管部署文件。
 - 发布脚本默认下载官方 v3 SDK，并对照官方 NPM browser-rum 的 latest 稳定版本和 MIT 许可，验证完整版标记并记录版本/来源/SHA-256；异常、预发布/新主版本或 CDN 尚未同步时中止。--skip-sdk-sync 仅用于已校验源码的离线重建。两套编译器的 test、同步脚本测试和 vet 通过后才打包。
@@ -301,15 +375,14 @@ Chrome 本地接收端最终统计为 View 3、Resource 6、Action 3、Error 1�
 | Go | Linux Go 1.20.14 / 1.26.8 全量 test、vet；独立 SDK 同步脚本边界测试；Go 1.26.8 race |
 | Nginx | OrbStack 1.9.4 / 1.28.3 自动挂接，确认与备份并发变化、原配置精确恢复、静态预压缩、反代头继承、热缓存、站点隔离、启停回滚及三类故障恢复通过 |
 | Legacy CLI | Go 1.20.14、CGO=0、GOAMD64=v1 的 Linux amd64 包，在 OrbStack 仿真下通过 Nginx 1.9.4 自动挂接全流程 |
-| Apache | OrbStack 2.4.23 / 2.4.69，自动挂接全流程及继承业务规则隔离通过 |
-| 人工挂接回归 | Nginx 1.9.4 与 Apache 2.4.23 的原完整 smoke 通过，覆盖压缩、缓存、继承、HEAD、启停、升级回滚与失败恢复 |
+| 人工挂接回归 | Nginx 1.9.4 的原完整 smoke 通过，覆盖压缩、缓存、继承、HEAD、启停、升级回滚与失败恢复 |
 | CDN | Nginx 1.28.3 真实官方 CDN：同域→CDN→同域回滚、HTTP 双编码与状态 URL 检查通过；本机 Chrome CDN 初始化、默认回放关闭、开启回放、新会话、停用及回滚通过 |
 
 2026-10-20 实际同步核对：官方 CDN 和 NPM latest 均为 3.3.21，SHA-256 为 67c7d58349e376864f3297e9e6d4a60453ede6ff0c6f6b1900a74c2a44d4d3b1，与内置文件一致，未虚构版本升级。官方地址当前未返回 Access-Control-Allow-Origin，因此默认 CDN 不启用 SRI；自建 CDN 的可选 SRI 属性经真实生成脚本 + Node VM 验证，HTTPS HTTP 边界测试覆盖有/无 CORS、同域无需 CORS、摘要错误、过期 gzip 和历史摘要。未对自建 SRI CDN 做浏览器实网验收。
 
 Chrome 页面只出现一个同域 init 和一个 https://static.guance.com/browser-sdk/v3/dataflux-rum.js 标签。默认 initialized、recording=false；TOML 开启后新会话显示 replayStatus=requested、recording=true、回放采样 100。Fetch 正常，Console 仅有主动触发的测试错误。停用后只剩业务脚本；回滚后使用不命中旧 HTML 缓存的新 URL，恢复 CDN 与录制。最后本地接收端计数为 View 12、Resource 22、Action 7、Error 1、Long Task 1，5 个回放片段、3696 个片段字节、17 次请求；这些只证明本地发送，不证明观测云入库。
 
-证据：/tmp/rumable-cdn-final-go.log、/tmp/rumable-cdn-final-nginx194.log、/tmp/rumable-cdn-final-apache2423.log、/tmp/rumable-cdn-final-apache2469.log、/tmp/rumable-cdn-final-legacy.log、/tmp/rumable-cdn-final-nginx128-cdn.log、/tmp/rumable-cdn-manual-nginx.log、/tmp/rumable-cdn-manual-apache.log、/tmp/rumable-cdn-chrome.png、/tmp/rumable-cdn-replay-chrome.png、/tmp/rumable-cdn-rollback-chrome.png、/tmp/rumable-cdn-chrome-stats.json。验证标签页、容器和网络已清理。
+证据：/tmp/rumable-cdn-final-go.log、/tmp/rumable-cdn-final-nginx194.log、/tmp/rumable-cdn-final-legacy.log、/tmp/rumable-cdn-final-nginx128-cdn.log、/tmp/rumable-cdn-manual-nginx.log、/tmp/rumable-cdn-chrome.png、/tmp/rumable-cdn-replay-chrome.png、/tmp/rumable-cdn-rollback-chrome.png、/tmp/rumable-cdn-chrome-stats.json。验证标签页、容器和网络已清理。
 
 可执行复验：
 
@@ -317,9 +390,8 @@ Chrome 页面只出现一个同域 init 和一个 https://static.guance.com/brow
 go test ./...
 go test scripts/sync-sdk.go scripts/sync-sdk_test.go
 go run scripts/sync-sdk.go
-SERVER=nginx NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-attach.sh
-SERVER=apache APACHE_IMAGE=rumable-apache:2.4.23 scripts/smoke-attach.sh
-CDN=1 SERVER=nginx NGINX_IMAGE=nginx:1.28-alpine scripts/smoke-attach.sh
+NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-attach.sh
+CDN=1 NGINX_IMAGE=nginx:1.28-alpine scripts/smoke-attach.sh
 # CDN=1 需要访问官方 HTTPS CDN；KEEP=1 保留本轮站点供 Chrome 使用。
 ```
 
@@ -335,12 +407,12 @@ Windows/IIS、旧内核、真实 OpenWay/DataKit 入库仍未执行；CDN 模式
 - Windows PE 的 386/amd64/arm64 Machine、Linux ELF 的 386/amd64/arm64 Machine 与构建元数据一致；包内可执行文件 SHA-256、preview 版本标记和 ZIP CRC 通过。此项是交叉编译与归档检查，不是 Windows 运行验收。
 - 五个 Linux 包全部在 OrbStack 执行 version、完整 TOML init、Nginx/DataKit 和 IIS/OpenWay 的 render/status；核对架构、编译器、preview 版本、停用状态与文件摘要。
 - Linux 386 分别用 Go 1.20.14 / 1.26.8 编译并运行全量测试，均通过；是 OrbStack 的 x86 用户态仿真，不代表原生旧内核验收。
-- 实际候选二进制执行完整自动挂接 smoke：Linux 386 / Go 1.26.8 对 Nginx 1.9.4、Linux amd64 / Go 1.26.8 对 Apache 2.4.23、Linux arm64 / Go 1.26.8 对 Nginx 1.28.3（含 CDN 切换）均通过。覆盖确认、压缩、缓存、继承、隔离、启停回滚、故障恢复和完整撤销。
+- 实际候选二进制执行完整自动挂接 smoke：Linux 386 / Go 1.26.8 对 Nginx 1.9.4、Linux arm64 / Go 1.26.8 对 Nginx 1.28.3（含 CDN 切换）均通过。覆盖确认、压缩、缓存、继承、隔离、启停回滚、故障恢复和完整撤销。
 - Windows x86 选取 Sysnative 的路径与不具备 64 位管理宿主时的拒绝，经 Go 边界测试验证。Windows PowerShell 资产解析与可移植脚本边界在 OrbStack PowerShell 7.4 / Linux amd64 执行通过（设置 TEMP=/tmp，运行 legacy Linux CLI）；不据此认定 Windows PowerShell 3/5.1 或 IIS API 实测通过。
 
 最终用户入口为 USER-GUIDE.md；每包自带平台 README、TOML 示例、兼容性、操作/恢复说明、版本说明、SDK 元数据及第三方许可。发布脚本将用户版本写入实际可执行文件，build.json 记录源码提交、编译器、目标和二进制摘要；下载目录包含索引与 SHA256SUMS。最终分发包需与这些已运行候选二进制逐字节对照，并核对归档文档对应提交的源码。
 
-证据日志：/tmp/rumable-preview-candidate-build.log、/tmp/rumable-preview-go-preflight.log、/tmp/rumable-preview-x86-tests.log、/tmp/rumable-preview-race.log、/tmp/rumable-preview-nginx-x86.log、/tmp/rumable-preview-apache-x64.log、/tmp/rumable-preview-nginx-arm64-cdn.log、/tmp/rumable-preview-powershell-portable.log。Windows 所有架构、IIS 7.5/10、旧 Windows / Linux 内核及真实 OpenWay/DataKit 入库继续列为未验收；Windows ARM64 包尤其不能视为 ARM64 IIS 能力保证。
+证据日志：/tmp/rumable-preview-candidate-build.log、/tmp/rumable-preview-go-preflight.log、/tmp/rumable-preview-x86-tests.log、/tmp/rumable-preview-race.log、/tmp/rumable-preview-nginx-x86.log、/tmp/rumable-preview-nginx-arm64-cdn.log、/tmp/rumable-preview-powershell-portable.log。Windows 所有架构、IIS 7.5/10、旧 Windows / Linux 内核及真实 OpenWay/DataKit 入库继续列为未验收；Windows ARM64 包尤其不能视为 ARM64 IIS 能力保证。
 
 ## 2026-10-20 · 服务端 OTel 源码验收
 
@@ -351,9 +423,8 @@ Windows/IIS、旧内核、真实 OpenWay/DataKit 入库仍未执行；CDN 模式
 | Go | OrbStack Linux arm64，Go 1.20.14 / 1.26.9 全量 test、vet 和发布归档契约测试通过；1.26.9 race 通过 |
 | Windows 构建 | Go 1.26.9 交叉编译 Windows 386/amd64/arm64，通过；不是 Windows 运行验证 |
 | Nginx OTel | Linux arm64：Nginx 1.25.3 + 官方模块 0.1.0、Nginx 1.28.3 + 官方模块 0.1.2，真实 Trace 链路全流程通过 |
-| Apache OTel | Linux amd64（OrbStack 仿真）：Apache 2.4.69 + webserver/v1.0.4 SDK + Rumable 隔离修复，真实 Trace 链路全流程通过；构建脚本输出也已实际用于该验收 |
 | Collector | 实际运行官方 Collector 0.163.1，原生模块发送 OTLP/gRPC，Collector 转成 OTLP/HTTP protobuf 至私有测试接收器 |
-| 原有 RUM | Nginx 1.9.4、Apache 2.4.23 自动挂接回归通过；各自完整 RUM smoke 也通过，覆盖压缩、缓存、继承、HEAD、启停、升级及恢复 |
+| 原有 RUM | Nginx 1.9.4 自动挂接与完整 RUM smoke 回归通过，覆盖压缩、缓存、继承、HEAD、启停、升级及恢复 |
 | Chrome | 本机 Chrome / Nginx 1.28.3：同时启用时一个 init、一个 SDK 标签，SDK 状态 initialized、Fetch 返回正常 JSON；停用 RUM 后无脚本、SDK=false、交互正常，Console 无错误/警告 |
 | IIS 脚本 | OrbStack PowerShell 7.4 / Linux amd64：桥接与实机验收脚本解析、可移植快照和 OTel mock 契约测试通过；未运行 Windows/IIS/.NET Agent |
 
@@ -361,13 +432,13 @@ Windows/IIS、旧内核、真实 OpenWay/DataKit 入库仍未执行；CDN 模式
 
 另外在 Nginx 1.25.3 执行纯 OTel 首次挂接：保留输出 gzip、原强 ETag、继承的 Host/Authorization，无 HTML 注入，JSON 页面可探测，API Trace 到达私有接收器，撤销后恢复原文件。原生装载失败的真实候选配置也已验证自动恢复；旧模块使用 HTTPS 在写入/创建挂接备份前被拒绝。
 
-回归中修复的具体边界：旧版 ngx_otel_module 使用不带 http:// 的 gRPC host:port，允许 origin 末尾 `/` 时规范化；旧模块不伪装支持 TLS。探测重新建立连接，避免被 keep-alive 固定到旧 worker，并检查 OTel 配置代次。Apache 校验请求级 OFF、受管模块块的精确所有权和原生 ABI，拒绝原版未修复模块与无效 ELF 装载。依赖站点正常提交的启停配置不会被误判成外部修改；未提交的编辑仍阻止恢复。
+回归中修复的具体边界：旧版 ngx_otel_module 使用不带 http:// 的 gRPC host:port，允许 origin 末尾 `/` 时规范化；旧模块不伪装支持 TLS。探测重新建立连接，避免被 keep-alive 固定到旧 worker，并检查 OTel 配置代次。依赖站点正常提交的启停配置不会被误判成外部修改；未提交的编辑仍阻止恢复。
 
 IIS mock 覆盖协议、Token 转义、采样百分比、x86/x64/runtime 切换、业务环境变量保留、回滚池名边界；快照测试覆盖提交前池归属/元数据/环境漂移与未变化压缩的零写入。Go 测试另覆盖 Dataway Token 轮换触发部署、单组件操作不应用另一组件尚未部署的 TOML 参数、共享 exporter 冲突、状态/私有资源校验及外部修改恢复保护。
 
-本轮可追溯构建材料：Nginx 1.25.3 模块 `nginx-module-otel_1.25.3+0.1.0-1~bookworm_arm64.deb`，SHA-256 `7a39abec8ac3b0f3f00f03d26c2264915bb9c48ce1e1a638f41a8407dd8bcf74`。Apache 构建产物模块 SHA-256 `7f500be0d2166e049e919852a0d0a9b9cb8b4316dd1bbac5eecdbd6e937cd931`，带 `rumable-apache-isolation-v1` 标记和上游许可；上游发布标签是 webserver/v1.0.4，附件内部 VERSION.txt 为 1.0.3GA，不将二者混写。
+本轮可追溯构建材料：Nginx 1.25.3 模块 `nginx-module-otel_1.25.3+0.1.0-1~bookworm_arm64.deb`，SHA-256 `7a39abec8ac3b0f3f00f03d26c2264915bb9c48ce1e1a638f41a8407dd8bcf74`。
 
-主要证据：`/tmp/rumable-otel-nginx-final.log`、`/tmp/rumable-otel-nginx125-final.log`、`/tmp/rumable-otel-apache-final.log`、`/tmp/rumable-otel-builder.log`、`/tmp/rumable-otel-nginx-native-failure.log`、`/tmp/rumable-otel-nginx-only.log`、`/tmp/rumable-otel-nginx-origin-slash.log`、`/tmp/rumable-otel-go120.log`、`/tmp/rumable-otel-go126.log`、`/tmp/rumable-otel-powershell.log`、`/tmp/rumable-otel-legacy-nginx.log`、`/tmp/rumable-otel-legacy-apache.log`。临时日志仅在本机保留，不随分发包提供。
+主要证据：`/tmp/rumable-otel-nginx-final.log`、`/tmp/rumable-otel-nginx125-final.log`、`/tmp/rumable-otel-builder.log`、`/tmp/rumable-otel-nginx-native-failure.log`、`/tmp/rumable-otel-nginx-only.log`、`/tmp/rumable-otel-nginx-origin-slash.log`、`/tmp/rumable-otel-go120.log`、`/tmp/rumable-otel-go126.log`、`/tmp/rumable-otel-powershell.log`、`/tmp/rumable-otel-legacy-nginx.log`。临时日志仅在本机保留，不随分发包提供。
 
 复验从源码目录运行：
 
@@ -375,11 +446,10 @@ IIS mock 覆盖协议、Token 转义、采样百分比、x86/x64/runtime 切换�
 go test ./...
 go vet ./...
 # 先准备匹配原生模块的镜像和 Linux arm64 Collector；本脚本针对本机 ARM64 OrbStack。
-OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=nginx NGINX_IMAGE=rumable-nginx-otel:1.25.3 bash scripts/smoke-otel.sh
-OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=apache APACHE_IMAGE=rumable-apache-otel:1.0.4-built bash scripts/smoke-otel.sh
+OTELCOL_BINARY=/path/to/linux-arm64/otelcol NGINX_IMAGE=rumable-nginx-otel:1.25.3 bash scripts/smoke-otel.sh
 ```
 
-模块与 Collector 安装、Apache 修复构建、IIS 管理员执行步骤见 [OTel 使用手册](otel.md)。Nginx 镜像分别预装对应官方 deb；Apache 镜像使用 `build-apache-otel.sh` 输出的 SDK，并配置动态库路径与日志目录权限。镜像是本轮本机验证环境，不是已发布的可下载镜像。
+模块与 Collector 安装、IIS 管理员执行步骤见 [OTel 使用手册](otel.md)。Nginx 镜像分别预装对应官方 deb。镜像是本轮本机验证环境，不是已发布的可下载镜像。
 
 未完成：Windows/IIS 10 原生 API、实际池回收、.NET Framework/ASP.NET Core Agent、Windows 7/Server 2008 R2 等旧系统；原生 TLS 握手/证书验收；真实 DataKit/Dataway 服务与观测云入库。Dataway 验证使用模拟空间 Token 和私有协议接收器，不能称为真实账号接入。IIS OTel 仅支持独占 .NET 应用池，静态页/Classic ASP/纯代理没有 .NET Span；旧 IIS 继续按 RUM 验收，不承诺 OTel。
 
@@ -401,15 +471,14 @@ OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=apache APACHE_IMAGE=rumable-a
 | Go | OrbStack Linux arm64：Go 1.20.14 / 1.26.9 全量 test、vet、SDK 同步及发布归档契约测试通过；1.26.9 race 通过 |
 | SDK | 发布前在线同步官方稳定 v3，仍为 3.3.21，SHA-256 `67c7d58349e376864f3297e9e6d4a60453ede6ff0c6f6b1900a74c2a44d4d3b1` |
 | Nginx OTel | 候选 Linux arm64 程序对 Nginx 1.25.3 / 官方模块 0.1.0、1.28.3 / 官方模块 0.1.2 完整流程通过；真实模块→Collector→私有 OTLP 接收器，包含 DataKit gRPC 和 Dataway HTTP/protobuf/Token 分支 |
-| Apache OTel | 候选 Linux amd64 程序对 Apache 2.4.69 / 已修复模块完整流程通过，包含拒绝未修复模块、站点隔离、独立启停、采样、故障恢复和原文件撤销 |
-| 最低 RUM 版本 | 候选 Linux x86 对 Nginx 1.9.4、Linux x64 对 Apache 2.4.23 的完整自动挂接回归通过，覆盖压缩、缓存、继承、确认、启停回滚、并发修改拒绝及备份保留 |
-| 五个 Linux 包 | x86/x64/ARM64 现代包和 x86/x64 legacy 包在 OrbStack 实际执行 version、完整 RUM init、三个服务器 OTel 示例 render/status，均通过；x86/x64 使用仿真，共享现代内核 |
+| 最低 RUM 版本 | 候选 Linux x86 对 Nginx 1.9.4 的完整自动挂接回归通过，覆盖压缩、缓存、继承、确认、启停回滚、并发修改拒绝及备份保留 |
+| 五个 Linux 包 | x86/x64/ARM64 现代包和 x86/x64 legacy 包在 OrbStack 实际执行 version、完整 RUM init、随包 OTel 示例 render/status，均通过；x86/x64 使用仿真，共享现代内核 |
 | Windows 与归档 | 交叉编译全部五个 Windows 包；PE/ELF 机器类型、编译器、preview 标记、二进制 SHA-256、ZIP CRC、Linux 可执行模式、包内文档链接和 OTel 示例检查通过 |
 | PowerShell | OrbStack PowerShell 7.4/Linux：IIS 快照与 OTel mock 通过；RUM/OTel 桥接和 Windows OTel 验收脚本解析通过。未执行 Windows/IIS API |
 
-本轮不改浏览器 SDK 或初始化行为，Chrome 的实际证据沿用上一节 OTel 源码验收记录，没有将其计为本轮重新执行。各包携带最终用户指南、三种 OTel 示例、原生模块安装/构建和 Dataway 配置步骤、Windows 实机脚本；原生模块、.NET Agent、Collector 需另行安装，不包含在 CLI 中。
+本轮不改浏览器 SDK 或初始化行为，Chrome 的实际证据沿用上一节 OTel 源码验收记录，没有将其计为本轮重新执行。各包携带最终用户指南、OTel 示例、原生模块安装/构建和 Dataway 配置步骤、Windows 实机脚本；原生模块、.NET Agent、Collector 需另行安装，不包含在 CLI 中。
 
-主要日志：`/tmp/rumable-preview2-rc3-build.log`、`/tmp/rumable-preview2-race.log`、`/tmp/rumable-preview2-otel-nginx125.log`、`/tmp/rumable-preview2-otel-nginx128.log`、`/tmp/rumable-preview2-otel-apache.log`、`/tmp/rumable-preview2-rum-nginx194.log`、`/tmp/rumable-preview2-rum-apache2423.log`、`/tmp/rumable-preview2-linux-matrix.log`、`/tmp/rumable-preview2-review-ps.log`、`/tmp/rumable-preview2-existing-output.log`。这些是本机日志，不随包分发。Windows/IIS 实机、旧内核、原生 TLS、真实 DataKit/Dataway 与观测云入库仍未验收；私有协议接收器成功不能替代真实入库。
+主要日志：`/tmp/rumable-preview2-rc3-build.log`、`/tmp/rumable-preview2-race.log`、`/tmp/rumable-preview2-otel-nginx125.log`、`/tmp/rumable-preview2-otel-nginx128.log`、`/tmp/rumable-preview2-rum-nginx194.log`、`/tmp/rumable-preview2-linux-matrix.log`、`/tmp/rumable-preview2-review-ps.log`、`/tmp/rumable-preview2-existing-output.log`。这些是本机日志，不随包分发。Windows/IIS 实机、旧内核、原生 TLS、真实 DataKit/Dataway 与观测云入库仍未验收；私有协议接收器成功不能替代真实入库。
 
 ## 2026-10-20 · Windows/IIS OTel 加固复审（未发布源码）
 
@@ -432,9 +501,9 @@ OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=apache APACHE_IMAGE=rumable-a
 - OrbStack Linux arm64：Go 1.20.14 / 1.26.9 全量 test、vet 通过；Go 1.26.9 race 和发布归档契约测试通过。新增 IIS 边界测试仅替换 Windows API 调用，执行真实事务落盘、历史、回收调用顺序、失败恢复与普通启用/停用快照回滚；另含提交后 HTTP 503 的恢复。
 - Microsoft PowerShell 7.4 / Linux amd64：受影响 PS 脚本解析、IIS 快照及 OTel 契约 mock 通过。快照回归覆盖池名、身份、用户、位数、CLR、管线、归属应用和环境漂移；重复环境顺序变化不写入/不回收。
 - Go 1.26.9 交叉编译 Windows x86/x64/ARM64，Go 1.20.14 编译 Windows x86/x64；五个 PE 的 Machine、Go 编译器、GOOS/GOARCH 和 CGO=0 检查通过，未执行 Windows 程序。
-- 共用部署代码的 Linux 运行回归：Nginx 1.28.3 / 模块 0.1.2（arm64），Apache 2.4.69 / 已修复模块（amd64 仿真），完整原生 OTel→Collector→私有接收器流程通过，包括独立启停、故障恢复和撤销。
+- 共用部署代码的 Linux 运行回归：Nginx 1.28.3 / 模块 0.1.2（arm64），完整原生 OTel→Collector→私有接收器流程通过，包括独立启停、故障恢复和撤销。
 
-本机日志：`/tmp/rumable-iis-otel-hardening-go120.log`、`/tmp/rumable-iis-otel-hardening-go126.log`、`/tmp/rumable-iis-otel-hardening-race.log`、`/tmp/rumable-iis-otel-hardening-powershell.log`、`/tmp/rumable-iis-otel-hardening-build.log`、`/tmp/rumable-iis-otel-hardening-pe.log`、`/tmp/rumable-iis-otel-hardening-nginx.log`、`/tmp/rumable-iis-otel-hardening-apache.log`。
+本机日志：`/tmp/rumable-iis-otel-hardening-go120.log`、`/tmp/rumable-iis-otel-hardening-go126.log`、`/tmp/rumable-iis-otel-hardening-race.log`、`/tmp/rumable-iis-otel-hardening-powershell.log`、`/tmp/rumable-iis-otel-hardening-build.log`、`/tmp/rumable-iis-otel-hardening-pe.log`、`/tmp/rumable-iis-otel-hardening-nginx.log`。
 
 尚未执行：Windows PowerShell 5.1、Microsoft.Web.Administration 的实际提交/池回收、IIS WorkerProcesses 枚举、ACL/双站点清理、真实 .NET Framework/ASP.NET Core Agent、旧 Windows、TLS 和 DataKit/Dataway/观测云入库。增强后的 Windows 验收脚本只做解析检查，未把脚本中的待执行断言列为通过。源码变更未改 Web SDK/初始化行为，本轮未重跑 Chrome。
 

@@ -1,30 +1,24 @@
 # TOML 配置参考
 
-浏览器 RUM 与服务端 OTel 分别使用 `[sites.rum]` / `[sites.otel]`。`rum.enabled` 省略时为 true，显式 false 时不要求浏览器凭据；省略 otel 表保持旧行为。服务端参数、采样实际能力、模块要求和三种服务器示例见 [OTel 配置手册](otel.md)。`enable/disable --component rum|otel` 保留另一组件的当前状态；`enable` 不带组件时按 TOML 应用两者，`disable` 不带组件时全部停用。
+浏览器 RUM 与服务端 OTel 分别使用 `[sites.rum]` / `[sites.otel]`。`rum.enabled` 省略时为 true，显式 false 时不要求浏览器凭据；省略 otel 表保持旧行为。modulePath/agentPath 可省略，配合 install-otel 自动准备；[sites.otel.install] 支持 archive/url、必填 sha256，见[安装配置](otel-installation.md)。服务端参数、采样实际能力、模块要求和两种服务器示例见 [OTel 配置手册](otel.md)。`enable/disable --component rum|otel` 保留另一组件的当前状态；OTel 单组件命令也保留已部署的 SDK、脚本和 CDN 引用，不顺带更新 Web SDK；`enable` 不带组件时按 TOML 应用两者，`disable` 不带组件时全部停用。
 
-IIS 源码加固版本的 RUM 单组件命令保留已部署的 OTel 凭据；修改 Dataway Token 后使用普通 enable 或 enable --component otel 应用。rollback 使用保存的凭据，仍会检查目标池/Agent 的兼容条件。ASP.NET Core 的 runtime=dotnet 要求 No Managed Code 池，netframework 要求 v4 Integrated；CLI 不自动修改 CLR 设置。
+IIS 的 RUM 单组件命令保留已部署的 OTel 凭据；修改 Dataway Token 后使用普通 enable 或 enable --component otel 应用。rollback 使用保存的凭据，仍会检查目标池/Agent 的兼容条件。ASP.NET Core 的 runtime=dotnet 要求 No Managed Code 池，netframework 要求 v4 Integrated；CLI 不自动修改 CLR 设置。
 
-配置按 `[[sites]]` 隔离，SDK 参数放在该站点的 `[sites.rum]` 下。`rumable init` 默认生成精简配置，只展示接入和回放开关；`rumable init --full` 与[完整模板](../examples/full.toml)包含全部静态 SDK 参数。`--server nginx|apache|iis` 选择服务器，`--reporting openway|datakit` 选择上报方式，默认 nginx / openway。例如 `rumable init --server apache --reporting datakit`。所有组合默认关闭回放；IIS 初始配置不预先允许压缩调整。
+配置按 `[[sites]]` 隔离，SDK 参数放在该站点的 `[sites.rum]` 下。`rumable init` 默认生成精简配置，只展示接入和回放开关；`rumable init --full` 与[完整模板](../examples/full.toml)包含全部静态 SDK 参数。`--server nginx|iis` 选择服务器，`--reporting openway|datakit` 选择上报方式，默认 nginx / openway。例如 `rumable init --server nginx --reporting datakit`。所有组合默认关闭回放；IIS 初始配置不预先允许压缩调整。
 
-init 默认站点 ID 为 example；可通过 `init --site website` 命名。单个配置站点的 render/check/enable 无需 --site；多个配置站点必须指定。attach/status/disable/rollback/probe 优先从受管状态选择：只有一个受管站点时无需原始 TOML，多个受管站点必须指定 --site。显式 --config、--state-dir、--site 的原用法保留。[Nginx 示例](../examples/nginx.toml)、[Apache 示例](../examples/apache.toml)和 [IIS 示例](../examples/iis.toml)也可直接编辑使用；注释字段为可选示例。
+init 默认站点 ID 为 example；可通过 `init --site website` 命名。单个配置站点的 render/check/enable 无需 --site；多个配置站点必须指定。attach/status/disable/rollback/probe 优先从受管状态选择：只有一个受管站点时无需原始 TOML，多个受管站点必须指定 --site。显式 --config、--state-dir、--site 的原用法保留。[Nginx 示例](../examples/nginx.toml)和 [IIS 示例](../examples/iis.toml)也可直接编辑使用；注释字段为可选示例。
 
 ## 服务器目标
 
-每个站点必须且只能配置一个 `[sites.nginx]`、`[sites.apache]` 或 `[sites.iis]`。`id`、`publicURL`、服务器类型及目标命令/参数绑定部署身份，不能原地迁移；迁移使用新 ID。SDK 参数和路径采集范围可修改后重新 enable。
+每个站点必须且只能配置一个 `[sites.nginx]` 或 `[sites.iis]`。`id`、`publicURL`、服务器类型及目标命令/参数绑定部署身份，不能原地迁移；迁移使用新 ID。SDK 参数和路径采集范围可修改后重新 enable。
 
-| Apache 参数 | 类型 / 默认值 | 说明 |
-|---|---|---|
-| `binary` | 字符串，必填 | Linux `httpd` / `apache2ctl` / `apachectl` 的可执行路径；不会通过 shell 拼接执行 |
-| `args` | 字符串数组，空 | 只允许成对 `-f 配置文件`、`-d ServerRoot`、`-D 自定义Define`；不允许注入配置、服务动作、进程或诊断模式 |
-| `attachmentReviewed` | 布尔，false | 人工挂接时表示已按 ATTACH.md 审查；成功的自动 attach 记录可以替代 true，无需编辑 TOML。初始停用/恢复不要求为 true；不能绕过版本、模块、有效 include 和配置检查 |
-
-Apache 运行操作限 Linux，macOS/Windows 可以预览生成文件；实际部署须保证生成路径与 Linux 命名空间一致，通常在 Linux 的最终固定目录重新 render，不能直接迁移路径不同的预览状态。资源和私有 Lua 过滤器使用内容哈希，并在启用/恢复前校验摘要。启用期间对 GET/HEAD 条件头、HTML 验证元数据、Range 和 mod_cache 的影响是固定正确性约束，详见 [Apache 手册](apache.md)。三个服务器共享以下全部 `[sites.rum]` 参数，包括 OpenWay / DataKit、回放、隐私与 Worker 设置。
+Nginx 和 IIS 共享以下全部 `[sites.rum]` 参数，包括 OpenWay / DataKit、回放、隐私与 Worker 设置。
 
 范围以发布包内的 **SDK 3.3.21** 为准：已开放其公开类型定义中未废弃、能用静态 TOML 表达的初始化参数。依据为官方 NPM 包 [browser-core 3.3.21](https://registry.npmjs.org/@cloudcare/browser-core/-/browser-core-3.3.21.tgz) 中的 `types/index.d.ts`，并核对内嵌 SDK 的校验和默认值。发布构建前同步最新稳定 v3，并重新测试；同域方式在站点执行 enable 时升级。
 
 ## SDK 加载方式
 
-三个服务器共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；RUM、回放及采样参数在两种加载方式下相同。
+Nginx 和 IIS 共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；RUM、回放及采样参数在两种加载方式下相同。
 
 | 参数 | 默认值 | 行为 |
 |---|---|---|

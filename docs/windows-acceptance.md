@@ -125,7 +125,7 @@ $report.cleanup
 
 ## 7. IIS 10 OTel 专项验收
 
-本节针对 preview.2 之后的源码修复，已有 dist 未重打。需构建当前源码的 Windows CLI，脚本与 CLI 使用同一版本。前述 IIS 7.5 RUM 验收不能替代本节。
+本节适用于 preview.3 及之后版本。使用对应发布包的 Windows CLI 和随包脚本，两者保持同一版本。前述 IIS 7.5 RUM 验收不能替代本节。
 
 准备 Windows 10/Server 2016+、IIS 10、64 位 Windows PowerShell 5.1、ASP.NET 4.x Integrated、.NET Framework 4.6.2+，预先安装并校验匹配目标池位数的官方 .NET Agent。机器/WAS/W3SVC 不得已有全局插桩。DataKit 先启用 gRPC 接收；Dataway 使用有效空间 Token，提前以已有安全方式设置到管理员进程的 tokenEnv 环境变量中。可选 WithRUM 需要 URL Rewrite 2 和静态文件能力。
 

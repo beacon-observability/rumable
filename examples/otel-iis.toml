@@ -18,7 +18,8 @@ enabled = true
 backend = "datakit"
 endpoint = "http://127.0.0.1:4317"
 serviceName = "iis-application"
-agentPath = 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
+# Omit agentPath; run install-otel before render. Explicit paths remain externally managed.
+# agentPath = 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
 runtime = "netframework" # ASP.NET Core uses dotnet and a No Managed Code pool.
 sampleRate = 100
 # Dataway sends directly via OTLP/HTTP: replace backend/endpoint below.

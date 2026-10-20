@@ -102,7 +102,7 @@ proxy_set_header If-Modified-Since "";
 NGINX
 # Existing business sub_filter rules must be repeated alongside the managed
 # location include, because Nginx replaces the parent's entire rule list.
-echo "sub_filter 'BUSINESS_ORIGINAL' 'BUSINESS_FILTERED';" > "$work/business-filter.conf"
+printf "%s\n" "sub_filter 'BUSINESS_ORIGINAL' 'BUSINESS_FILTERED';" "sub_filter 'use strict' 'PARENT_FILTER_CHANGED';" > "$work/business-filter.conf"
 cat > "$work/nginx.conf" <<'NGINX'
 user root;
 pid /work/smoke/nginx.pid;
@@ -280,6 +280,11 @@ for path in / /static.html /stream /split-head /conditional /validators /inherit
   done
 done
 old_script=$(script_url)
+cli disable --component rum
+fetch "$base$old_script"
+cmp "$work/body" "$work/state/sites/smoke/public/smoke/${old_script##*/}" || fail 'component disable changed cached-page bootstrap bytes through inherited filters'
+cli enable --component rum
+cli enable
 echo 'Stage: HEAD metadata follows the rewritten GET representation'
 for path in /static.html /validators /conditional /cache; do
   for encoding in identity gzip; do

@@ -1,59 +1,11 @@
 package rumable
 
 import (
-	"bytes"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
-
-func (c *attachConfig) checkApacheOTel(root string, s Site) (bool, error) {
-	owner, err := otelOwner(root, s)
-	if err != nil {
-		return false, err
-	}
-	ownerSite := s
-	if owner != s.ID {
-		st, err := loadState(root, owner)
-		if err != nil {
-			return false, err
-		}
-		ownerSite = st.Current.Site
-	}
-	block := insertBlock(ownerSite, "otel-module", "LoadModule otel_apache_module "+apacheQuote(s.OTel.ModulePath)+"\nApacheModuleEnabled OFF\n")
-	backup, _ := loadAttachment(root, ownerSite)
-	ownedModuleNode := func(n *attachNode) bool {
-		if backup.Phase != "attached" && backup.Phase != "applying" {
-			return false
-		}
-		for _, f := range backup.Files {
-			live := c.files[n.file]
-			start := bytes.Index(live, []byte(block))
-			if f.Path == n.file && bytes.Count(f.After, []byte(block)) == 1 && bytes.Count(live, []byte(block)) == 1 && n.start >= start && n.stop <= start+len(block) {
-				return true
-			}
-		}
-		return false
-	}
-	loaded := false
-	err = visitNodes(c.root, func(n *attachNode) error {
-		if strings.EqualFold(n.words[0], "LoadModule") && len(n.words) > 2 && n.words[1] == "otel_apache_module" {
-			if filepath.Clean(n.words[2]) != filepath.Clean(s.OTel.ModulePath) {
-				return fmt.Errorf("another Apache OTel module is loaded at %s", n.key())
-			}
-			if !ownedModuleNode(n) {
-				return fmt.Errorf("unmanaged Apache OTel module at %s; automatic attachment must own its global OFF baseline", n.key())
-			}
-			loaded = true
-		}
-		if strings.HasPrefix(strings.ToLower(n.words[0]), "apachemodule") && !managedOTelFile(root, n.file) && !ownedModuleNode(n) {
-			return fmt.Errorf("unmanaged Apache OTel directive at %s", n.key())
-		}
-		return nil
-	})
-	return loaded, err
-}
 
 func otelPaths(s Site) (include, exclude []string) {
 	include = append([]string{}, s.OTel.Include...)
@@ -110,36 +62,7 @@ func renderNginxOTel(n *Snapshot) {
 	n.Files["server.conf"] = append(n.Files["server.conf"], fmt.Sprintf("location = %s {\n    otel_trace off;\n    otel_trace_context ignore;\n    default_type text/plain;\n    expires -1;\n    return 200 %s;\n}\n", nginxQuote(s.assetPrefix()+"otel-status.json"), nginxQuote(n.otelGeneration()))...)
 }
 
-func apacheOTel(s Site, active bool) string {
-	o := s.OTel
-	if o == nil {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "ApacheModuleOtelSpanExporter otlp\nApacheModuleOtelExporterEndpoint %s\nApacheModuleOtelSpanProcessor batch\nApacheModuleOtelScheduledDelayMillis 1000\nApacheModuleServiceName %s\nApacheModuleServiceNamespace rumable\nApacheModuleServiceInstanceId %s\n", apacheQuote(strings.TrimPrefix(strings.TrimPrefix(o.nativeEndpoint(s), "http://"), "https://")), apacheQuote(o.ServiceName), apacheQuote(o.ServiceName))
-	if strings.HasPrefix(o.nativeEndpoint(s), "https://") {
-		b.WriteString("ApacheModuleOtelSslEnabled ON\n")
-		if o.TrustedCA != "" {
-			fmt.Fprintf(&b, "ApacheModuleOtelSslCertificatePath %s\n", apacheQuote(o.TrustedCA))
-		}
-	}
-	inc, exc := otelPaths(s)
-	for i := range inc {
-		inc[i] = regexp.QuoteMeta(inc[i])
-	}
-	for i := range exc {
-		exc[i] = regexp.QuoteMeta(exc[i])
-	}
-	common := b.String()
-	b.Reset()
-	b.WriteString("<Location \"/\">\n    ApacheModuleEnabled OFF\n</Location>\n")
-	if active && o.rate() > 0 {
-		fmt.Fprintf(&b, "<LocationMatch %s>\n%s    ApacheModuleEnabled ON\n    ApacheModuleWebserverContext %s rumable %s\n</LocationMatch>\n", apacheQuote("^(?!(?:"+strings.Join(exc, "|")+"))(?:"+strings.Join(inc, "|")+")"), common, apacheQuote(o.ServiceName), apacheQuote(s.ID))
-	}
-	return b.String()
-}
-
-func nginxOTelAttachment(c *attachConfig, root string, s Site, selected *attachNode) ([]attachEdit, error) {
+func nginxOTelAttachment(c *attachConfig, root string, s Site) ([]attachEdit, error) {
 	if s.OTel == nil {
 		return nil, nil
 	}
@@ -169,11 +92,9 @@ func nginxOTelAttachment(c *attachConfig, root string, s Site, selected *attachN
 	if loaded {
 		return nil, nil
 	}
-	main := selected
-	for main.parent != c.root {
-		main = main.parent
-	}
-	return []attachEdit{{main.file, 0, 0, insertBlock(s, "otel-module", "load_module "+nginxQuote(s.OTel.ModulePath)+";\n")}}, nil
+	// A main-context include can appear after events/http. Dynamic modules must
+	// load before those blocks, at the start of the actual entry configuration.
+	return []attachEdit{{c.root.file, 0, 0, insertBlock(s, "otel-module", "load_module "+nginxQuote(s.OTel.ModulePath)+";\n")}}, nil
 }
 
 func checkNginxOTel(root string, s Site, version, dump []byte) error {
@@ -227,7 +148,7 @@ func managedOTelFile(root, file string) bool {
 	if len(parts) != 2 || !idPattern.MatchString(parts[0]) {
 		return false
 	}
-	if !contains([]string{"http.conf", "location.conf", "server.conf", "apache.conf"}, parts[1]) {
+	if !contains([]string{"http.conf", "location.conf", "server.conf"}, parts[1]) {
 		return false
 	}
 	st, err := loadState(root, parts[0])
