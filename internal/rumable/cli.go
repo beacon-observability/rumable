@@ -204,7 +204,7 @@ func Run(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return apply(root, st, s, activate, out)
+		return apply(root, st, s, activate, component, out)
 	}
 	if cmd == "attach" {
 		st, err := loadState(root, *id)
@@ -274,7 +274,7 @@ func Run(args []string, out io.Writer) error {
 	if err = s.validate(); err != nil {
 		return err
 	}
-	return apply(root, st, s, activate, out)
+	return apply(root, st, s, activate, component, out)
 }
 
 func componentSite(s Site, current Snapshot, component string, on bool) (Site, bool, error) {

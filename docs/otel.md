@@ -4,6 +4,8 @@ Rumable 可管理 Linux Nginx、Linux Apache 和 Windows IIS/.NET 的请求 Trac
 
 本能力包含在 `0.1.0-preview.2` 发布包中；旧 `0.1.0-preview.1` 不包含 OTel。直接使用与目标平台匹配的新包，无需为 CLI 安装 Go。这里只采集 HTTP 请求链路；应用内部方法、数据库等仍由对应语言 Agent/SDK 负责。
 
+本页的 IIS 事务分阶段、旧 worker 等待和增强验收脚本属于 preview.2 之后的源码修复，现有 dist 未重打。使用这些修复时需构建当前源码，脚本与 CLI 使用同一源码版本；本轮证据见[验证记录](verification.md)。
+
 ## 支持范围
 
 | 目标 | 插桩方式 | 本版要求 |
@@ -11,7 +13,7 @@ Rumable 可管理 Linux Nginx、Linux Apache 和 Windows IIS/.NET 的请求 Trac
 | Nginx | 官方 `ngx_otel_module` | Linux，Nginx 1.25.3+，与 Nginx 版本、发行版、架构匹配的模块；明文兼容模块 0.1.0；TLS/自定义 CA 需要 0.1.2+ |
 | Apache | 社区 webserver/v1.0.4 模块加 Rumable 请求隔离修复 | Linux x64，Apache 2.4.23+，匹配目标系统/Apache 头文件构建；原版模块会被自动拒绝 |
 | IIS/.NET Framework | 官方 .NET Automatic Instrumentation | IIS 10，Windows 10/Server 2016+，Windows PowerShell 5.1，.NET Framework 4.6.2+，v4 Integrated 独占应用池 |
-| IIS/ASP.NET Core | 同一 Agent 的 CLR profiler + startup hook | 同上，受 Agent 支持的 .NET 版本，按池位数安装 win-x64/win-x86 Agent；托管方式须在目标主机验收 |
+| IIS/ASP.NET Core | 同一 Agent 的 CLR profiler + startup hook | 同上，池的 CLR Version 必须为 No Managed Code，按池位数安装 win-x64/win-x86 Agent；托管方式须在目标主机验收 |
 
 IIS 的 OTel 首版支持 x64 Windows 上的 x64/x86 应用池，ARM64 会拒绝启用。静态文件、Classic ASP、纯反向代理不是 .NET 应用插桩的覆盖范围。旧 Nginx 1.9.4、旧 Windows/IIS 7.5 仍可使用原有 RUM；不能因 legacy Go CLI 能运行就推断 OTel 模块/Agent 也兼容。
 
@@ -154,7 +156,11 @@ APACHE_IMAGE=httpd:2.4 bash scripts/build-apache-otel.sh \
 
 IIS 自动完成应用池配置挂接，不需要 Linux 的 attach 命令。按实际池位数选择 win-x64/win-x86 profiler；netframework 使用 COR profiler，dotnet 使用 CORECLR profiler及启动钩子。切换时清理旧的受管 runtime 设置，恢复时按保存的原值处理。业务的其他环境变量不受影响。
 
-共享池、机器级 OTel/profiler/startup 设置、池中未受管的 OTel 覆盖项、已有非本工具管理的插桩配置、池身份/运行时/位数或归属应用变化会阻止相关操作。启用 OTel 不要求 URL Rewrite，不改压缩、HTML 或 CSP；同时启用 RUM 时才检查 RUM 的模块和压缩要求。不能保证 .NET 应用无需预热或无短暂回收影响。
+共享池、机器级及 WAS/W3SVC 服务级 OTel/profiler/startup 设置、池中未受管的 OTel 覆盖项、已有非本工具管理的插桩配置、池身份/运行时/位数或归属应用变化会阻止相关操作。包括 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT 等信号级覆盖项的外部修改也会进入漂移检查。ASP.NET Core 应用有效 aspNetCore/environmentVariables 中的 OTel/profiler 项也会拒绝，防止 web.config 或继承配置覆盖池参数；其优先级见[微软 ANCM 文档](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/web-config#configuration-of-environment-variables)。移除池设置不能消除外部插桩，因此冲突会阻止改变池插桩状态的停用/恢复，需先人工解决。
+
+启用 OTel 不要求 URL Rewrite，不改压缩、HTML 或 CSP；同时启用 RUM 时才检查 RUM 的模块和压缩要求。ASP.NET Core 必须使用 No Managed Code 池；工具不会自动改变池的 CLR/管线设置。[官方 IIS 说明](https://github.com/open-telemetry/opentelemetry-dotnet-instrumentation/blob/main/docs/iis-instrumentation.md)同时说明了这些池和全局环境配置条件。
+
+IIS 的配置提交和池回收分为两次调用：先记录已提交快照，再校验快照/归属并回收目标池。环境值未变时不回收；变更时最多等待旧 worker 退出 15 秒，超时或池未 Started 即失败，不强杀业务进程。失败恢复会重新回收原配置，即使上次恢复已写回配置；恢复仍失败则保留 transaction.json，解决进程/外部配置问题后执行 rollback 重试。配置提交完成但尚未记录快照时进程被强制终止，若现场不能与日志匹配，仍停止自动覆盖并要求人工审查。不能保证 .NET 应用无需预热或无短暂回收影响。
 
 ## 启停、回滚和验收
 
@@ -172,7 +178,7 @@ rumable rollback --attachment        # Linux：确认后恢复首次业务配置
 
 原有 RUM 部署不带 OTel 模块入口，不能仅补一张表后假定已经挂接。升级时先停用并撤销原自动挂接，保留旧状态备份和缓存所需资产，然后以新站点 ID/状态目录重新 render、预览及挂接；IIS 残留的旧资源映射需按原部署记录审查处理。不会静默删除旧配置或接管未知规则。
 
-单组件命令保留另一组件已部署的参数与开关，不应用其尚未部署的 TOML 修改。所有多站点命令应显式传入 --site。
+单组件命令保留另一组件已部署的参数与开关，不应用其尚未部署的 TOML 修改。IIS 的 RUM 单组件操作还保留已部署的 Dataway Token，不重新读取当前进程的 Token，也不重新检查未变化的 Agent/接收端；OTel 环境不变时不会回收池。普通 enable/enable --component otel 才应用 Token 轮换。rollback 会检查目标 Agent/池条件，并使用已保存凭据，无需当前 Token 环境变量。所有多站点命令应显式传入 --site。
 
 配置检查、提交、reload/池回收、HTTP 探测失败时恢复本次受管变更；首次挂接的候选配置令原生解析失败时，也会在来源与受管字节未漂移的前提下恢复原文件。发现外部修改时停止覆盖并保留事务。HTTP 探测每次重新建立连接，Linux 专属配置生效探针进一步区分新旧 worker，并在相隔 200ms 的连续两轮均成功后才确认启停，覆盖 Nginx 先启动新 worker、再通知旧 worker 退出的窗口。停用不保证中止已有请求，已排队的 Span 可以继续上报。
 
@@ -183,10 +189,11 @@ Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像为 arm64、Apache �
 ```powershell
 .\scripts\windows-otel-smoke.ps1 -Binary C:\Rumable\rumable.exe `
   -AgentPath 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation' `
-  -Backend datakit -Endpoint http://127.0.0.1:4317
+  -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x64-01
 # 32 位应用池：再执行一遍并加 -X86。
 # Dataway：先在当前进程安全设置 RUMABLE_DATAWAY_TOKEN，再替换这两个参数：
 # -Backend dataway -Endpoint https://dataway.example.com/otel
+# 已安装 URL Rewrite 2 时加 -WithRUM，覆盖两种能力的独立启停。
 ```
 
-该脚本创建独立站点/池，验证环境、采样、重复启用、提交后 HTTP 失败恢复、共享池和外部修改阻止、停用及回滚，并输出需在观测云查询的 Trace ID。默认清理测试站点；`-Keep` 保留用于排查，之后手动清理。它不会修改其他站点或全局服务。当前主机无 Windows/IIS，本轮只有 PowerShell 解析和桥接契约 mock 检查；Windows 实机、ASP.NET Core 托管方式和真实后端入库仍需验收。
+该脚本创建两个独立站点/池，以实际环境值和 PID 验证目标进程变更、重复启停不回收、旁站不变、提交后 HTTP 失败恢复、共享池/外部修改拒绝，以及凭据缺失时的回滚；WithRUM 另测双开关和 RUM 操作不改变 OTel 凭据/PID。结果目录必须为新目录，保存 cli.log、report.json 和待查询的 Trace ID；默认清理临时站点，日志保留，Keep 会保留两组资源。报告 passed 只代表脚本断言通过，仍需查询 Trace 才能证明入库。完整命令与结果读取见[Windows 验收](windows-acceptance.md#7-iis-10-otel-专项验收)。当前主机无 Windows/IIS，Windows 实机、ASP.NET Core 托管方式和真实后端入库仍需验收。

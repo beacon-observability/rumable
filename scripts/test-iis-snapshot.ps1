@@ -40,11 +40,13 @@ try {
     $snapshot.otel = @{pool='Dedicated';runtime='v4.0';pipeline='Integrated';x86=$false;identity='ApplicationPoolIdentity';user='';applications=@('Site/');environment=@{OTEL_SERVICE_NAME='original'}}
     $saved=$snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
     Assert-Snapshot $saved $snapshot
-    foreach ($change in @('environment','pool','applications')) {
+    foreach ($change in @('environment','pool','applications','runtime','pipeline','x86','identity','user')) {
         $live=$snapshot.Clone();$live.otel=$snapshot.otel.Clone()
         if ($change -eq 'environment') {$live.otel.environment=@{OTEL_SERVICE_NAME='external'}}
         elseif ($change -eq 'pool') {$live.otel.pool='AnotherPool'}
-        else {$live.otel.applications=@('Site/','Other/')}
+        elseif ($change -eq 'applications') {$live.otel.applications=@('Site/','Other/')}
+        elseif ($change -eq 'x86') {$live.otel.x86=$true}
+        else {$live.otel[$change]='external-change'}
         try {Assert-Snapshot $saved $live;throw 'Concurrent change was accepted.'} catch {if ($_.Exception.Message -notlike '*changed before commit*') {throw}}
     }
     $target = 'Other Site'; $site.iis.site = 'Other Site'

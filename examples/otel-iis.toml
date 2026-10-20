@@ -19,7 +19,7 @@ backend = "datakit"
 endpoint = "http://127.0.0.1:4317"
 serviceName = "iis-application"
 agentPath = 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
-runtime = "netframework" # Or dotnet for ASP.NET Core.
+runtime = "netframework" # ASP.NET Core uses dotnet and a No Managed Code pool.
 sampleRate = 100
 # Dataway sends directly via OTLP/HTTP: replace backend/endpoint below.
 # backend = "dataway"

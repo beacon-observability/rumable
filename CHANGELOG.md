@@ -1,5 +1,14 @@
 # 版本说明
 
+## 未发布 · IIS OTel 加固
+
+- 丢弃 IIS Recycle 的状态返回值，修复桥接 JSON 被额外输出破坏；mock 同步模拟真实返回契约。
+- RUM 单组件操作保留已部署的 OTel 凭据和池进程，不因当前 Token 缺失/轮换改变 OTel；回滚使用保存的凭据。
+- IIS 配置提交后先持久化事务，再独立回收目标池；失败恢复和重复恢复均重试原进程代次，保留未完成日志与外部修改保护。
+- 等待被回收的旧 worker 退出，超时保留恢复状态，不强杀业务进程；重复启停不回收。
+- 拒绝 WAS/W3SVC 全局插桩、未受管信号级 OTEL 覆盖、ASP.NET Core 应用级覆盖及不适合的 CLR 池配置；Windows ARM64 的 x64 仿真宿主同样拒绝 OTel。
+- 修复 Windows OTel 验收资源名与清理校验不一致，增加独立结果目录、旁站池/PID 隔离和可选 RUM/OTel 联合验收。现有 preview.2 dist 未重打；实际验证见[验证记录](docs/verification.md)。
+
 ## 0.1.0-preview.2 · 2026-10-20
 
 - 增加 Linux Nginx、Linux Apache、IIS/.NET 的站点级 OTel 配置，RUM/OTel 独立开关和组件启停。

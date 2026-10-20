@@ -226,6 +226,8 @@ rumable enable --config /etc/rumable/server-otel.toml --state-dir /var/lib/rumab
 
 IIS 使用管理员的 64 位 Windows PowerShell 5.1，执行 render、check、enable；不需要 attach，不重启整台 IIS。纯 OTel 不需要 URL Rewrite，也不改变压缩或 CSP：
 
+ASP.NET Core 的应用池需设置 No Managed Code；.NET Framework 使用 v4 Integrated。WAS/W3SVC 或机器级已有全局插桩时应先处理冲突，不能用站点开关隔离未知全局设置。preview.2 之后的 IIS 加固及验收步骤见 [OTel 手册](docs/otel.md#iis-安装和操作)，现有 dist 未包含这轮源码修复。
+
 ```powershell
 .\rumable.exe render --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel
 .\rumable.exe check --config .\otel-iis.toml --state-dir C:\ProgramData\RumableOTel

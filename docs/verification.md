@@ -411,6 +411,35 @@ OTELCOL_BINARY=/path/to/linux-arm64/otelcol SERVER=apache APACHE_IMAGE=rumable-a
 
 主要日志：`/tmp/rumable-preview2-rc3-build.log`、`/tmp/rumable-preview2-race.log`、`/tmp/rumable-preview2-otel-nginx125.log`、`/tmp/rumable-preview2-otel-nginx128.log`、`/tmp/rumable-preview2-otel-apache.log`、`/tmp/rumable-preview2-rum-nginx194.log`、`/tmp/rumable-preview2-rum-apache2423.log`、`/tmp/rumable-preview2-linux-matrix.log`、`/tmp/rumable-preview2-review-ps.log`、`/tmp/rumable-preview2-existing-output.log`。这些是本机日志，不随包分发。Windows/IIS 实机、旧内核、原生 TLS、真实 DataKit/Dataway 与观测云入库仍未验收；私有协议接收器成功不能替代真实入库。
 
+## 2026-10-20 · Windows/IIS OTel 加固复审（未发布源码）
+
+本轮针对 preview.2 之后的源码，未覆盖原发布包或改变 v0.1.0-preview.2 标签。当前主机为 macOS，OrbStack 仅有 Linux 环境，没有 Windows/IIS 测试机；下面区分真实 Go 事务运行、PowerShell mock、交叉编译和仍需实机执行的项目。
+
+修复与保护的具体行为：
+
+| 问题 | 修复及回归 |
+|---|---|
+| IIS Recycle 返回值污染桥接 JSON | [官方 API](https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.administration.applicationpool.recycle)返回 ObjectState，原 mock 的 void 签名漏检。生产代码显式丢弃返回值，mock 改为返回状态，验证回收有动作时仍无多余输出；未将此合同检查算作 IIS 实机运行 |
+| 单独操作 RUM 会读取当前 Dataway Token | RUM 命令保留已部署 OTel 环境与凭据摘要，不再重新检查未变化的 Agent/接收器。Go 测试覆盖 Token 缺失及轮换且接收端不可达时的幂等 RUM 操作；PS mock 验证实际环境保留，不触发回收 |
+| 回收失败先于事务记录，恢复后的进程状态无法确认 | IIS apply/restore 只提交配置；Go 先持久化已提交快照，再以独立 activate 调用校验归属并回收。真实 Go 日志/状态代码覆盖回收失败、恢复回收再次失败、已恢复配置的后续重试，以及重试期间外部池修改拒绝 |
+| 旧 worker 在 overlapped recycle 后继续使用旧 exporter | 回收前记录本池 worker，最多等待其退出 15 秒；不强杀进程。超时或池未 Started 时失败并保留恢复日志。PS mock 使用真实 Linux 子进程及 .NET Process API 验证等待，不将它算成 IIS 回收实测 |
+| 外部 OTel 设置绕过站点参数或停用 | 增加 WAS/W3SVC 服务环境检查、所有 OTEL_* 和通用 profiler path 的漂移捕获；ASP.NET Core 检查有效 aspNetCore/environmentVariables，拒绝应用级覆盖。PS mock 覆盖共享池、服务/应用覆盖、冲突时零写入及未知信号级 exporter |
+| Agent/池条件与回滚凭据混在一起 | 普通回滚重新检查目标 Agent/池条件，同时使用已保存 Token。ASP.NET Core 要求 No Managed Code；Windows ARM64 经 x64 仿真宿主也拒绝。mock 覆盖这些前置条件、x86/x64 profiler 参数和保存凭据恢复 |
+| 验收脚本无法按已有清理契约删除临时资源 | 资源名改为既有受限清理格式；新增独立 ResultDir，清理失败影响最终结果，日志不随临时站点删除。两个测试池用于隔离/PID 断言；WithRUM 覆盖独立启停与缺失 Token；失败恢复检查实际应用环境代次，重复启停检查 PID/历史 |
+
+实际执行：
+
+- OrbStack Linux arm64：Go 1.20.14 / 1.26.9 全量 test、vet 通过；Go 1.26.9 race 和发布归档契约测试通过。新增 IIS 边界测试仅替换 Windows API 调用，执行真实事务落盘、历史、回收调用顺序、失败恢复与普通启用/停用快照回滚；另含提交后 HTTP 503 的恢复。
+- Microsoft PowerShell 7.4 / Linux amd64：受影响 PS 脚本解析、IIS 快照及 OTel 契约 mock 通过。快照回归覆盖池名、身份、用户、位数、CLR、管线、归属应用和环境漂移；重复环境顺序变化不写入/不回收。
+- Go 1.26.9 交叉编译 Windows x86/x64/ARM64，Go 1.20.14 编译 Windows x86/x64；五个 PE 的 Machine、Go 编译器、GOOS/GOARCH 和 CGO=0 检查通过，未执行 Windows 程序。
+- 共用部署代码的 Linux 运行回归：Nginx 1.28.3 / 模块 0.1.2（arm64），Apache 2.4.69 / 已修复模块（amd64 仿真），完整原生 OTel→Collector→私有接收器流程通过，包括独立启停、故障恢复和撤销。
+
+本机日志：`/tmp/rumable-iis-otel-hardening-go120.log`、`/tmp/rumable-iis-otel-hardening-go126.log`、`/tmp/rumable-iis-otel-hardening-race.log`、`/tmp/rumable-iis-otel-hardening-powershell.log`、`/tmp/rumable-iis-otel-hardening-build.log`、`/tmp/rumable-iis-otel-hardening-pe.log`、`/tmp/rumable-iis-otel-hardening-nginx.log`、`/tmp/rumable-iis-otel-hardening-apache.log`。
+
+尚未执行：Windows PowerShell 5.1、Microsoft.Web.Administration 的实际提交/池回收、IIS WorkerProcesses 枚举、ACL/双站点清理、真实 .NET Framework/ASP.NET Core Agent、旧 Windows、TLS 和 DataKit/Dataway/观测云入库。增强后的 Windows 验收脚本只做解析检查，未把脚本中的待执行断言列为通过。源码变更未改 Web SDK/初始化行为，本轮未重跑 Chrome。
+
+Windows 可直接执行的 DataKit、Dataway、x86 池和 WithRUM 命令、结果读取及保留资源清理见 [Windows/IIS OTel 专项步骤](windows-acceptance.md#7-iis-10-otel-专项验收)。配置提交与本地事务记录之间仍有不可原子化窗口；无法匹配日志时停止覆盖，保留现场人工审查。
+
 ## 尚未完成的环境验收
 
 - Windows 10 / Server 2016+ 与旧 Windows 7 / Server 2008 R2 / Server 2012 的真实运行。

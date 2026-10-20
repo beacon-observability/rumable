@@ -1,6 +1,29 @@
 # Loaded by the IIS bridge. Only the selected dedicated pool is modified.
-$otelKeys = @('OTEL_DOTNET_AUTO_HOME','OTEL_SERVICE_NAME','OTEL_TRACES_EXPORTER','OTEL_METRICS_EXPORTER','OTEL_LOGS_EXPORTER','OTEL_EXPORTER_OTLP_PROTOCOL','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_EXPORTER_OTLP_HEADERS','OTEL_TRACES_SAMPLER','OTEL_TRACES_SAMPLER_ARG','OTEL_PROPAGATORS','COR_ENABLE_PROFILING','COR_PROFILER','COR_PROFILER_PATH_32','COR_PROFILER_PATH_64','CORECLR_ENABLE_PROFILING','CORECLR_PROFILER','CORECLR_PROFILER_PATH_32','CORECLR_PROFILER_PATH_64','DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE')
+$otelKeys = @('OTEL_DOTNET_AUTO_HOME','OTEL_SERVICE_NAME','OTEL_TRACES_EXPORTER','OTEL_METRICS_EXPORTER','OTEL_LOGS_EXPORTER','OTEL_EXPORTER_OTLP_PROTOCOL','OTEL_EXPORTER_OTLP_ENDPOINT','OTEL_EXPORTER_OTLP_HEADERS','OTEL_TRACES_SAMPLER','OTEL_TRACES_SAMPLER_ARG','OTEL_PROPAGATORS','COR_ENABLE_PROFILING','COR_PROFILER','COR_PROFILER_PATH','COR_PROFILER_PATH_32','COR_PROFILER_PATH_64','CORECLR_ENABLE_PROFILING','CORECLR_PROFILER','CORECLR_PROFILER_PATH','CORECLR_PROFILER_PATH_32','CORECLR_PROFILER_PATH_64','DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE')
 $profilerId = '{918728DD-259F-4A6A-AC2B-B85E1B658318}'
+
+function Test-OTelKey([string]$name) { return $name -like 'OTEL_*' -or $otelKeys -contains $name }
+
+function Assert-OTelExternalEnvironment {
+    foreach ($key in [Environment]::GetEnvironmentVariables('Machine').Keys) {
+        if (Test-OTelKey $key) { throw 'Machine-wide OTel/profiler/startup settings already exist; review their conflict manually.' }
+    }
+    foreach ($service in @('WAS','W3SVC')) {
+        $path = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $service
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $settings = Get-ItemProperty -LiteralPath $path
+        foreach ($entry in @($settings.Environment)) {
+            if (Test-OTelKey (([string]$entry -split '=',2)[0])) { throw 'WAS/W3SVC service-wide OTel/profiler/startup settings already exist; review their conflict manually.' }
+        }
+    }
+    if ($site.otel.runtime -eq 'dotnet') {
+        # ANCM app environment overrides the worker's inherited pool values.
+        $webConfig = $manager.GetWebConfiguration($site.iis.site, $site.iis.application)
+        foreach ($entry in $webConfig.GetSection('system.webServer/aspNetCore').GetCollection('environmentVariables')) {
+            if (Test-OTelKey ([string]$entry.GetAttributeValue('name'))) { throw 'ASP.NET Core application environment overrides OTel/profiler settings; review web.config and inherited configuration manually.' }
+        }
+    }
+}
 
 function Get-OTelPool {
     if ($iisVersion.MajorVersion -lt 10 -or $PSVersionTable.PSVersion -lt [version]'5.1' -or [Environment]::OSVersion.Version.Major -lt 10) { throw 'IIS OTel requires IIS 10, Windows 10/Server 2016+ and Windows PowerShell 5.1; legacy IIS remains RUM-only.' }
@@ -15,17 +38,17 @@ function Read-OTelSnapshot {
     $values = @{}
     foreach ($entry in $pool.GetCollection('environmentVariables')) {
         $name = [string]$entry.GetAttributeValue('name')
-        if ($otelKeys -contains $name) { $values[$name] = [string]$entry.GetAttributeValue('value') }
+        if (Test-OTelKey $name) { $values[$name] = [string]$entry.GetAttributeValue('value') }
     }
     $users = @($manager.Sites | ForEach-Object { $owner=$_.Name; $_.Applications | Where-Object { $_.ApplicationPoolName -ieq $pool.Name } | ForEach-Object { $owner + $_.Path } } | Sort-Object)
     return @{ pool=$pool.Name; environment=$values; runtime=$pool.ManagedRuntimeVersion; pipeline=[string]$pool.ManagedPipelineMode; x86=[bool]$pool.Enable32BitAppOnWin64; identity=[string]$pool.ProcessModel.IdentityType; user=[string]$pool.ProcessModel.UserName; applications=$users }
 }
 
-function Assert-OTelPool {
+function Assert-OTelPool([switch]$SavedCredentials) {
     $pool = Get-OTelPool
     $users = @($manager.Sites | ForEach-Object { $_.Applications } | Where-Object { $_.ApplicationPoolName -ieq $pool.Name })
     if ($users.Count -ne 1) { throw 'IIS OTel requires a dedicated application pool; shared pools could instrument other sites/applications.' }
-    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'IIS OTel ARM64 is not accepted in this release; select Windows x64 with an x64/x86 application pool.' }
+    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { throw 'IIS OTel ARM64 is not accepted in this release; select Windows x64 with an x64/x86 application pool.' }
     $agent = [string]$site.otel.agentPath
     if (-not [IO.Path]::IsPathRooted($agent)) { throw 'IIS OTel agentPath must be absolute.' }
     $arch = 'win-x64'; if ($pool.Enable32BitAppOnWin64) { $arch = 'win-x86' }
@@ -33,10 +56,11 @@ function Assert-OTelPool {
     if ($site.otel.runtime -eq 'netframework') {
         $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full').Release
         if ($release -lt 394802 -or $pool.ManagedRuntimeVersion -ne 'v4.0' -or [string]$pool.ManagedPipelineMode -ne 'Integrated') { throw 'IIS OTel netframework requires .NET Framework 4.6.2+ and a v4 Integrated pool.' }
-    } elseif (-not (Test-Path -LiteralPath (Join-Path $agent 'net/OpenTelemetry.AutoInstrumentation.StartupHook.dll') -PathType Leaf)) { throw 'The .NET startup hook is missing from agentPath.' }
-    foreach ($key in [Environment]::GetEnvironmentVariables('Machine').Keys) {
-        if ($key -like 'OTEL_*' -or $otelKeys -contains $key) { throw 'Machine-wide OTel/profiler/startup settings already exist; review their conflict manually.' }
+    } else {
+        if (-not [string]::IsNullOrEmpty($pool.ManagedRuntimeVersion)) { throw 'IIS OTel dotnet requires an ASP.NET Core application pool with No Managed Code.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $agent 'net/OpenTelemetry.AutoInstrumentation.StartupHook.dll') -PathType Leaf)) { throw 'The .NET startup hook is missing from agentPath.' }
     }
+    Assert-OTelExternalEnvironment
     foreach ($entry in $pool.GetCollection('environmentVariables')) {
         $key = [string]$entry.GetAttributeValue('name')
         if ($key -like 'OTEL_*' -and $otelKeys -notcontains $key) { throw 'Unmanaged pool OTel overrides could bypass the configured exporter/sampler; review them manually.' }
@@ -50,7 +74,7 @@ function Assert-OTelPool {
         if ($null -ne $original -and @($original.environment.PSObject.Properties).Count -gt 0) { throw 'Pre-existing application pool instrumentation settings are not owned by Rumable; refusing to replace them.' }
     }
     if ($live.environment.Count -gt 0 -and $null -eq $owned) { throw 'The application pool already has OTel/profiler environment settings without Rumable ownership.' }
-    if ($site.otel.backend -eq 'dataway' -and [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($site.otel.tokenEnv))) { throw 'The environment variable named by otel.tokenEnv is missing.' }
+    if (-not $SavedCredentials -and $site.otel.backend -eq 'dataway' -and [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($site.otel.tokenEnv))) { throw 'The environment variable named by otel.tokenEnv is missing.' }
 }
 
 function Same-OTelEnvironment($expected, $actual) {
@@ -64,14 +88,16 @@ function Same-OTelEnvironment($expected, $actual) {
 
 function Set-OTelEnvironment($values) {
     if (Same-OTelEnvironment $values (Read-OTelSnapshot).environment) { return }
+    if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties.Name) }
+    foreach ($key in $names) {
+        if ($otelKeys -notcontains $key) { throw 'Invalid OTel environment key in snapshot.' }
+    }
     $pool = Get-OTelPool
     $collection = $pool.GetCollection('environmentVariables')
     for ($i=$collection.Count-1; $i -ge 0; $i--) {
         if ($otelKeys -contains [string]$collection[$i].GetAttributeValue('name')) { $collection.RemoveAt($i) }
     }
-    if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties.Name) }
     foreach ($key in $names) {
-        if ($otelKeys -notcontains $key) { throw 'Invalid OTel environment key in snapshot.' }
         $entry = $collection.CreateElement('add')
         $entry.SetAttributeValue('name',[string]$key)
         $entry.SetAttributeValue('value',[string]$values.$key)
@@ -83,11 +109,13 @@ function Restore-OTel($snapshot) {
     if ($null -eq $site.otel) { return }
     $pool = Get-OTelPool
     if ($null -eq $snapshot -or $snapshot.pool -cne $pool.Name) { throw 'OTel snapshot application pool mismatch; refusing to change another pool.' }
+    if (-not (Same-OTelEnvironment $snapshot.environment (Read-OTelSnapshot).environment)) { Assert-OTelExternalEnvironment }
     Set-OTelEnvironment $snapshot.environment
 }
 
 function Apply-OTel {
     if ($null -eq $site.otel) { return }
+    if ($request.preserveOTel) { Restore-OTel $request.expected.otel; return }
     if (-not $request.otelEnabled) { Restore-OTel $request.original.otel; return }
     Assert-OTelPool
     $pool = Get-OTelPool
@@ -120,8 +148,25 @@ function Recycle-OTelPool($before) {
     if ($null -eq $site.otel) { return }
     $after = Read-OTelSnapshot
     if (-not (Same-OTelEnvironment $before.environment $after.environment)) {
+        Assert-OTelExternalEnvironment
         $pool = Get-OTelPool
         if (@($after.applications).Count -ne 1) { throw 'Application pool became shared; refusing to recycle other applications.' }
-        if ([string]$pool.State -eq 'Started') { $pool.Recycle() }
+        if ([string]$pool.State -ne 'Started') { throw 'Application pool is not Started; refusing to report OTel activation before the pool can be recycled.' }
+        $workers = @()
+        try {
+            foreach ($worker in $pool.WorkerProcesses) {
+                try { $workers += [Diagnostics.Process]::GetProcessById($worker.ProcessId) }
+                catch [ArgumentException] { }
+            }
+            [void]$pool.Recycle()
+            # Overlapped recycle can serve the old profiler/exporter generation.
+            # Bound the wait; never kill an application to finish activation.
+            $deadline = [DateTime]::UtcNow.AddSeconds(15)
+            foreach ($worker in $workers) {
+                while (-not $worker.WaitForExit(100)) {
+                    if ([DateTime]::UtcNow -ge $deadline) { throw 'Old application pool worker did not exit after recycle; activation/recovery is incomplete.' }
+                }
+            }
+        } finally { foreach ($worker in $workers) { $worker.Dispose() } }
     }
 }

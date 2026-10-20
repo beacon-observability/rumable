@@ -145,7 +145,7 @@ func preflight(root string, s Site) error {
 	return probeWorkers(s)
 }
 
-func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
+func apply(root string, st State, s Site, enabled bool, component string, w io.Writer) error {
 	if !compatibleTarget(st.Current.Site, s) {
 		return errors.New("site identity/target changed; use a new site ID and separate attachment")
 	}
@@ -164,8 +164,14 @@ func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
 	if _, err := os.Stat(journalPath(root, s)); err == nil {
 		return errors.New("unfinished transaction; use rollback first")
 	}
+	checking := s
+	if component == "rum" && s.IIS != nil && s.OTel != nil {
+		otel := *s.OTel
+		otel.Enabled = false
+		checking.OTel = &otel
+	}
 	if enabled {
-		if err := preflight(root, s); err != nil {
+		if err := preflight(root, checking); err != nil {
 			return err
 		}
 	} else if err := nativeCheck(root, s, false); err != nil {
@@ -192,6 +198,11 @@ func apply(root string, st State, s Site, enabled bool, w io.Writer) error {
 	n, public, err := render(root, s, enabled)
 	if err != nil {
 		return err
+	}
+	if component == "rum" && s.IIS != nil {
+		// Keep the deployed credentials as well as the OTel TOML settings.
+		n.Native = st.Current.Native
+		n.OTelTokenHash = st.Current.OTelTokenHash
 	}
 	if snapshotsEqual(st.Current, n) {
 		fmt.Fprintln(w, "Already in requested state; verifying HTTP probes.")
@@ -252,6 +263,9 @@ func transact(root string, st State, n Snapshot, public map[string][]byte, resto
 	if err = writeJSON(jp, t); err != nil {
 		return fail(err)
 	}
+	if err = nativeActivate(root, n, st.Current.Native); err != nil {
+		return fail(err)
+	}
 	if err = waitProbes(n); err != nil {
 		return fail(err)
 	}
@@ -297,6 +311,13 @@ func restoreTransaction(root string, t transaction) error {
 	}
 	if err := nativeRestore(root, &t.Before.Current, nativeExpected); err != nil {
 		return err
+	}
+	if t.NativeCommitted {
+		// Retry the old pool generation even if an earlier recovery already
+		// restored its configuration but failed while recycling the process.
+		if err := nativeActivate(root, t.Before.Current, t.After.Native); err != nil {
+			return err
+		}
 	}
 	if err := waitProbes(t.Before.Current); err != nil {
 		return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w", err)
@@ -353,6 +374,11 @@ func rollback(root string, st State, w io.Writer) error {
 	}
 	if st.Previous.active() && st.Previous.Site.IIS == nil {
 		if err = nativeCheck(root, st.Previous.Site, true); err != nil {
+			return err
+		}
+	}
+	if st.Previous.OTelEnabled && st.Previous.Site.IIS != nil {
+		if _, err = iisCommand(root, st.Previous.Site, "check", map[string]any{"checkingEnabled": true, "restoringOTel": true}); err != nil {
 			return err
 		}
 	}

@@ -150,7 +150,7 @@ try {
     }
 
     $before = Read-Snapshot
-    if ($request.action -eq 'apply' -or $request.action -eq 'restore') {
+    if (@('apply','restore','activate') -contains $request.action) {
         if ($null -eq $request.expected) { throw 'Expected IIS snapshot is required before changing configuration.' }
         Assert-Snapshot $request.expected $before
     }
@@ -166,17 +166,21 @@ try {
     if ($request.action -eq 'check') {
         if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
         if ($rumWanted -and $compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
-        if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool }
+        if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool -SavedCredentials:([bool]$request.restoringOTel) }
         $virtual = $application.VirtualDirectories[$vpath]
         $expectedPath = Join-Path $request.root 'public'
         if ($rumWanted -and $null -ne $virtual -and $virtual.PhysicalPath -ne $expectedPath) { throw 'Reserved /__rumable__ virtual directory is already owned by another deployment.' }
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'inspect') {
         $before | ConvertTo-Json -Depth 30 -Compress
+    } elseif ($request.action -eq 'activate') {
+        # Go persists the committed snapshot before this separate process can
+        # recycle a pool, so recycle failure/timeout remains recoverable.
+        Recycle-OTelPool $request.previous.otel
+        Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'restore') {
         Restore-Nodes $request.snapshot
         $manager.CommitChanges()
-        try { Recycle-OTelPool $before.otel } catch { Restore-Nodes $before; $manager.CommitChanges(); throw }
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'apply') {
         Remove-Owned $rules
@@ -226,7 +230,6 @@ try {
         if ($request.enabled -and $null -eq $application.VirtualDirectories[$vpath]) { [void]$application.VirtualDirectories.Add($vpath, (Join-Path $request.root 'public')) }
         Apply-OTel
         $manager.CommitChanges()
-        try { Recycle-OTelPool $before.otel } catch { Restore-Nodes $before; $manager.CommitChanges(); throw }
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } else { throw 'Unknown bridge action.' }
     $manager.Dispose()

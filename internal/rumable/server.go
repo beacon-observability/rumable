@@ -119,7 +119,7 @@ func nativeApply(root string, n *Snapshot, original, expected json.RawMessage) e
 		_, err := command(x.Binary, append(append([]string{}, x.Args...), "-s", "reload")...)
 		return err
 	}
-	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "otelEnabled": n.OTelEnabled, "script": n.Script, "original": original, "expected": expected})
+	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "otelEnabled": n.OTelEnabled, "script": n.Script, "original": original, "expected": expected, "preserveOTel": len(n.Native) != 0})
 	if err == nil {
 		n.Native = data
 	}
@@ -144,7 +144,17 @@ func nativeRestore(root string, n *Snapshot, expected json.RawMessage) error {
 	return err
 }
 
-func iisCommand(root string, s Site, action string, extra map[string]any) (json.RawMessage, error) {
+func nativeActivate(root string, n Snapshot, previous json.RawMessage) error {
+	if n.Site.IIS == nil || n.Site.OTel == nil {
+		return nil
+	}
+	_, err := iisCommand(root, n.Site, "activate", map[string]any{"expected": n.Native, "previous": previous})
+	return err
+}
+
+var iisCommand = runIISCommand
+
+func runIISCommand(root string, s Site, action string, extra map[string]any) (json.RawMessage, error) {
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("IIS commands require Windows; render can run on any OS")
 	}

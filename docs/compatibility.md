@@ -2,6 +2,8 @@
 
 服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；Apache 为 Linux x64 并要求包含请求隔离修复的模块；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。安装原生模块不等于旧系统已经通过 OTel 运行验收。
 
+IIS 源码加固版本要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。已发布 preview.2 未包含本轮修复，见[验证记录](verification.md)。
+
 ## 编译器与操作系统是两个独立约束
 
 源码使用 `go 1.20`，标准库 API 与 TOML 解析依赖均兼容 Go 1.20（固定 `github.com/BurntSushi/toml v1.6.0`，上游最低 Go 1.18）。现代包使用 Go 1.26.x，legacy 包必须真正使用 **Go 1.20.14** 编译；不使用非官方 Go runtime 补丁。

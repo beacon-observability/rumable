@@ -122,3 +122,71 @@ $report.cleanup
 自动流程使用 0% RUM / 遥测采样和不可用的本地接收地址，避免把测试数据写入任何真实应用。回放参数仅用于脚本升级与回滚验证，不代表录制上传已验证。
 
 在独立业务测试站点配置真实 OpenWay / DataKit、100% 接入采样与所需回放开关后，用受 SDK 支持的现代 Chrome 检查 Console / Network、唯一初始化、交互、错误、回放 Worker 与观测云数据。旧 Windows 服务器通过本脚本，不代表 IE 或旧 Chrome 支持当前 SDK，也不代表真实接收端的 CORS / TLS 已通过。
+
+## 7. IIS 10 OTel 专项验收
+
+本节针对 preview.2 之后的源码修复，已有 dist 未重打。需构建当前源码的 Windows CLI，脚本与 CLI 使用同一版本。前述 IIS 7.5 RUM 验收不能替代本节。
+
+准备 Windows 10/Server 2016+、IIS 10、64 位 Windows PowerShell 5.1、ASP.NET 4.x Integrated、.NET Framework 4.6.2+，预先安装并校验匹配目标池位数的官方 .NET Agent。机器/WAS/W3SVC 不得已有全局插桩。DataKit 先启用 gRPC 接收；Dataway 使用有效空间 Token，提前以已有安全方式设置到管理员进程的 tokenEnv 环境变量中。可选 WithRUM 需要 URL Rewrite 2 和静态文件能力。
+
+已有 Go 的 Windows 开发终端可在仓库根目录构建：
+
+```powershell
+$env:CGO_ENABLED='0'
+go build -buildvcs=false -o C:\RumableTest\rumable.exe .\cmd\rumable
+```
+
+管理员的 64 位 Windows PowerShell 5.1 执行。ResultDir 每次必须不存在；默认占用 19780/19781 两个回环端口：
+
+```powershell
+$ps="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$agent='C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
+& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+  -Binary C:\RumableTest\rumable.exe -AgentPath $agent `
+  -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x64-01
+$LASTEXITCODE
+
+# 32 位应用池；Agent 须带 win-x86 profiler。WithRUM 同时验证独立开关。
+& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+  -Binary C:\RumableTest\rumable.exe -AgentPath $agent -X86 -WithRUM `
+  -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x86-rum-01
+
+# 当前进程已安全设置 RUMABLE_DATAWAY_TOKEN 后，另跑 Dataway：
+& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+  -Binary C:\RumableTest\rumable.exe -AgentPath $agent -WithRUM `
+  -Backend dataway -Endpoint https://dataway.example.com/otel -ResultDir C:\RumableResults\otel-dataway-01
+```
+
+| 场景 | 脚本实际断言 |
+|---|---|
+| 独占池与旁站 | 新建两个随机站点/池；目标池环境生效，旁站池环境、HTTP service 值和 PID 不变；共享目标池时拒绝启用 |
+| 重复启停 | 重复 enable/disable 不改变成功历史，实际服务请求的 PID 不变 |
+| 独立开关（WithRUM） | RUM/OTel 分别启停，注入一次且资源摘要正确；RUM 操作不改变 OTel 环境/PID，Dataway 当前 Token 暂时缺失也可操作 RUM |
+| 采样配置 | 0/100 转换为池环境 0/1；不将环境值当作采样统计或入库证明 |
+| 失败恢复 | 改变 serviceName 后应用主动返回 503；CLI 必须失败，旧历史、旧环境和实际服务代次恢复，无 transaction.json 残留 |
+| 外部修改 | 受管 serviceName 或新增信号级 exporter 覆盖时拒绝停用，保留外部值 |
+| 回滚 | 恢复已保存 profiler/凭据，实际应用显示恢复的 serviceName；Dataway 当前 Token 缺失时仍可回滚 |
+| 清理与报告 | 只清理两组测试资源，ResultDir 保留；池账户只能遍历状态父目录、读取公共脚本，不获准读取状态/事务文件 |
+
+读取结果：
+
+```powershell
+$report=Get-Content C:\RumableResults\otel-dataway-01\report.json -Raw | ConvertFrom-Json
+$report.result
+$report.steps | Format-Table name,result,time -AutoSize
+$report.cleanup
+$report.traceId # 到观测云查询 Trace，核对 service.name 与上下游。
+```
+
+退出码 0 代表本脚本断言与清理通过（或显式 Keep），失败返回非零；report.json 与 cli.log 保留环境、二进制摘要和阶段结果，不保存原始 Token。默认纯 OTel 运行不覆盖 RUM 联合场景，应另跑 WithRUM。脚本是 .NET Framework 夹具；ASP.NET Core 的 No Managed Code、托管方式与 Agent 加载仍须在业务测试应用验收。
+
+Keep 会保留两组站点/池与受限状态目录。之后在同一账户的管理员 64 位 PowerShell 中，按报告归属清理：
+
+```powershell
+Add-Type -Path "$env:SystemRoot\System32\inetsrv\Microsoft.Web.Administration.dll"
+. .\scripts\windows-iis-helpers.ps1
+Remove-TestDeployment $report.site (Join-Path $env:TEMP $report.site)
+Remove-TestDeployment $report.peer (Join-Path $env:TEMP $report.peer)
+```
+
+本轮 macOS/OrbStack 没有 Windows/IIS。实际池回收、IIS API、Windows PowerShell 5.1、Agent 加载和真实入库，均需保存目标环境结果后才能标为通过。
