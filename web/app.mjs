@@ -18,6 +18,12 @@ function render() {
   $('replay-fields').hidden = !m.sessionReplayEnabled;
   $('nginx-fields').hidden = m.server !== 'nginx';
   $('iis-fields').hidden = m.server !== 'iis';
+  $('iis-options').hidden = m.server !== 'iis';
+  $('windows-help').hidden = m.server !== 'iis';
+  $('manual-fields').hidden = !m.manualTarget;
+  $('discovery-help').hidden = m.manualTarget;
+  form.elements.publicURL.required = m.manualTarget;
+  form.elements.id.required = m.manualTarget;
   $('arch-field').hidden = m.server === 'iis';
   $('sample-summary').textContent = `${m.sessionSampleRate}%`;
   $('replay-summary').textContent = m.sessionReplayEnabled ? `${m.sessionReplaySampleRate}%` : '关闭';
@@ -36,9 +42,6 @@ function render() {
 form.addEventListener('input', () => { $('action-status').textContent = ''; render(); });
 form.addEventListener('change', render);
 form.addEventListener('submit', e => e.preventDefault());
-form.elements.server.addEventListener('change', () => {
-  if (form.elements.server.value === 'iis') $('server-details').open = true;
-});
 $('tab-config').onclick = () => { tab = 'config'; render(); };
 $('tab-command').onclick = () => { tab = 'command'; render(); };
 $('manifest-url').oninput = () => {
@@ -79,7 +82,8 @@ $('download-config').onclick = () => {
 };
 const initial = new URLSearchParams(location.search).get('manifest');
 if (initial) $('manifest-url').value = initial;
-else if (location.protocol === 'https:' && /\/\d+\.\d+\.\d+(?:-[a-z0-9.]+)?\/setup\/(?:index\.html)?$/.test(location.pathname)) {
+else if (location.protocol === 'https:' && /\/(?:latest|\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)\/setup\/(?:index\.html)?$/.test(location.pathname)) {
   $('manifest-url').value = new URL('../manifest.json', location.href).href;
 }
 render();
+if ($('manifest-url').value) $('load-release').click();

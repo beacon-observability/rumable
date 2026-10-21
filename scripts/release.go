@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.2", "release version")
+	versionName := flag.String("version", "0.1.3", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -224,7 +224,7 @@ func run() error {
 	public["manifest.json"], err = json.MarshalIndent(map[string]any{
 		"schemaVersion": 1, "version": *versionName, "revision": *revision,
 		"artifactBase": "../" + *versionName + "/",
-		"capabilities": []string{"rum-setup-v1", "rum-install-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
+		"capabilities": []string{"rum-setup-v1", "rum-install-v1", "rum-discovery-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -274,20 +274,24 @@ func releaseSupportFiles(root string) (map[string][]byte, error) {
 // domain. The page passes the directory of the manifest selected by the user.
 func releaseInstallers(templateDir, version string, packages []map[string]string) (map[string][]byte, map[string]map[string]string, error) {
 	values := []string{"@@VERSION@@", version}
-	for _, target := range []struct{ os, arch, marker string }{
-		{"linux", "386", "@@LINUX_386_SHA256@@"},
-		{"linux", "amd64", "@@LINUX_AMD64_SHA256@@"},
-		{"linux", "arm64", "@@LINUX_ARM64_SHA256@@"},
-		{"windows", "amd64", "@@WINDOWS_AMD64_SHA256@@"},
+	for _, target := range []struct{ os, arch, flavor, marker string }{
+		{"linux", "386", "modern", "@@LINUX_386_SHA256@@"},
+		{"linux", "amd64", "modern", "@@LINUX_AMD64_SHA256@@"},
+		{"linux", "arm64", "modern", "@@LINUX_ARM64_SHA256@@"},
+		{"windows", "386", "modern", "@@WINDOWS_386_SHA256@@"},
+		{"windows", "amd64", "modern", "@@WINDOWS_AMD64_SHA256@@"},
+		{"windows", "arm64", "modern", "@@WINDOWS_ARM64_SHA256@@"},
+		{"windows", "386", "legacy", "@@WINDOWS_386_LEGACY_SHA256@@"},
+		{"windows", "amd64", "legacy", "@@WINDOWS_AMD64_LEGACY_SHA256@@"},
 	} {
 		digest := ""
 		for _, p := range packages {
-			if p["os"] == target.os && p["arch"] == target.arch && p["flavor"] == "modern" {
+			if p["os"] == target.os && p["arch"] == target.arch && p["flavor"] == target.flavor {
 				digest = p["sha256"]
 			}
 		}
 		if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(digest) {
-			return nil, nil, fmt.Errorf("installer requires %s/%s modern archive", target.os, target.arch)
+			return nil, nil, fmt.Errorf("installer requires %s/%s %s archive", target.os, target.arch, target.flavor)
 		}
 		values = append(values, target.marker, digest)
 	}

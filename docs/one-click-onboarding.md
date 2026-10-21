@@ -2,39 +2,49 @@
 
 页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
 
-产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.2` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
+产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.3` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
 
 ## 当前可用流程
 
-1. 页面填写 SDK 配置与接入目标，立即生成可下载的 TOML。
-2. 读取 CI 发布到 OSS 的 latest 或固定版本 `manifest.json`。
+1. 页面默认只填写 RUM 配置并选择 Linux/Nginx 或 Windows/IIS，生成不含网站目标的 TOML。网站、路径和程序位置等字段收起到高级选项，勾选“手动指定站点与路径”才启用。
+2. 线上页面自动读取同版本发布清单，也可切换 latest 或指定版本。
 3. 根据服务器类型生成一条带配置的命令：Linux 下载并运行 `install.sh`，IIS 下载并运行 `install.ps1`。
-4. 安装脚本自动识别架构、下载指定版本包，按脚本内固定摘要校验 SHA-256，安装版本化 CLI，解码临时 TOML，执行 `rumable setup --yes`。
-5. `setup` 在单次操作锁内完成首次 render、Nginx attach、enable；已有站点复用原状态进行更新。目标变化、外部修改或未完成事务会阻止操作。
+4. 安装脚本自动识别架构、下载指定版本包，按脚本内固定摘要校验 SHA-256，安装版本化 CLI，解码临时 TOML，执行 `rumable setup --discover --yes`；手动模式不带 `--discover`。
+5. 自动发现本机站点：单站点自动选中，多站点/多访问地址在终端选择；通配绑定等无法确定域名时提示输入。确定目标后，`setup` 在单次操作锁内完成首次 render、Nginx attach、enable；已有站点复用原状态进行更新。目标变化、外部修改或未完成事务会阻止操作。
 
-配置在浏览器本地生成，无配置服务依赖，不上传到 OSS。命令中的 Base64 只是防止 shell 转义改变 TOML，不是加密；包含的 clientToken 是浏览器公开令牌，不得填写管理 API Key。临时配置在结束时删除；受管状态保存配置，后续 disable/rollback 不依赖临时文件。需要修改时重新生成命令或使用下载的 TOML 执行 enable。
+配置在浏览器本地生成，无配置服务依赖，不上传到 OSS。命令中的 Base64 只是防止 shell 转义改变 TOML，不是加密；包含的 clientToken 是浏览器公开令牌，不得填写管理 API Key。临时配置在结束时删除；受管状态保存配置，后续 disable/rollback 不依赖临时文件。需要修改时重新生成命令。自动发现格式的 TOML 使用 `setup --discover --config rumable.toml --state-dir ... --yes`；手动模式的完整 TOML 才能直接交给 `enable`。
 
-当前一键入口仅做 RUM，默认同域提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态压缩变更选项。Windows 命令要求 x64、PowerShell 5.1 与现代受支持 Windows；legacy 包继续使用手工流程。
+当前一键入口仅做 RUM，默认同域提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
 
 ## 页面生成的短命令
 
 Linux 命令结构如下（域名和配置为示意，实际由页面填入）：
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fsSL 'https://下载域名/rumable/0.1.2/install.sh' | sudo sh -s -- --base-url 'https://下载域名/rumable/0.1.2/' --config '<Base64 RUM 配置>'
+curl --proto '=https' --proto-redir '=https' -fsSL 'https://下载域名/rumable/0.1.3/install.sh' | sudo sh -s -- --base-url 'https://下载域名/rumable/0.1.3/' --config '<Base64 RUM 配置>' --discover
 ```
 
-Windows 在管理员身份的 64 位 Windows PowerShell 5.1 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
+Windows 在管理员身份的 PowerShell 5.1+ 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.2/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.2/' -Config '<Base64 RUM 配置>'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.3/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.3/' -Config '<Base64 RUM 配置>' -Discover
 ```
 
-Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.2\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；发布包不含自动验收脚本，测试时从仓库同版本 tag 获取脚本并指定 CLI 路径，详见 Windows 验收手册。
+Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.3\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；发布包不含自动验收脚本，测试时从仓库同版本 tag 获取脚本并指定 CLI 路径，详见 Windows 验收手册。
 
-只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 的 `artifactBase` 相对地址推导，不需要 CI 配置公开下载域名；旧固定版本清单没有此字段时沿用清单目录。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 使用 x64 PowerShell 安装脚本。读取 latest 后生成的命令仍绑定一个固定版本；安装期间 latest 更新不会改变已选包。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
+只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 的 `artifactBase` 相对地址推导，不需要 CI 配置公开下载域名；旧固定版本清单没有此字段时沿用清单目录。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 自动识别原生 x64 / ARM64 及 modern / legacy 包。读取 latest 后生成的命令仍绑定一个固定版本；安装期间 latest 更新不会改变已选包。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
 
 产品也可固定调用 `https://static.guance.com/rumable/latest/install.sh` 或 `https://static.guance.com/rumable/latest/install.ps1`，base URL 使用同目录 `https://static.guance.com/rumable/latest/`，安装器自行转到脚本内绑定的版本。需要审计或复现时优先保存页面生成的固定版本命令与 TOML。
+
+## 站点自动发现与手动设置
+
+- Nginx 从 PATH 或标准安装位置查找程序，读取其默认配置及有效 include；不会猜测自定义启动参数。使用自定义 `-c` / `-p`、非首页验收、仅部分路径或无法识别的布局时，使用高级手动配置。
+- IIS 只读枚举运行中的 HTTP(S) 站点和应用。端口、域名和应用路径来自绑定；无主机名的通配绑定不会冒用 localhost，会要求填写实际可访问 URL。
+- 安装脚本的 `--yes` 只确认接入操作，不会代替站点、地址或压缩调整的选择。交互从终端读取，不消费 Linux 管道中的脚本；无终端且有歧义时停止，不修改站点。
+- 新站点生成稳定的 `auto-...` 接入标识；重复安装恢复原 ID、URL、注入/排除/验收路径，继续复用同一状态目录。不会因为 Nginx 行号变化创建第二次接入。选择结束后重新检查目标，防止等待输入期间配置变化导致接错站点。
+- IIS 静态压缩开启时，只有已勾选高级选项或在终端同意后才调整；卸载/回滚继续使用原备份机制。已有管理状态的配置、外部修改和未完成事务仍会检查。
+- 自动模式默认验证网站或应用首页。需要登录、首页重定向、非完整 HTML、多种模板、HTTPS 上报或 Worker 同源限制导致验证失败时，按提示使用高级设置，补齐适合该网站的验收路径。自动发现不会跳过预检或放宽 TLS/CSP。
+- 老版本清单没有 `rum-discovery-v1` 时，页面拒绝生成自动发现命令；仍可用高级手动模式生成兼容配置。
 
 ## SDK 字段对应
 
@@ -55,7 +65,7 @@ Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.2\rumable.exe`，状态保存�
 
 ## CI → OSS 约定
 
-复用 `scripts/release.go` 打包。新增输出 `manifest.json`，包含 schemaVersion、version、revision、SDK 元数据、`rum-setup-v1` / `rum-install-v1` 能力、安装脚本及各平台包的文件名和 SHA-256；manifest 本身进入 SHA256SUMS。依赖许可证随包发布。
+复用 `scripts/release.go` 打包。新增输出 `manifest.json`，包含 schemaVersion、version、revision、SDK 元数据、`rum-setup-v1` / `rum-install-v1` / `rum-discovery-v1` 能力、安装脚本及各平台包的文件名和 SHA-256；manifest 本身进入 SHA256SUMS。依赖许可证随包发布。
 
 CI 与 OSS 变量、受保护 tag、重试和验收见 [GitLab CI 发布说明](gitlab-ci-release.md)。实际目录：
 
@@ -78,7 +88,7 @@ rumable/
       styles.css
 ```
 
-CI 先验证、打包并上传安装脚本、全部包和配置页，核对远端摘要，再发布 manifest；报告输出固定版本的 OSS 路径，供控制台选择。相同版本内容变化会被拒绝；下一次发布使用新版本号，不覆盖已有版本。OSS 使用 HTTPS；跨域部署页面时允许页面域名 GET manifest。同版本 `setup/index.html` 自动预填清单地址；也可用 `?manifest=https://<OSS域名>/rumable/<version>/manifest.json` 指定，在控制台集成时由平台注入地址。
+CI 先验证、打包并上传安装脚本、全部包和配置页，核对远端摘要，再发布 manifest；报告输出固定版本的 OSS 路径，供控制台选择。相同版本内容变化会被拒绝；下一次发布使用新版本号，不覆盖已有版本。OSS 使用 HTTPS；跨域部署页面时允许页面域名 GET manifest。同版本 `setup/index.html` 自动读取清单；也可用 `?manifest=https://<OSS域名>/rumable/<version>/manifest.json` 指定，在控制台集成时由平台注入地址。
 
 正式版本完成后再更新 `rumable/latest/` 的配置页入口、安装器和清单；清单最后更新，不长期缓存。latest 页面跳到同版本页面，避免 HTML/CSS/JS 混用。旧版本重试不会让 latest 回退，预发布版本不更新 latest。产品读取清单后按 `artifactBase` 解析具体包地址，不能直接把含版本号的包名拼到 latest 目录。
 
@@ -97,6 +107,9 @@ python3 -m http.server 18872 --bind 127.0.0.1 --directory web
 node --test web/generator_test.mjs
 go test ./...
 bash scripts/smoke-onboarding.sh
+bash scripts/smoke-discovery.sh
+# 发布后，从真实 OSS 下载脚本与包，在临时容器验证注入和恢复：
+RUMABLE_PUBLIC_MANIFEST=https://static.guance.com/rumable/0.1.3/manifest.json bash scripts/smoke-discovery.sh
 ```
 
-最后一项在临时 Docker Nginx 中执行页面生成的真实 Linux 命令；OSS 下载用本地脚本和归档替代，实际执行校验、安装、首次接入、重复运行、升级、回滚、停用和撤销。不会对宿主机 /opt、/var/lib 或 Nginx 进行修改。Windows 命令及 IIS 原生行为仍需 Windows 环境验收。
+两项 smoke 在临时 Docker Nginx 中执行页面生成的真实 Linux 命令；OSS 下载用本地脚本和归档替代，实际执行校验、安装、首次接入、重复运行、升级、回滚、停用和撤销。不会对宿主机 /opt、/var/lib 或 Nginx 进行修改。自动发现 smoke 还覆盖多站点无终端拒绝、管道安装时终端选择、未选中站点不变。Windows 脚本契约测试见 `scripts/test-windows-installer.ps1`；Windows API 与 IIS 原生行为仍需 Windows 环境验收。

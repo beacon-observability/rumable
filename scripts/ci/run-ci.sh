@@ -24,6 +24,7 @@ docker build -t "$release_image" \
   --build-arg "MODERN_GO_IMAGE=${MODERN_GO_IMAGE:-golang:1.26.1-bookworm}" \
   --build-arg "LEGACY_GO_IMAGE=${LEGACY_GO_IMAGE:-golang:1.20.14-bookworm}" \
   --build-arg "RELEASE_NODE_IMAGE=${RELEASE_NODE_IMAGE:-node:22-bookworm}" \
+  --build-arg "RELEASE_POWERSHELL_IMAGE=${RELEASE_POWERSHELL_IMAGE:-mcr.microsoft.com/powershell:7.4-ubuntu-22.04}" \
   scripts/ci
 docker run --rm --init --name "$release_container" \
   --user "$(id -u):$(id -g)" \

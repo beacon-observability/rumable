@@ -105,6 +105,7 @@ test('manifest is uploaded last, all objects are read back, identical retry writ
   assert.equal(results.length, artifacts.length);
   assert(s.puts.every(p => p.options.headers['x-oss-forbid-overwrite'] === 'true'));
   assert.equal(s.puts.find(p => p.name.endsWith('app.mjs')).options.mime, 'application/javascript; charset=utf-8');
+  assert.equal(s.puts.find(p => p.name.endsWith('setup/index.html')).options.headers['Content-Disposition'], 'inline');
   s.puts.length = 0;
   await publishArtifacts(artifacts, s.client);
   assert.equal(s.puts.length, 0);
@@ -143,6 +144,7 @@ test('CI builds the pinned SDK and matching commit, and emits a credential-free 
   assert(build.includes('--skip-sdk-sync'));
   assert(build.includes(revision));
   assert(build.includes('/opt/go-legacy/bin/go'));
+  assert(commands.some(([command]) => command === 'pwsh'));
   assert.equal(report.status, 'verified');
   const content = fs.readFileSync(path.join(f.cwd, 'release-report.json'), 'utf8');
   assert(!content.includes(env.OSS_ACCESS_KEY_SECRET));
@@ -171,6 +173,7 @@ test('latest is promoted after immutable verification, pins assets and avoids mu
   const page = s.objects.get('rumable/latest/setup/index.html').toString();
   assert(page.includes('url=../../0.1.0/setup/index.html'));
   assert.equal(new URL('../../0.1.0/setup/index.html','https://example.com/rumable/latest/setup/index.html').pathname, '/rumable/0.1.0/setup/index.html');
+  assert.equal(s.puts.find(p => p.name === 'rumable/latest/setup/index.html').options.headers['Content-Disposition'], 'inline');
   for (const p of s.puts.filter(p => p.name.startsWith('rumable/latest/'))) {
     assert.equal(p.options.headers['Cache-Control'], 'no-store, max-age=0');
     assert(!('x-oss-forbid-overwrite' in p.options.headers));

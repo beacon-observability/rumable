@@ -5,9 +5,10 @@ main() {
   set -eu
   fail() { printf '%s\n' "Rumable: $*" >&2; exit 1; }
   version='@@VERSION@@'
-  base_url= config=
+  base_url= config= discover=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --discover) discover=true; shift ;;
       --base-url|--config)
         [ "$#" -ge 2 ] || fail "Missing value for $1"
         case "$1" in --base-url) base_url=$2 ;; --config) config=$2 ;; esac
@@ -55,7 +56,9 @@ main() {
   # Public SDK directories need to be traversable by the web server. The CLI
   # itself creates private state/config files with restrictive permissions.
   umask 022
-  "$bin" setup --config "$work/rumable.toml" --state-dir /var/lib/rumable --yes
+  set -- setup --config "$work/rumable.toml" --state-dir /var/lib/rumable --yes
+  if [ "$discover" = true ]; then set -- "$@" --discover; fi
+  "$bin" "$@"
 }
 
 main "$@"

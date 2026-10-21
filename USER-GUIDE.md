@@ -1,6 +1,8 @@
 # Rumable 使用指南
 
-版本：**0.1.2**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
+推荐从[latest 一键接入页](https://static.guance.com/rumable/latest/setup/index.html)开始：填写 RUM 参数，选择 Linux/Nginx 或 Windows/IIS，复制命令到目标服务器。默认自动发现站点；多个目标时在终端选择，网站、路径等手动设置收在高级选项。Windows 自动识别原生架构和系统版本，选择现代/legacy 包。详细流程与限制见[一键接入说明](docs/one-click-onboarding.md)。
+
+版本：**0.1.3**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
 
 Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
 
@@ -12,11 +14,11 @@ Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，�
 
 打开固定的 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，读取发布版本，填写 RUM 配置并选择 Nginx / IIS，再执行生成的安装命令。页面会跳到最新正式版；复制的命令仍绑定具体版本。安装器负责下载、摘要校验、安装 CLI 和 `setup`；不自动安装 Web 服务器或 IIS URL Rewrite。完整说明见[页面接入](docs/one-click-onboarding.md)。
 
-Windows 一键入口使用管理员身份的 64 位 Windows PowerShell 5.1，CLI 路径为 `%ProgramFiles%\Rumable\0.1.2\rumable.exe`，状态目录为 `%ProgramData%\Rumable`。请保留下载的 TOML；按 [Windows 验收手册](docs/windows-acceptance.md)检查重复安装、注入、启停和回滚。其他架构及旧系统继续按下面的下载包流程执行。
+Windows 一键入口使用管理员身份的 64 位 Windows PowerShell 5.1，CLI 路径为 `%ProgramFiles%\Rumable\0.1.3\rumable.exe`，状态目录为 `%ProgramData%\Rumable`。请保留下载的 TOML；按 [Windows 验收手册](docs/windows-acceptance.md)检查重复安装、注入、启停和回滚。其他架构及旧系统继续按下面的下载包流程执行。
 
 ## 1. 选择下载包
 
-在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.2_` 开头。
+在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.3_` 开头。
 
 | 系统 / CPU | 文件名后缀 | 适用条件 |
 |---|---|---|
@@ -41,17 +43,17 @@ Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；�
 
 ```sh
 sha256sum -c SHA256SUMS
-mkdir rumable-0.1.2
-tar -xzf rumable_0.1.2_linux_amd64.tar.gz -C rumable-0.1.2
-cd rumable-0.1.2
+mkdir rumable-0.1.3
+tar -xzf rumable_0.1.3_linux_amd64.tar.gz -C rumable-0.1.3
+cd rumable-0.1.3
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\rumable_0.1.2_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\rumable_0.1.3_windows_amd64.zip -Algorithm SHA256
 # 与 SHA256SUMS 内同名文件的摘要比较，然后解压到新目录。
-Expand-Archive .\rumable_0.1.2_windows_amd64.zip -DestinationPath C:\Tools\Rumable
+Expand-Archive .\rumable_0.1.3_windows_amd64.zip -DestinationPath C:\Tools\Rumable
 C:\Tools\Rumable\rumable.exe version
 ```
 

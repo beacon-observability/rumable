@@ -46,6 +46,10 @@ func Run(args []string, out io.Writer) error {
 		f.StringVar(&component, "component", "all", "all, rum or otel; independently change one component")
 	}
 	var target *string
+	var discover *bool
+	if cmd == "setup" {
+		discover = f.Bool("discover", false, "discover server sites using a RUM-only configuration; ambiguous targets require a terminal")
+	}
 	var yes, dry, attachmentUndo *bool
 	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" || cmd == "setup" {
 		yes = f.Bool("yes", false, "confirm the displayed changes (noninteractive)")
@@ -103,6 +107,12 @@ func Run(args []string, out io.Writer) error {
 	root, err := filepath.Abs(*dir)
 	if err != nil {
 		return err
+	}
+	if discover != nil && *discover {
+		if *id != "" || *target != "" {
+			return errors.New("--discover cannot be combined with --site or --target; use a full site configuration for manual setup")
+		}
+		return setupDiscovered(root, *config, *yes, out)
 	}
 	if *id == "" {
 		*id, err = selectSite(root, *config, cmd == "status" || cmd == "disable" || cmd == "rollback" || cmd == "probe" || cmd == "attach" || cmd == "uninstall")

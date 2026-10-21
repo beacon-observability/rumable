@@ -15,11 +15,13 @@
 
 CI 不配置公开下载域名，只按固定 object key 上传。页面由所选 manifest 的 HTTPS 地址推导下载目录，并通过 `--base-url` 传给安装脚本；同一套产物可使用不同 OSS/CDN 域名。
 
+配置页应使用 `https://static.guance.com/rumable/latest/setup/index.html` 等自定义域名。阿里云 OSS 原始域名可能返回 `x-oss-force-download: true` 并强制下载 HTML；不能仅靠 HTML 标签修复。上传器同时设置 `Content-Type: text/html; charset=utf-8` 与 `Content-Disposition: inline`，固定版本页和 latest 入口都覆盖。
+
 配置 bucket/CDN 对 `rumable/*` 的匿名读取和正确 MIME 类型；跨域使用配置页时允许其域名 GET 清单。脚本不自动修改 bucket ACL、CORS、域名或 CDN。上传后的 SHA-256 回读使用 OSS API，不能代替公开域名/CDN 的下载验收。
 
 在 Settings → Repository → Protected tags 保护 `release-*`，仅允许发布负责人创建。启用 `cloudcare-tools` Runner，安装 Docker，并允许访问镜像仓库、Go 模块代理、npm registry 和 OSS。与 browser-sdk 相同，不使用 Shell executor 会忽略的 GitLab `image` 字段。
 
-构建镜像包含 Go 1.26.1、Go 1.20.14 和 Node 22。可通过 `MODERN_GO_IMAGE`、`LEGACY_GO_IMAGE`、`RELEASE_NODE_IMAGE` 指向内部镜像或固定 digest；发布脚本仍校验编译器分别为 1.26.x 和 1.20.14。Node 仅供 CI 和本地页面测试，最终用户无需安装 Node/Go。
+构建镜像包含 Go 1.26.1、Go 1.20.14 、Node 22 和 PowerShell 7.4。可通过 `MODERN_GO_IMAGE`、`LEGACY_GO_IMAGE`、`RELEASE_NODE_IMAGE`、`RELEASE_POWERSHELL_IMAGE` 指向内部镜像或固定 digest；发布脚本仍校验编译器分别为 1.26.x 和 1.20.14。Node 仅供 CI 和本地页面测试，最终用户无需安装 Node/Go。
 
 Runner 的 Go 模块下载默认使用 `GOPROXY=https://goproxy.cn,direct`，保留 `GOSUMDB=sum.golang.org` 校验；可用同名 CI 变量覆盖，两项会显式传入构建容器。不要通过关闭摘要校验绕过网络故障。
 
@@ -29,17 +31,17 @@ Runner 的 Go 模块下载默认使用 `GOPROXY=https://goproxy.cn,direct`，保
 
 先更新并审核源码、`internal/rumable/config.go` 的 `Version` 和版本说明；如需升级内置 SDK，在准备阶段运行 `go run scripts/sync-sdk.go`，将 SDK 与元数据一并提交。CI 验证其摘要，使用 tag 中已提交的 SDK，不在重试时下载变化的 latest。
 
-将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.2`：
+将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.3`：
 
 ```sh
 git switch main
 git pull --ff-only origin main
 
 # 只检查版本、工作区和远端 tag，不创建或推送 tag
-bash scripts/release-oss.sh 0.1.2 --dry-run
+bash scripts/release-oss.sh 0.1.3 --dry-run
 
 # 创建附注 tag 并推送，触发 GitLab 的 OSS 发布流水线
-bash scripts/release-oss.sh 0.1.2
+bash scripts/release-oss.sh 0.1.3
 ```
 
 省略版本号时读取源码 Version，默认远端为 `origin`，可用 `--remote NAME` 指定已配置的远端。脚本检查实际 push URL，只推送当前提交的一个发布 tag，不提交代码或推送分支，不覆盖不同提交的同名 tag。推送失败保留本地 tag，修复原因后可重跑；远端已存在且提交相同时只报告现状，不会再次触发流水线。远端 tag 回读通过不等于 OSS 发布成功，仍需查看 GitLab 流水线及发布报告。
@@ -49,21 +51,21 @@ bash scripts/release-oss.sh 0.1.2
 ## 执行顺序
 
 1. 核对受保护 tag、源码 Version、commit、OSS 变量。
-2. 按独立 lockfile 安装发布依赖，运行页面/发布脚本回归。
+2. 按独立 lockfile 安装发布依赖，运行页面/发布脚本回归及 Windows 安装脚本的可移植契约测试（不代替 Windows 实机验收）。
 3. 使用两套 Go 编译器分别运行全量 test/vet、SDK 同步和归档测试，生成全部 10 个平台包。
 4. 生成同版本 `install.sh`、`install.ps1`、`setup/` 配置页、manifest、SDK 元数据和 SHA256SUMS。公开目录只允许 10 个平台包、2 个安装器、4 个页面文件及 3 个元数据/校验文件，共 19 个对象；上传前拒绝任何额外文件，即使其摘要正确。使用文档、配置示例和许可证只放在平台包内。
 5. 预读 OSS 全部同名对象：相同字节可重试，任何不同字节均停止，不覆盖旧版本。
 6. 逐项上传并 GET 回读校验 SHA-256；全部通过后才上传和验证 `manifest.json`。报告写入脚本、页面和清单的 OSS object key。
 7. 正式版本更新 `latest/setup/index.html`、两个安装器，再更新 `latest/manifest.json`，逐项回读校验。latest 使用 `Cache-Control: no-store, max-age=0`；固定版本仍使用长期不可变缓存。
 
-当前目录为 `rumable/0.1.2/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页会预填同版本清单地址；用户读取版本、填写 Web SDK 参数后即可复制接入命令。
+当前目录为 `rumable/0.1.3/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页自动读取同版本清单；填写 Web SDK 参数并选择安装环境后即可复制接入命令。
 
 发布完成后的公开入口：
 
-- 配置页：`https://static.guance.com/rumable/0.1.2/setup/index.html`
-- 清单：`https://static.guance.com/rumable/0.1.2/manifest.json`
-- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.2/install.sh`、`https://static.guance.com/rumable/0.1.2/install.ps1`
-- Windows x64：`https://static.guance.com/rumable/0.1.2/rumable_0.1.2_windows_amd64.zip`
+- 配置页：`https://static.guance.com/rumable/0.1.3/setup/index.html`
+- 清单：`https://static.guance.com/rumable/0.1.3/manifest.json`
+- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.3/install.sh`、`https://static.guance.com/rumable/0.1.3/install.ps1`
+- Windows x64：`https://static.guance.com/rumable/0.1.3/rumable_0.1.3_windows_amd64.zip`
 
 产品集成使用下面四个固定地址：
 

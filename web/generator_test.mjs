@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
 export const model = {
+  manualTarget:true,
   id:'website', applicationId:'app-test', reporting:'openway', endpoint:'https://openway.example.com', clientToken:'browser-only-token',
   service:'网站 "quoted" \\ test', env:'production', version:'1.0.0', sessionSampleRate:'35.5', sessionOnErrorSampleRate:'0',
   sessionReplayEnabled:false, sessionReplaySampleRate:'20', sessionReplayOnErrorSampleRate:'10', trackUserInteractions:true,
@@ -49,7 +50,7 @@ if (process.argv.includes('--fixtures')) {
     const encoded = Buffer.from(makeConfig(m)).toString('base64'); assert.ok(command.includes(encoded));
     const ps = makeCommand({...m,server:'iis'},manifest,source);
     assert.ok(ps.includes(Buffer.from(makeConfig({...m,server:'iis'})).toString('base64')));
-    assert.match(ps,/install\.ps1/);
+    assert.match(ps,/SecurityProtocol.*Tls12;.*Invoke-WebRequest.*install\.ps1/);
     assert.doesNotMatch(ps,/\n|Get-FileHash|ExtractToFile|LASTEXITCODE/);
   });
   test('latest discovery produces immutable commands for both operating systems', () => {
@@ -59,6 +60,24 @@ if (process.argv.includes('--fixtures')) {
     for (const server of ['nginx','iis']) {
       assert.equal(makeCommand({...model,server},latest,latestURL), makeCommand({...model,server},manifest,source));
       assert.doesNotMatch(makeCommand({...model,server},latest,latestURL), /\/latest\//);
+    }
+  });
+  test('automatic setup needs only RUM fields and an environment; old releases fail closed', () => {
+    for (const server of ['nginx','iis']) {
+      const m = {...model, manualTarget:false, server, id:'', publicURL:'', nginxBinary:'', iisSite:'', includePaths:'', probePaths:''};
+      const config = makeConfig(m);
+      assert.match(config, /\[rum\]/);
+      assert.match(config, new RegExp(`server = "${server}"`));
+      assert.doesNotMatch(config, /\[\[sites\]\]|publicURL|probePaths|nginxBinary|website/);
+      assert.throws(() => makeCommand(m,manifest,source), /自动发现/);
+      const current = {...manifest, capabilities:[...manifest.capabilities,'rum-discovery-v1']};
+      const command = makeCommand(m,current,source);
+      assert.match(command, server === 'iis' ? / -Discover$/ : / --discover$/);
+      assert.ok(command.includes(Buffer.from(config).toString('base64')));
+      if (server === 'nginx') execFileSync('sh',['-n'],{input:command});
+      // Host-dependent checks happen after site discovery in the CLI.
+      assert.doesNotThrow(() => makeConfig({...m, workerUrl:'https://www.example.com/worker.js',useSecureSessionCookie:true}));
+      assert.throws(() => makeConfig({...m,workerUrl:'//evil.example/worker.js'}));
     }
   });
 }

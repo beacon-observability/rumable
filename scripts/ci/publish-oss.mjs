@@ -109,7 +109,8 @@ export async function publishArtifacts(artifacts, client, onVerified = () => {})
       try {
         await client.put(artifact.object, artifact.content, {
           mime:mime(artifact.name),
-          headers:{'Cache-Control':'public, max-age=31536000, immutable', 'x-oss-forbid-overwrite':'true'}
+          headers:{'Cache-Control':'public, max-age=31536000, immutable', 'x-oss-forbid-overwrite':'true',
+            ...(artifact.name.endsWith('.html') ? {'Content-Disposition':'inline'} : {})}
         });
       } catch { throw Error(`OSS upload failed: ${artifact.object}`); }
     }
@@ -159,7 +160,7 @@ export async function publishLatest(artifacts, client, onVerified = () => {}) {
   for (const alias of aliases) {
     const object = `rumable/latest/${alias.name}`, digest = sha256(alias.content);
     try {
-      await client.put(object, alias.content, {mime:mime(alias.name), headers:{'Cache-Control':'no-store, max-age=0'}});
+      await client.put(object, alias.content, {mime:mime(alias.name), headers:{'Cache-Control':'no-store, max-age=0', ...(alias.name.endsWith('.html') ? {'Content-Disposition':'inline'} : {})}});
     } catch { throw Error(`OSS latest update failed: ${object}`); }
     const result = await read(object);
     if (result === null || sha256(result) !== digest) throw Error(`OSS latest read-back checksum mismatch: ${object}`);

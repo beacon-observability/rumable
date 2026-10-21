@@ -18,9 +18,13 @@ function url(value, label, {origin = false, https = false} = {}) {
 }
 
 export function makeConfig(m) {
-  if (!/^[a-z][a-z0-9-]{0,47}$/.test(m.id)) throw Error('接入标识需以小写字母开头，使用小写字母、数字或短横线，最多 48 位');
-  const base = url(m.publicURL, '网站地址');
-  if (m.publicURL.includes('?') || base.pathname.includes('%') || !base.pathname.endsWith('/')) throw Error('网站地址必须以 / 结尾，不带查询参数或编码路径');
+  const manual = !!m.manualTarget;
+  let base;
+  if (manual) {
+    if (!/^[a-z][a-z0-9-]{0,47}$/.test(m.id)) throw Error('接入标识需以小写字母开头，使用小写字母、数字或短横线，最多 48 位');
+    base = url(m.publicURL, '网站地址');
+    if (m.publicURL.includes('?') || base.pathname.includes('%') || !base.pathname.endsWith('/')) throw Error('网站地址必须以 / 结尾，不带查询参数或编码路径');
+  }
   if (!['nginx', 'iis'].includes(m.server)) throw Error('请选择 Nginx 或 IIS');
   for (const key of ['applicationId', ...(m.reporting === 'openway' ? ['clientToken'] : [])]) {
     if (!m[key] || /[&#+%;\s\p{Cc}]/u.test(m[key])) throw Error(`${key}必填，且不能包含空白或 & # + % ; 字符`);
@@ -28,7 +32,7 @@ export function makeConfig(m) {
   if (!['openway', 'datakit'].includes(m.reporting)) throw Error('请选择上报方式');
   const endpointKey = m.reporting === 'openway' ? 'site' : 'datakitOrigin';
   const endpoint = url(m.endpoint, '上报地址', {origin: true});
-  if (base.protocol === 'https:' && endpoint.protocol !== 'https:') throw Error('HTTPS 网站需要 HTTPS 上报地址');
+  if (base?.protocol === 'https:' && endpoint.protocol !== 'https:') throw Error('HTTPS 网站需要 HTTPS 上报地址');
   const rum = {applicationId: m.applicationId, [endpointKey]: endpoint.origin};
   if (m.reporting === 'openway') rum.clientToken = m.clientToken;
   for (const key of stringFields) if (m[key]) rum[key] = String(m[key]);
@@ -46,16 +50,20 @@ export function makeConfig(m) {
   if (!['auto', 'cookie', 'local-storage'].includes(m.sessionPersistence)) throw Error('请选择会话存储方式');
   if (m.sessionPersistence !== 'auto') rum.sessionPersistence = m.sessionPersistence;
   if (rum.allowFallbackToLocalStorage && m.sessionPersistence !== 'auto') throw Error('存储回退需要将会话存储设为自动选择');
-  if (rum.useSecureSessionCookie && base.protocol !== 'https:') throw Error('安全 Cookie 需要 HTTPS 网站');
+  if (rum.useSecureSessionCookie && base && base.protocol !== 'https:') throw Error('安全 Cookie 需要 HTTPS 网站');
   if (rum.workerUrl) {
-    const worker = new URL(rum.workerUrl, base);
-    if (rum.workerUrl.startsWith('//') || (!rum.workerUrl.startsWith('/') && !/^https?:\/\//.test(rum.workerUrl)) || worker.origin !== base.origin || worker.hash || worker.username || worker.password) throw Error('Worker 地址必须是同源的绝对地址或 / 开头的路径');
+    const worker = url(new URL(rum.workerUrl, base || 'https://discovery.invalid/').href, 'Worker 地址');
+    if (rum.workerUrl.startsWith('//') || (!rum.workerUrl.startsWith('/') && !/^https?:\/\//.test(rum.workerUrl)) || (base && worker.origin !== base.origin)) throw Error('Worker 地址必须是同源的绝对地址或 / 开头的路径');
   }
   rum.allowedTracingUrls = lines(m.allowedTracingUrls);
   for (const raw of rum.allowedTracingUrls) url(raw, '链路匹配地址');
   if (rum.allowedTracingUrls.length) {
     if (!traceTypes.includes(m.traceType)) throw Error('请选择链路协议');
     rum.traceType = m.traceType;
+  }
+  const rumText = Object.entries(rum).map(([k,v]) => `${k} = ${encode(v)}`).join('\n');
+  if (!manual) {
+    return `schemaVersion = 1\nserver = ${encode(m.server)}\n${m.server === 'iis' ? `allowCompressionChanges = ${!!m.allowCompressionChanges}\n` : ''}\n[rum]\n${rumText}\n`;
   }
   const paths = key => {
     const values = lines(m[key]);
@@ -78,7 +86,7 @@ export function makeConfig(m) {
     if ((m.iisApplication === '/' ? '/' : m.iisApplication + '/') !== base.pathname) throw Error('网站地址的路径需与 IIS 应用路径一致');
     target = `[sites.iis]\nsite = ${encode(m.iisSite)}\napplication = ${encode(m.iisApplication)}\nallowCompressionChanges = ${!!m.allowCompressionChanges}`;
   }
-  return `schemaVersion = 1\n\n[[sites]]\nid = ${encode(m.id)}\npublicURL = ${encode(m.publicURL)}\nprobePaths = ${encode(probes)}\nincludePaths = ${encode(include)}\nexcludePaths = ${encode(exclude)}\n\n${target}\n\n[sites.rum]\n${Object.entries(rum).map(([k,v]) => `${k} = ${encode(v)}`).join('\n')}\n`;
+  return `schemaVersion = 1\n\n[[sites]]\nid = ${encode(m.id)}\npublicURL = ${encode(m.publicURL)}\nprobePaths = ${encode(probes)}\nincludePaths = ${encode(include)}\nexcludePaths = ${encode(exclude)}\n\n${target}\n\n[sites.rum]\n${rumText}\n`;
 }
 
 export function validateManifest(m, manifestURL) {
@@ -109,12 +117,13 @@ function base64(text) {
 // until the user runs this command; the base URL follows the selected manifest.
 export function makeCommand(m, manifest, manifestURL) {
   validateManifest(manifest, manifestURL);
+  if (!m.manualTarget && !manifest.capabilities.includes('rum-discovery-v1')) throw Error('此版本不支持自动发现站点，请选择 0.1.3 或更新版本，或启用手动指定站点');
   const config = base64(makeConfig(m));
   const base = new URL(manifest.artifactBase || '.', manifestURL).href;
   if (m.server === 'iis') {
     const script = new URL(manifest.installers.windows.file, base).href;
-    return `& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing ${psQuote(script)}).Content)) -BaseUrl ${psQuote(base)} -Config ${psQuote(config)}`;
+    return `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing ${psQuote(script)}).Content)) -BaseUrl ${psQuote(base)} -Config ${psQuote(config)}${m.manualTarget ? '' : ' -Discover'}`;
   }
   const script = new URL(manifest.installers.linux.file, base).href;
-  return `curl --proto '=https' --proto-redir '=https' -fsSL ${shellQuote(script)} | sudo sh -s -- --base-url ${shellQuote(base)} --config ${shellQuote(config)}`;
+  return `curl --proto '=https' --proto-redir '=https' -fsSL ${shellQuote(script)} | sudo sh -s -- --base-url ${shellQuote(base)} --config ${shellQuote(config)}${m.manualTarget ? '' : ' --discover'}`;
 }

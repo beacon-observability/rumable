@@ -19,8 +19,8 @@ import (
 
 func TestReleaseInstallersPinArchivesWithoutBindingADomain(t *testing.T) {
 	var packages []map[string]string
-	for i, target := range []struct{ os, arch string }{{"linux", "386"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}} {
-		packages = append(packages, map[string]string{"os": target.os, "arch": target.arch, "flavor": "modern", "sha256": strings.Repeat(string(rune('a'+i)), 64)})
+	for i, target := range []struct{ os, arch, flavor string }{{"linux", "386", "modern"}, {"linux", "amd64", "modern"}, {"linux", "arm64", "modern"}, {"windows", "386", "modern"}, {"windows", "amd64", "modern"}, {"windows", "arm64", "modern"}, {"windows", "386", "legacy"}, {"windows", "amd64", "legacy"}} {
+		packages = append(packages, map[string]string{"os": target.os, "arch": target.arch, "flavor": target.flavor, "sha256": strings.Repeat(string("01234567"[i]), 64)})
 	}
 	files, metadata, err := releaseInstallers(".", "0.1.0", packages)
 	if err != nil {
@@ -42,8 +42,8 @@ func TestReleaseInstallersPinArchivesWithoutBindingADomain(t *testing.T) {
 			t.Fatal("installer lost archive integrity pin", p)
 		}
 	}
-	if _, _, err = releaseInstallers(".", "0.1.0", packages[:3]); err == nil {
-		t.Fatal("missing Windows package was accepted")
+	if _, _, err = releaseInstallers(".", "0.1.0", packages[:7]); err == nil {
+		t.Fatal("missing legacy Windows package was accepted")
 	}
 	cmd := exec.Command("sh", "-n")
 	cmd.Stdin = bytes.NewReader(files["install.sh"])

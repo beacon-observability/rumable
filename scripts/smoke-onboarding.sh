@@ -62,7 +62,7 @@ const archiveHash = service==='bad-digest'?'0'.repeat(64):digest;
 const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.1').replaceAll('@@LINUX_386_SHA256@@',archiveHash).replaceAll('@@LINUX_AMD64_SHA256@@',archiveHash).replaceAll('@@LINUX_ARM64_SHA256@@',archiveHash);
 fs.writeFileSync(work+'/install.sh',script);
 const manifest = {schemaVersion:1,version:'0.1.1',artifactBase:'../0.1.1/',capabilities:['rum-setup-v1','rum-install-v1'],installers:{linux:{file:'install.sh',sha256:crypto.createHash('sha256').update(script).digest('hex')},windows:{file:'install.ps1',sha256:'a'.repeat(64)}},sdk:{version:'3.3.21'},packages:[{os:'linux',arch,flavor:'modern',file:`rumable_0.1.1_linux_${arch}.tar.gz`,sha256:archiveHash}]};
-const m = {id:'website',applicationId:'fixture',reporting:'datakit',endpoint:'http://127.0.0.1:18080',service,publicURL:'http://127.0.0.1:18080/',server:'nginx',arch,nginxBinary:'/usr/sbin/nginx',nginxConfig:'/work/nginx.conf',includePaths:'/',excludePaths:'',probePaths:probe,sessionSampleRate:100,sessionReplayEnabled:false,defaultPrivacyLevel:'mask',sessionPersistence:'cookie'};
+const m = {manualTarget:true,id:'website',applicationId:'fixture',reporting:'datakit',endpoint:'http://127.0.0.1:18080',service,publicURL:'http://127.0.0.1:18080/',server:'nginx',arch,nginxBinary:'/usr/sbin/nginx',nginxConfig:'/work/nginx.conf',includePaths:'/',excludePaths:'',probePaths:probe,sessionSampleRate:100,sessionReplayEnabled:false,defaultPrivacyLevel:'mask',sessionPersistence:'cookie'};
 fs.writeFileSync(work+'/command.sh',makeCommand(m,manifest,'https://oss.example.test/latest/manifest.json'));
 JS
 }
