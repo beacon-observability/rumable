@@ -31,6 +31,7 @@ docker run --rm --init --name "$release_container" \
   --workdir "$CI_PROJECT_DIR" \
   --env HOME=/tmp/rumable-ci --env GOPATH=/tmp/rumable-go \
   --env GOCACHE=/tmp/rumable-go-cache --env NPM_CONFIG_CACHE=/tmp/rumable-npm \
+  --env "GOPROXY=${GOPROXY:-https://goproxy.cn,direct}" --env "GOSUMDB=${GOSUMDB:-sum.golang.org}" \
   --env GITLAB_CI --env CI_COMMIT_REF_PROTECTED --env CI_COMMIT_TAG --env CI_COMMIT_SHA \
   --env OSS_REGION --env OSS_BUCKET --env OSS_ACCESS_KEY_ID --env OSS_ACCESS_KEY_SECRET --env OSS_STS_TOKEN \
   "$release_image" node scripts/ci/ci.mjs

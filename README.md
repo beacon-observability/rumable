@@ -1,6 +1,6 @@
 # Rumable
 
-当前版本：**0.1.0**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[验证记录](docs/verification.md)区分编译、本地运行与实际入库验收。
+当前版本：**0.1.1**。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[验证记录](docs/verification.md)区分编译、本地运行与实际入库验收。
 
 通过 Nginx / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
 
@@ -79,10 +79,10 @@ Nginx 最低要求 **1.9.4 + http_sub_module**。1.9.4 的 `check`、`enable` �
 ## 配置与命令
 
 - 可使用[配置页](web/index.html)填写 Web SDK 参数，下载 TOML 或读取 CI/OSS 发布清单生成安装命令。当前支持 Nginx/Linux 和 IIS/Windows RUM；本地预览及发布约定见[一键接入说明](docs/one-click-onboarding.md)。
-- `0.1.0` 发布后使用[在线配置页](https://static.guance.com/rumable/0.1.0/setup/index.html)；Windows 一键安装、重复接入、停用与回滚的具体步骤见 [Windows 验收手册](docs/windows-acceptance.md)。
+- 产品集成使用固定的 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)或 [latest 清单](https://static.guance.com/rumable/latest/manifest.json)，页面生成的安装命令绑定具体版本。Windows 一键安装、重复接入、停用与回滚的具体步骤见 [Windows 验收手册](docs/windows-acceptance.md)。
 - 新增 `setup --config rumable.toml --state-dir /var/lib/rumable --yes`：依次准备状态、自动挂接 Nginx、启用并探测；重复执行更新相同目标。发生故障复用部署恢复机制，保留资源映射与备份。
 - [GitLab CI 发布](docs/gitlab-ci-release.md)沿用 browser-sdk 的 Runner、受保护 tag 与 OSS 变量约定；install.sh / install.ps1、版本包和配置页一起发布，全部摘要回读通过后才发布清单。
-- 提交待发布源码后执行 `bash scripts/release-oss.sh 0.1.0` 创建并推送发布 tag；加 `--dry-run` 只做预演。脚本不提交代码或推送分支，OSS 上传由 tag 对应 CI 完成。
+- 提交待发布源码后执行 `bash scripts/release-oss.sh 0.1.1` 创建并推送发布 tag；加 `--dry-run` 只做预演。脚本不提交代码或推送分支，OSS 上传由 tag 对应 CI 完成。
 
 - 配置示例：[Nginx / OpenWay](examples/nginx.toml)、[IIS / DataKit](examples/iis.toml)。两种上报方式均可用于两种服务器；单站点自动选择，多站点通过 `--site` 定位。
 - 默认配置文件为 `rumable.toml`，使用 UTF-8 编码；每个站点使用 `[[sites]]`，其下配置 `[sites.nginx]`、`[sites.iis]` 二选一，以及 `[sites.rum]`。支持注释，拒绝未知字段和重复定义。`init` 默认生成精简的 Nginx / OpenWay 配置；`--server` / `--reporting` 切换目标，`--full` 列出完整静态 SDK 参数。
@@ -162,10 +162,10 @@ NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-nginx.sh
 # 同份源码，两个真实编译器；仅设置 go.mod 不会让新 Go 支持旧 Windows。
 # 默认先同步官方最新稳定 v3 SDK，再运行两套编译器的测试、vet 和打包。
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.0
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.1
 ```
 
-发布目录默认为 `dist/0.1.0/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
+发布目录默认为 `dist/0.1.1/`，包括下载索引、最终用户指南和 10 个 Windows / Linux 包。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包和附带文档。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
 
 可单独执行 `go run scripts/sync-sdk.go` 同步并审查 SDK、版本、来源和 SHA-256；CDN 与官方 NPM 稳定版不一致、版本不是稳定 v3 或许可变更时中止。离线重建可显式使用 `release.go --skip-sdk-sync`，其含义是沿用已校验文件，不检查最新版本。站点不会自动更新；分发新二进制后执行 `enable` 升级，默认同域方式保留旧资源供缓存页面和回滚使用。
 

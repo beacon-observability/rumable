@@ -85,6 +85,7 @@ export function validateManifest(m, manifestURL) {
   const source = url(manifestURL, '发布清单', {https: true});
   if (source.search) throw Error('发布清单使用固定的版本地址，不带查询参数');
   if (m.schemaVersion !== 1 || !/^\d+\.\d+\.\d+(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)?$/.test(m.version) || !m.capabilities?.includes('rum-setup-v1') || !m.capabilities?.includes('rum-install-v1') || !Array.isArray(m.packages) || !m.sdk?.version) throw Error('清单不包含支持一键接入的版本');
+  if ((m.artifactBase !== undefined && m.artifactBase !== `../${m.version}/`) || (/\/latest\/manifest\.json$/.test(source.pathname) && !m.artifactBase)) throw Error('latest 清单必须指向对应的固定版本目录');
   for (const [platform, file] of [['linux', 'install.sh'], ['windows', 'install.ps1']]) {
     const installer = m.installers?.[platform];
     if (installer?.file !== file || !/^[a-f0-9]{64}$/.test(installer.sha256)) throw Error('清单缺少有效的一键安装脚本，请选择 CI 发布的新版本');
@@ -109,7 +110,7 @@ function base64(text) {
 export function makeCommand(m, manifest, manifestURL) {
   validateManifest(manifest, manifestURL);
   const config = base64(makeConfig(m));
-  const base = new URL('.', manifestURL).href;
+  const base = new URL(manifest.artifactBase || '.', manifestURL).href;
   if (m.server === 'iis') {
     const script = new URL(manifest.installers.windows.file, base).href;
     return `& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing ${psQuote(script)}).Content)) -BaseUrl ${psQuote(base)} -Config ${psQuote(config)}`;

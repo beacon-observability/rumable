@@ -21,28 +21,30 @@ CI 不配置公开下载域名，只按固定 object key 上传。页面由所�
 
 构建镜像包含 Go 1.26.1、Go 1.20.14 和 Node 22。可通过 `MODERN_GO_IMAGE`、`LEGACY_GO_IMAGE`、`RELEASE_NODE_IMAGE` 指向内部镜像或固定 digest；发布脚本仍校验编译器分别为 1.26.x 和 1.20.14。Node 仅供 CI 和本地页面测试，最终用户无需安装 Node/Go。
 
+Runner 的 Go 模块下载默认使用 `GOPROXY=https://goproxy.cn,direct`，保留 `GOSUMDB=sum.golang.org` 校验；可用同名 CI 变量覆盖，两项会显式传入构建容器。不要通过关闭摘要校验绕过网络故障。
+
 ## 版本准备与触发
 
 发布脚本在 Rumable 源码 Git 仓库中运行；Windows / Linux 分发包用于安装验收，不含 Git 元数据。
 
 先更新并审核源码、`internal/rumable/config.go` 的 `Version` 和版本说明；如需升级内置 SDK，在准备阶段运行 `go run scripts/sync-sdk.go`，将 SDK 与元数据一并提交。CI 验证其摘要，使用 tag 中已提交的 SDK，不在重试时下载变化的 latest。
 
-将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.0`：
+将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.1`：
 
 ```sh
 git switch main
 git pull --ff-only origin main
 
 # 只检查版本、工作区和远端 tag，不创建或推送 tag
-bash scripts/release-oss.sh 0.1.0 --dry-run
+bash scripts/release-oss.sh 0.1.1 --dry-run
 
 # 创建附注 tag 并推送，触发 GitLab 的 OSS 发布流水线
-bash scripts/release-oss.sh 0.1.0
+bash scripts/release-oss.sh 0.1.1
 ```
 
 省略版本号时读取源码 Version，默认远端为 `origin`，可用 `--remote NAME` 指定已配置的远端。脚本检查实际 push URL，只推送当前提交的一个发布 tag，不提交代码或推送分支，不覆盖不同提交的同名 tag。推送失败保留本地 tag，修复原因后可重跑；远端已存在且提交相同时只报告现状，不会再次触发流水线。远端 tag 回读通过不等于 OSS 发布成功，仍需查看 GitLab 流水线及发布报告。
 
-普通分支、普通 `v...` tag、未保护的 tag 均不发布；不需要 GitLab API token。脚本不会配置受保护 tag 规则；首次使用必须完成前述 GitLab 设置。CI 不修改版本、不提交代码、不推送分支，也不更新可变的 latest/current 地址。
+普通分支、普通 `v...` tag、未保护的 tag 均不发布；不需要 GitLab API token。脚本不会配置受保护 tag 规则；首次使用必须完成前述 GitLab 设置。CI 不修改版本、不提交代码或推送分支。正式版本全部验证成功后更新 latest，预发布版本只发布自身版本目录。
 
 ## 执行顺序
 
@@ -52,15 +54,29 @@ bash scripts/release-oss.sh 0.1.0
 4. 生成同版本 `install.sh`、`install.ps1`、`setup/` 配置页、manifest、文档和 SHA256SUMS，检查文件完整性、全部平台摘要及来源 commit。
 5. 预读 OSS 全部同名对象：相同字节可重试，任何不同字节均停止，不覆盖旧版本。
 6. 逐项上传并 GET 回读校验 SHA-256；全部通过后才上传和验证 `manifest.json`。报告写入脚本、页面和清单的 OSS object key。
+7. 正式版本更新 `latest/setup/index.html`、两个安装器，再更新 `latest/manifest.json`，逐项回读校验。latest 使用 `Cache-Control: no-store, max-age=0`；固定版本仍使用长期不可变缓存。
 
-当前目录为 `rumable/0.1.0/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页会预填同版本清单地址；用户读取版本、填写 Web SDK 参数后即可复制接入命令。
+当前目录为 `rumable/0.1.1/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页会预填同版本清单地址；用户读取版本、填写 Web SDK 参数后即可复制接入命令。
 
 发布完成后的公开入口：
 
-- 配置页：`https://static.guance.com/rumable/0.1.0/setup/index.html`
-- 清单：`https://static.guance.com/rumable/0.1.0/manifest.json`
-- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.0/install.sh`、`https://static.guance.com/rumable/0.1.0/install.ps1`
-- Windows x64：`https://static.guance.com/rumable/0.1.0/rumable_0.1.0_windows_amd64.zip`
+- 配置页：`https://static.guance.com/rumable/0.1.1/setup/index.html`
+- 清单：`https://static.guance.com/rumable/0.1.1/manifest.json`
+- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.1/install.sh`、`https://static.guance.com/rumable/0.1.1/install.ps1`
+- Windows x64：`https://static.guance.com/rumable/0.1.1/rumable_0.1.1_windows_amd64.zip`
+
+产品集成使用下面四个固定地址：
+
+| 固定入口 | 用途 |
+|---|---|
+| `https://static.guance.com/rumable/latest/setup/index.html` | 跳转到最新正式版配置页 |
+| `https://static.guance.com/rumable/latest/manifest.json` | 读取版本、包摘要、`artifactBase` |
+| `https://static.guance.com/rumable/latest/install.sh` | Linux 安装入口 |
+| `https://static.guance.com/rumable/latest/install.ps1` | Windows 安装入口 |
+
+清单的 `artifactBase` 为 `../<version>/`，通过 `new URL(manifest.artifactBase, manifestURL)` 得到版本目录，再解析包或安装器的 `file`。页面即使读取 latest 清单，也生成固定版本命令。直接使用 latest 安装器时，将 base URL 设为 `https://static.guance.com/rumable/latest/`；脚本会按自身固定版本转换到对应目录，避免旧脚本与新包混用。
+
+latest 只允许版本号向前推进，比较数字版本号；旧 tag 重试发现更高版本时会跳过 latest。同版本但清单内容不同会拒绝。latest 多对象更新不是事务，但每个页面/安装器都指向已经完整发布的固定版本；失败时可重试，清单最后更新。CDN 应遵守 latest 的不缓存响应头，不对该目录配置强制长期缓存。
 
 公开域名仅用于文档与接入入口，不成为 CI 变量。发布后同时核对清单中的 revision 与 tag 提交、公开下载的 SHA-256 与 SHA256SUMS；本地旧测试包的 revision 为 `uncommitted` 时，不要用它替代 CI 的正式构建产物。
 

@@ -34,7 +34,7 @@ if (process.argv.includes('--fixtures')) {
   });
   test('manifest rejects changed capabilities, paths, hashes and duplicate platforms', () => {
     validateManifest(manifest, source);
-    for (const patch of [{capabilities:[]},{installers:{}},{installers:{...manifest.installers,linux:{file:'../install.sh',sha256:'c'.repeat(64)}}},{version:'../../x'},{packages:[{...manifest.packages[0],file:'../../rumable'}]},{packages:[{...manifest.packages[0],sha256:'bad'}]},{packages:[manifest.packages[0],manifest.packages[0]]}]) assert.throws(() => validateManifest({...manifest,...patch},source));
+    for (const patch of [{artifactBase:'https://other.example/'},{artifactBase:'../9.9.9/'},{capabilities:[]},{installers:{}},{installers:{...manifest.installers,linux:{file:'../install.sh',sha256:'c'.repeat(64)}}},{version:'../../x'},{packages:[{...manifest.packages[0],file:'../../rumable'}]},{packages:[{...manifest.packages[0],sha256:'bad'}]},{packages:[manifest.packages[0],manifest.packages[0]]}]) assert.throws(() => validateManifest({...manifest,...patch},source));
     assert.throws(() => validateManifest(manifest,'http://example.com/manifest.json'));
   });
   test('one-line command delegates installation and keeps SDK configuration as data', () => {
@@ -51,5 +51,14 @@ if (process.argv.includes('--fixtures')) {
     assert.ok(ps.includes(Buffer.from(makeConfig({...m,server:'iis'})).toString('base64')));
     assert.match(ps,/install\.ps1/);
     assert.doesNotMatch(ps,/\n|Get-FileHash|ExtractToFile|LASTEXITCODE/);
+  });
+  test('latest discovery produces immutable commands for both operating systems', () => {
+    const latestURL = 'https://downloads.example.com/rumable/latest/manifest.json';
+    assert.throws(() => validateManifest(manifest, latestURL), /latest/);
+    const latest = {...manifest,artifactBase:`../${manifest.version}/`};
+    for (const server of ['nginx','iis']) {
+      assert.equal(makeCommand({...model,server},latest,latestURL), makeCommand({...model,server},manifest,source));
+      assert.doesNotMatch(makeCommand({...model,server},latest,latestURL), /\/latest\//);
+    }
   });
 }

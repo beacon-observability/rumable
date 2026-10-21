@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.0", "release version")
+	versionName := flag.String("version", "0.1.1", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -229,6 +229,7 @@ func run() error {
 	}
 	shared["manifest.json"], err = json.MarshalIndent(map[string]any{
 		"schemaVersion": 1, "version": *versionName, "revision": *revision,
+		"artifactBase": "../" + *versionName + "/",
 		"capabilities": []string{"rum-setup-v1", "rum-install-v1"}, "sdk": json.RawMessage(shared["sdk.json"]), "packages": packages, "installers": installers,
 	}, "", "  ")
 	if err != nil {

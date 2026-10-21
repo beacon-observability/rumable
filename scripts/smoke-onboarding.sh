@@ -44,7 +44,7 @@ while [ "$#" -gt 0 ]; do
 done
 case "$source" in
   */install.sh) cat /work/install.sh ;;
-  */rumable_0.1.0_linux_*.tar.gz) cp /work/package.tar.gz "$destination" ;;
+  */rumable_0.1.1_linux_*.tar.gz) cp /work/package.tar.gz "$destination" ;;
   *) echo 'Unexpected download URL' >&2; exit 1 ;;
 esac
 SH
@@ -59,15 +59,15 @@ import {makeCommand} from './web/generator.mjs';
 const [work, arch, service, probe] = process.argv.slice(2);
 const digest = crypto.createHash('sha256').update(fs.readFileSync(work+'/package.tar.gz')).digest('hex');
 const archiveHash = service==='bad-digest'?'0'.repeat(64):digest;
-const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.0').replaceAll('@@LINUX_386_SHA256@@',archiveHash).replaceAll('@@LINUX_AMD64_SHA256@@',archiveHash).replaceAll('@@LINUX_ARM64_SHA256@@',archiveHash);
+const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.1').replaceAll('@@LINUX_386_SHA256@@',archiveHash).replaceAll('@@LINUX_AMD64_SHA256@@',archiveHash).replaceAll('@@LINUX_ARM64_SHA256@@',archiveHash);
 fs.writeFileSync(work+'/install.sh',script);
-const manifest = {schemaVersion:1,version:'0.1.0',capabilities:['rum-setup-v1','rum-install-v1'],installers:{linux:{file:'install.sh',sha256:crypto.createHash('sha256').update(script).digest('hex')},windows:{file:'install.ps1',sha256:'a'.repeat(64)}},sdk:{version:'3.3.21'},packages:[{os:'linux',arch,flavor:'modern',file:`rumable_0.1.0_linux_${arch}.tar.gz`,sha256:archiveHash}]};
+const manifest = {schemaVersion:1,version:'0.1.1',artifactBase:'../0.1.1/',capabilities:['rum-setup-v1','rum-install-v1'],installers:{linux:{file:'install.sh',sha256:crypto.createHash('sha256').update(script).digest('hex')},windows:{file:'install.ps1',sha256:'a'.repeat(64)}},sdk:{version:'3.3.21'},packages:[{os:'linux',arch,flavor:'modern',file:`rumable_0.1.1_linux_${arch}.tar.gz`,sha256:archiveHash}]};
 const m = {id:'website',applicationId:'fixture',reporting:'datakit',endpoint:'http://127.0.0.1:18080',service,publicURL:'http://127.0.0.1:18080/',server:'nginx',arch,nginxBinary:'/usr/sbin/nginx',nginxConfig:'/work/nginx.conf',includePaths:'/',excludePaths:'',probePaths:probe,sessionSampleRate:100,sessionReplayEnabled:false,defaultPrivacyLevel:'mask',sessionPersistence:'cookie'};
-fs.writeFileSync(work+'/command.sh',makeCommand(m,manifest,'https://oss.example.test/0.1.0/manifest.json'));
+fs.writeFileSync(work+'/command.sh',makeCommand(m,manifest,'https://oss.example.test/latest/manifest.json'));
 JS
 }
 run_generated() { docker exec -e PATH=/work/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "$server" sh /work/command.sh; }
-cli() { docker exec "$server" /opt/rumable/0.1.0/rumable "$@" --state-dir /var/lib/rumable --site website; }
+cli() { docker exec "$server" /opt/rumable/0.1.1/rumable "$@" --state-dir /var/lib/rumable --site website; }
 generate bad-digest /
 if run_generated > "$work/failure.log" 2>&1; then echo 'Bad checksum was accepted'; exit 1; fi
 docker exec "$server" test ! -e /var/lib/rumable/sites/website/state.json
@@ -89,4 +89,4 @@ cli probe
 cli disable
 cli rollback --attachment --yes
 cmp "$work/nginx.conf" "$work/original.conf"
-echo 'PASS: streamed installer, automatic architecture, generated short command, checksum rejection, first setup, failed preflight retry, idempotence, upgrade, rollback, disable and exact detach. OSS transfer was a local fixture.'
+echo 'PASS: latest manifest, streamed installer, automatic architecture, generated short command, checksum rejection, first setup, failed preflight retry, idempotence, upgrade, rollback, disable and exact detach. OSS transfer was a local fixture.'

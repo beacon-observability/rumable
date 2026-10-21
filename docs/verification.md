@@ -1,5 +1,12 @@
 # 实现验证记录
 
+## 0.1.1 latest 与 CI 依赖下载（2026-10-21）
+
+- 20 项 Node 测试通过：latest 清单生成的 Linux / Windows 命令绑定版本目录；安装器将 latest base 转为脚本固定版本；入口仅在不可变清单验证后发布，禁止旧版回退，预发布跳过；更新失败保留旧清单、重试修复，摘要回读失败拒绝完成。
+- Go 全量测试与发布归档/安装器契约测试通过；shell 语法及 diff 检查通过。OrbStack Nginx 的完整一键安装流程从 latest 清单生成命令，校验、安装、预检失败重试、幂等、升级回滚、停用及精确撤销通过。日志 `/tmp/rumable-latest-onboarding-smoke.log`，OSS 下载仍使用本地替身。
+- 首个 `release-oss-v0.1.0` 流水线 319659 在下载 Go 依赖时连接 proxy.golang.org 超时，尚未进入打包和 OSS 上传。后续 CI 显式传入 GOPROXY / GOSUMDB，默认使用 goproxy.cn 并保留摘要校验；旧 tag 保留，不覆盖。
+- Windows 安装器原生执行、IIS 及观测云入库仍由目标 Windows 环境验收。发布成功只证明构建、文件上传和入口校验，不代表上述运行验收通过。
+
 ## 0.1.0 短命令安装器与本地测试包（2026-10-21）
 
 - 安装逻辑独立为 `install.sh` / `install.ps1`，版本号使用 `0.1.0`。CI 不再要求公开下载域名；页面从清单地址推导下载目录。Linux 安装脚本自动识别 386 / amd64 / arm64，Windows 一键入口使用 amd64。

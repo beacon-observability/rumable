@@ -50,7 +50,7 @@
       </form>
       <aside class="output"><section class="card sticky"><div class="output-title"><span class="terminal-icon">›_</span><div><h2>生成接入命令</h2><p>复制一条命令 → 自动接入</p></div></div>
         <div class="summary-grid"><span>SDK 托管</span><strong>网站同域</strong><span>会话采样</span><strong id="sample-summary">100%</strong><span>会话回放</span><strong id="replay-summary">关闭</strong></div>
-        <label>发布清单地址<input id="manifest-url" type="url" placeholder="https://OSS域名/rumable/版本/manifest.json"><small>CI 发布的固定版本清单，包含 SDK 版本和安装包摘要。</small></label><button id="load-release" class="secondary" type="button">读取发布版本</button><p id="release-status" class="hint" role="status">尚未连接 OSS，可先配置并下载 TOML。</p>
+        <label>发布清单地址<input id="manifest-url" type="url" placeholder="https://OSS域名/rumable/版本/manifest.json"><small>支持 latest 固定入口或指定版本，包含 SDK 版本和安装包摘要。</small></label><button id="load-release" class="secondary" type="button">读取发布版本</button><p id="release-status" class="hint" role="status">尚未连接 OSS，可先配置并下载 TOML。</p>
         <p id="form-error" class="error" role="alert"></p><div class="output-tabs"><button id="tab-config" class="selected" type="button">配置预览</button><button id="tab-command" type="button">接入命令</button></div>
         <pre id="output-text" tabindex="0" aria-label="生成内容">填写应用 ID、上报地址和网站地址后生成配置。</pre>
         <button id="copy-command" class="primary" type="button" disabled>复制接入命令 <span>↗</span></button><button id="download-config" class="secondary" type="button" disabled>下载 rumable.toml</button><p id="action-status" role="status" class="hint"></p>

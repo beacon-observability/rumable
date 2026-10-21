@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {sha256, ossConfiguration, releasePaths, artifactsFromDirectory, publishArtifacts, createClient} from './publish-oss.mjs';
+import {sha256, ossConfiguration, releasePaths, artifactsFromDirectory, publishArtifacts, publishLatest, createClient} from './publish-oss.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export function validateEnvironment(env, cwd) {
@@ -38,10 +38,14 @@ export async function runRelease({env = process.env, cwd = root, execute, client
     report.step = 'validate all release artifacts';
     const artifacts = artifactsFromDirectory(path.join(cwd, 'dist', config.version), config.version, config.revision);
     report.step = 'upload and read back OSS objects';
-    await publishArtifacts(artifacts, client || createClient(env), entry => {
+    const oss = client || createClient(env);
+    const record = entry => {
       report.objects.push(entry);
       fs.writeFileSync(path.join(cwd, 'release-report.json'), JSON.stringify(report, null, 2) + '\n');
-    });
+    };
+    await publishArtifacts(artifacts, oss, record);
+    report.step = 'update and read back latest entry points';
+    report.latest = await publishLatest(artifacts, oss, record);
     report.status = 'verified';
     report.step = 'complete';
     return report;

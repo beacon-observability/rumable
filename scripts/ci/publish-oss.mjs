@@ -15,7 +15,8 @@ export function ossConfiguration(env = process.env) {
 }
 
 export function releasePaths(version) {
-  return {manifest:`rumable/${version}/manifest.json`, setup:`rumable/${version}/setup/index.html`, installer:`rumable/${version}/install.sh`};
+  return {manifest:`rumable/${version}/manifest.json`, setup:`rumable/${version}/setup/index.html`, installer:`rumable/${version}/install.sh`,
+    latestManifest:'rumable/latest/manifest.json', latestSetup:'rumable/latest/setup/index.html'};
 }
 
 // Load and validate the complete output before making any OSS write.
@@ -106,6 +107,55 @@ export async function publishArtifacts(artifacts, client, onVerified = () => {})
     if (remote === null || sha256(remote) !== artifact.sha256) throw Error(`OSS read-back checksum mismatch: ${artifact.object}`);
     onVerified({object:artifact.object, sha256:artifact.sha256, status:missing.has(artifact.object) ? 'uploaded_verified' : 'already_verified'});
   }
+}
+
+function compareStable(a, b) {
+  const left = a.split('.').map(BigInt), right = b.split('.').map(BigInt);
+  for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
+  return 0;
+}
+
+// Run only after the immutable release has been uploaded and read back. Each
+// alias is self-contained and pins its archive/page to one immutable version.
+export async function publishLatest(artifacts, client, onVerified = () => {}) {
+  const byName = new Map(artifacts.map(a => [a.name, a]));
+  const release = byName.get('manifest.json');
+  const manifest = validateManifest(JSON.parse(release.content), 'https://release.invalid/manifest.json');
+  if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) return {status:'skipped_prerelease'};
+  const read = async name => {
+    try { return (await client.get(name)).content; }
+    catch (error) { if (error.code === 'NoSuchKey') return null; throw Error(`OSS read failed: ${name}`); }
+  };
+  const immutable = await read(release.object);
+  if (immutable === null || sha256(immutable) !== release.sha256) throw Error('Immutable release must be verified before updating latest');
+  const latestManifest = Buffer.from(JSON.stringify({...manifest, artifactBase:`../${manifest.version}/`}, null, 2) + '\n');
+  const previous = await read('rumable/latest/manifest.json');
+  if (previous !== null) {
+    let current;
+    try { current = validateManifest(JSON.parse(previous), 'https://release.invalid/latest/manifest.json'); }
+    catch { throw Error('Existing latest manifest is invalid; manual review required'); }
+    if (!/^\d+\.\d+\.\d+$/.test(current.version)) throw Error('Existing latest version is not stable');
+    const comparison = compareStable(current.version, manifest.version);
+    if (comparison > 0) return {status:'skipped_newer', version:current.version};
+    if (comparison === 0 && sha256(previous) !== sha256(latestManifest)) throw Error('Latest already contains different metadata for this version');
+  }
+  const destination = `../../${manifest.version}/setup/index.html`;
+  const page = Buffer.from(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${destination}"><title>Rumable ${manifest.version}</title></head><body><a href="${destination}">打开 Rumable ${manifest.version} 配置页</a></body></html>\n`);
+  const aliases = [
+    {name:'setup/index.html', content:page},
+    ...['install.sh', 'install.ps1'].map(name => ({name, content:byName.get(name).content})),
+    {name:'manifest.json', content:latestManifest},
+  ];
+  for (const alias of aliases) {
+    const object = `rumable/latest/${alias.name}`, digest = sha256(alias.content);
+    try {
+      await client.put(object, alias.content, {mime:mime(alias.name), headers:{'Cache-Control':'no-store, max-age=0'}});
+    } catch { throw Error(`OSS latest update failed: ${object}`); }
+    const result = await read(object);
+    if (result === null || sha256(result) !== digest) throw Error(`OSS latest read-back checksum mismatch: ${object}`);
+    onVerified({object, sha256:digest, status:'latest_verified'});
+  }
+  return {status:'verified', version:manifest.version};
 }
 
 export function createClient(env) {

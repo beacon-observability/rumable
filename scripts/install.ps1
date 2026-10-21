@@ -8,6 +8,8 @@ $digest = '@@WINDOWS_AMD64_SHA256@@'
 if ($releaseVersion.Contains('@@') -or $digest.Contains('@@')) { throw 'Use the CI-published installer, not the source template' }
 $source = [Uri]$BaseUrl
 if (-not $source.IsAbsoluteUri -or $source.Scheme -ne 'https' -or $source.UserInfo -or $source.Query -or $source.Fragment) { throw 'BaseUrl must be a public HTTPS directory' }
+$BaseUrl = $BaseUrl.TrimEnd('/')
+if ($BaseUrl.EndsWith('/latest', [StringComparison]::Ordinal)) { $BaseUrl = $BaseUrl.Substring(0, $BaseUrl.Length - 7) + '/' + $releaseVersion }
 if ($env:OS -ne 'Windows_NT' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'This installer requires Windows x64 and 64-bit PowerShell' }
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run PowerShell as Administrator' }

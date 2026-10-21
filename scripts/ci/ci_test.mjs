@@ -4,14 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {validateEnvironment, runRelease} from './ci.mjs';
-import {sha256, releasePaths, artifactsFromDirectory, publishArtifacts} from './publish-oss.mjs';
+import {sha256, releasePaths, artifactsFromDirectory, publishArtifacts, publishLatest} from './publish-oss.mjs';
 
 const version = '0.1.0', revision = 'a'.repeat(40);
 const env = {GITLAB_CI:'true', CI_COMMIT_REF_PROTECTED:'true', CI_COMMIT_TAG:`release-oss-v${version}`, CI_COMMIT_SHA:revision,
   OSS_REGION:'oss-test', OSS_BUCKET:'test', OSS_ACCESS_KEY_ID:'fixture-id', OSS_ACCESS_KEY_SECRET:'fixture-secret'};
 const manifestPath = releasePaths(version).manifest;
 
-function fixture(t) {
+function fixture(t, version = '0.1.0') {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'rumable-ci-test-'));
   t.after(() => fs.rmSync(cwd, {recursive:true, force:true}));
   const write = (name, value) => { fs.mkdirSync(path.dirname(path.join(cwd, name)), {recursive:true}); fs.writeFileSync(path.join(cwd, name), value); };
@@ -133,9 +133,75 @@ test('CI builds the pinned SDK and matching commit, and emits a credential-free 
   const content = fs.readFileSync(path.join(f.cwd, 'release-report.json'), 'utf8');
   assert(!content.includes(env.OSS_ACCESS_KEY_SECRET));
   assert(!content.includes(env.OSS_ACCESS_KEY_ID));
-  assert.equal(report.objects.length, f.load().length);
+  assert.equal(report.objects.length, f.load().length + 4);
+  assert.deepEqual(report.latest, {status:'verified', version});
   const failed = store();
   await assert.rejects(runRelease({env, cwd:f.cwd, client:failed.client, execute:() => { throw Error('build failed'); }}), /install release dependencies/);
   assert.equal(failed.puts.length, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.cwd, 'release-report.json'))).status, 'failed');
+});
+
+test('latest is promoted after immutable verification, pins assets and avoids mutable caching', async t => {
+  const f = fixture(t), s = store(), artifacts = f.load();
+  await assert.rejects(publishLatest(artifacts, s.client), /Immutable release/);
+  assert.equal(s.puts.length, 0);
+  await publishArtifacts(artifacts, s.client);
+  const results = [];
+  await publishLatest(artifacts, s.client, x => results.push(x));
+  assert.equal(results.length, 4);
+  assert.equal(s.puts.at(-1).name, 'rumable/latest/manifest.json');
+  const latest = JSON.parse(s.objects.get('rumable/latest/manifest.json'));
+  assert.equal(latest.artifactBase, '../0.1.0/');
+  assert.equal(latest.revision, revision);
+  assert(s.objects.get('rumable/latest/install.ps1').equals(f.files.get('install.ps1')));
+  const page = s.objects.get('rumable/latest/setup/index.html').toString();
+  assert(page.includes('url=../../0.1.0/setup/index.html'));
+  assert.equal(new URL('../../0.1.0/setup/index.html','https://example.com/rumable/latest/setup/index.html').pathname, '/rumable/0.1.0/setup/index.html');
+  for (const p of s.puts.filter(p => p.name.startsWith('rumable/latest/'))) {
+    assert.equal(p.options.headers['Cache-Control'], 'no-store, max-age=0');
+    assert(!('x-oss-forbid-overwrite' in p.options.headers));
+  }
+});
+
+test('latest update failure preserves the previous manifest and a retry completes it', async t => {
+  const first = fixture(t), next = fixture(t, '0.1.1'), s = store();
+  await publishArtifacts(first.load(), s.client); await publishLatest(first.load(), s.client);
+  const previous = s.objects.get('rumable/latest/manifest.json');
+  await publishArtifacts(next.load(), s.client);
+  const put = s.client.put;
+  s.client.put = async (...args) => {
+    if (args[0] === 'rumable/latest/install.ps1') throw Error('secret');
+    return put(...args);
+  };
+  await assert.rejects(publishLatest(next.load(), s.client), e => /latest update failed/.test(e.message) && !e.message.includes('secret'));
+  assert(s.objects.get('rumable/latest/manifest.json').equals(previous));
+  s.client.put = put;
+  await publishLatest(next.load(), s.client);
+  assert.equal(JSON.parse(s.objects.get('rumable/latest/manifest.json')).version, '0.1.1');
+  const get = s.client.get;
+  s.client.get = async name => name === 'rumable/latest/install.sh' ? {content:Buffer.from('corrupt readback')} : get(name);
+  await assert.rejects(publishLatest(next.load(), s.client), /latest read-back checksum/);
+});
+
+test('old releases and prereleases cannot roll latest back; conflicting metadata is refused', async t => {
+  const newer = fixture(t, '0.10.0'), older = fixture(t, '0.9.0'), prerelease = fixture(t, '0.11.0-test.1'), s = store();
+  await publishArtifacts(newer.load(), s.client); await publishLatest(newer.load(), s.client);
+  await publishArtifacts(older.load(), s.client);
+  const count = s.puts.length;
+  assert.deepEqual(await publishLatest(older.load(), s.client), {status:'skipped_newer',version:'0.10.0'});
+  assert.deepEqual(await publishLatest(prerelease.load(), s.client), {status:'skipped_prerelease'});
+  assert.equal(s.puts.length, count);
+  const changed = JSON.parse(s.objects.get('rumable/latest/manifest.json'));
+  changed.revision = 'b'.repeat(40);
+  s.objects.set('rumable/latest/manifest.json', Buffer.from(JSON.stringify(changed)));
+  await assert.rejects(publishLatest(newer.load(), s.client), /different metadata/);
+  assert.equal(s.puts.length, count);
+});
+
+test('failed immutable publishing never touches latest', async t => {
+  const f = fixture(t), s = store();
+  s.client.put = async () => { throw Error('upload unavailable'); };
+  await assert.rejects(runRelease({env,cwd:f.cwd,client:s.client,execute:() => {}}), /upload and read back OSS/);
+  assert([...s.objects.keys()].every(k => !k.startsWith('rumable/latest/')));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.cwd, 'release-report.json'))).latest, undefined);
 });

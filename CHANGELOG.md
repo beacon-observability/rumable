@@ -1,5 +1,12 @@
 # 版本说明
 
+## 0.1.1 · 2026-10-21
+
+- 新增 `rumable/latest/` 固定配置页、清单和 Linux / Windows 安装入口；正式版本完整发布后再更新，旧版本重试不回退 latest。
+- 清单增加 `artifactBase`，latest 发现与实际安装版本分开；页面命令及安装器均下载所选固定版本，保留历史目录和摘要校验。
+- CI 默认使用可访问的 Go 模块镜像并保留校验数据库，修复首轮流水线因 proxy.golang.org 下载超时而无法构建的问题。
+- 更新产品集成入口、main 发布流程和 Windows 一键安装验收文档。Windows/IIS 原生运行仍由目标测试机验收。
+
 ## 0.1.0 · 2026-10-21
 
 - 新增 Web SDK 配置页，按 OpenWay/DataKit、采样、回放、隐私及链路参数生成 TOML；从固定版本 OSS manifest 生成带摘要校验的 Linux/Windows 安装命令。
