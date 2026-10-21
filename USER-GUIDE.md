@@ -1,6 +1,6 @@
 # Rumable 使用指南
 
-版本：**0.1.1**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
+版本：**0.1.2**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
 
 Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
 
@@ -12,11 +12,11 @@ Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，�
 
 打开固定的 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，读取发布版本，填写 RUM 配置并选择 Nginx / IIS，再执行生成的安装命令。页面会跳到最新正式版；复制的命令仍绑定具体版本。安装器负责下载、摘要校验、安装 CLI 和 `setup`；不自动安装 Web 服务器或 IIS URL Rewrite。完整说明见[页面接入](docs/one-click-onboarding.md)。
 
-Windows 一键入口使用管理员身份的 64 位 Windows PowerShell 5.1，CLI 路径为 `%ProgramFiles%\Rumable\0.1.1\rumable.exe`，状态目录为 `%ProgramData%\Rumable`。请保留下载的 TOML；按 [Windows 验收手册](docs/windows-acceptance.md)检查重复安装、注入、启停和回滚。其他架构及旧系统继续按下面的下载包流程执行。
+Windows 一键入口使用管理员身份的 64 位 Windows PowerShell 5.1，CLI 路径为 `%ProgramFiles%\Rumable\0.1.2\rumable.exe`，状态目录为 `%ProgramData%\Rumable`。请保留下载的 TOML；按 [Windows 验收手册](docs/windows-acceptance.md)检查重复安装、注入、启停和回滚。其他架构及旧系统继续按下面的下载包流程执行。
 
 ## 1. 选择下载包
 
-在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.1_` 开头。
+在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.2_` 开头。
 
 | 系统 / CPU | 文件名后缀 | 适用条件 |
 |---|---|---|
@@ -41,17 +41,17 @@ Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；�
 
 ```sh
 sha256sum -c SHA256SUMS
-mkdir rumable-0.1.1
-tar -xzf rumable_0.1.1_linux_amd64.tar.gz -C rumable-0.1.1
-cd rumable-0.1.1
+mkdir rumable-0.1.2
+tar -xzf rumable_0.1.2_linux_amd64.tar.gz -C rumable-0.1.2
+cd rumable-0.1.2
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\rumable_0.1.1_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\rumable_0.1.2_windows_amd64.zip -Algorithm SHA256
 # 与 SHA256SUMS 内同名文件的摘要比较，然后解压到新目录。
-Expand-Archive .\rumable_0.1.1_windows_amd64.zip -DestinationPath C:\Tools\Rumable
+Expand-Archive .\rumable_0.1.2_windows_amd64.zip -DestinationPath C:\Tools\Rumable
 C:\Tools\Rumable\rumable.exe version
 ```
 
@@ -257,7 +257,7 @@ rumable rollback --state-dir /var/lib/rumable-otel
 
 如果计划以后启用两种能力，首次就准备完整 RUM 参数并保留 `rum.enabled=true`，先执行 `enable --component otel`。以纯 OTel 配置首次挂接，之后添加 RUM 需要重新审查 HTML 改写要求。原有 RUM-only 站点升级增加 OTel，也需要撤销旧挂接并按新站点重新部署；普通版本升级继续使用原状态。完整安装、Dataway、迁移和恢复步骤见 [OTel 手册](docs/otel.md)。
 
-probe 只证明 HTTP 与配置生效，不能证明 Trace 入库。向业务发送带已知 W3C traceparent 的请求，在观测云核对 Trace ID、service.name 和上下游关系。Windows/IIS 实机与真实后端入库仍待目标环境验收，随包提供 `scripts/windows-otel-smoke.ps1`。
+probe 只证明 HTTP 与配置生效，不能证明 Trace 入库。向业务发送带已知 W3C traceparent 的请求，在观测云核对 Trace ID、service.name 和上下游关系。Windows/IIS 实机与真实后端入库仍待目标环境验收，验收脚本 `scripts/windows-otel-smoke.ps1` 从仓库同版本 tag 获取，详见 [Windows 验收手册](docs/windows-acceptance.md)。
 
 ## 8. 验收、停用、回滚与升级
 

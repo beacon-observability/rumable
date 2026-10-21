@@ -2,9 +2,9 @@
 
 Rumable 可管理 Linux Nginx 和 Windows IIS/.NET 的请求 Trace，与浏览器 RUM、Session Replay 分别配置。它负责生成配置、挂接、预检、启停、配置生效探测和受管项回滚。原生模块、.NET Agent、DataKit 和 Collector 是外部运行依赖，需先安装；CLI 不会偷偷升级服务器、下载未经匹配的模块或重启整个 IIS。
 
-本页适用于 **0.1.0-preview.3**。直接使用与目标平台匹配的新包，无需为 CLI 安装 Go。这里只采集 HTTP 请求链路；应用内部方法、数据库等仍由对应语言 Agent/SDK 负责。
+本页适用于 **0.1.2**。直接使用与目标平台匹配的新包，无需为 CLI 安装 Go。这里只采集 HTTP 请求链路；应用内部方法、数据库等仍由对应语言 Agent/SDK 负责。
 
-本包已包含 IIS 事务分阶段、旧 worker 等待、增强验收脚本，以及 Linux 单组件启停和多文件恢复修复。请保持脚本与 CLI 来自同一发布包；实际运行边界见[验证记录](verification.md)。
+本版已包含 IIS 事务分阶段、旧 worker 等待，以及 Linux 单组件启停和多文件恢复修复。验收脚本与夹具仅保留在仓库；请检出与 CLI 版本相同的发布 tag 后运行脚本，实际运行边界见[验证记录](verification.md)。
 
 ## 支持范围
 
@@ -170,7 +170,9 @@ rumable rollback --attachment        # Linux：确认后恢复首次业务配置
 
 预检的接收地址检查目前是 TCP 可达；probe 校验 HTTP 和受管配置是否生效，不能证明 OTLP 鉴权成功或观测云入库。向应用发带已知 W3C traceparent 的请求，在观测云搜索该 Trace ID，确认 service.name 和上下游关系，才算接入验收。浏览器关联还需在 RUM 中设置 allowedTracingUrls / w3c_traceparent，并满足跨域请求要求。
 
-Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像和 Collector 均使用 Linux arm64；需 Go 和 OrbStack/Docker。有源码时直接构建 CLI，二进制包可用 RUMABLE_BINARY 指向与测试容器架构匹配的 Linux 可执行文件。脚本：[smoke-otel.sh](../scripts/smoke-otel.sh)，使用真实原生模块和 Collector、私有 OTLP HTTP 接收夹具，覆盖独立开关、站点/路径隔离、升级及回滚。Windows 实机脚本：[windows-otel-smoke.ps1](../scripts/windows-otel-smoke.ps1)：
+以下验收命令在仓库同版本 tag 的根目录执行，源码与测试夹具不随安装包分发。Windows 获取步骤见 [Windows 验收手册](windows-acceptance.md#3-执行完整验收)。
+
+Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像和 Collector 均使用 Linux arm64；需 Go 和 OrbStack/Docker。有源码时直接构建 CLI，二进制包可用 RUMABLE_BINARY 指向与测试容器架构匹配的 Linux 可执行文件。脚本：[smoke-otel.sh](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.2/scripts/smoke-otel.sh)，使用真实原生模块和 Collector、私有 OTLP HTTP 接收夹具，覆盖独立开关、站点/路径隔离、升级及回滚。Windows 实机脚本：[windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.2/scripts/windows-otel-smoke.ps1)：
 
 ```powershell
 .\scripts\windows-otel-smoke.ps1 -Binary C:\Rumable\rumable.exe `

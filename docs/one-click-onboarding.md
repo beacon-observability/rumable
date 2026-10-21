@@ -2,7 +2,7 @@
 
 页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
 
-产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.1` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
+产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.2` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
 
 ## 当前可用流程
 
@@ -21,16 +21,16 @@
 Linux 命令结构如下（域名和配置为示意，实际由页面填入）：
 
 ```sh
-curl --proto '=https' --proto-redir '=https' -fsSL 'https://下载域名/rumable/0.1.1/install.sh' | sudo sh -s -- --base-url 'https://下载域名/rumable/0.1.1/' --config '<Base64 RUM 配置>'
+curl --proto '=https' --proto-redir '=https' -fsSL 'https://下载域名/rumable/0.1.2/install.sh' | sudo sh -s -- --base-url 'https://下载域名/rumable/0.1.2/' --config '<Base64 RUM 配置>'
 ```
 
 Windows 在管理员身份的 64 位 Windows PowerShell 5.1 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.1/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.1/' -Config '<Base64 RUM 配置>'
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.2/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.2/' -Config '<Base64 RUM 配置>'
 ```
 
-Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.1\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；如需完整自动验收脚本，另下载并解压同版本 Windows ZIP。
+Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.2\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；发布包不含自动验收脚本，测试时从仓库同版本 tag 获取脚本并指定 CLI 路径，详见 Windows 验收手册。
 
 只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 的 `artifactBase` 相对地址推导，不需要 CI 配置公开下载域名；旧固定版本清单没有此字段时沿用清单目录。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 使用 x64 PowerShell 安装脚本。读取 latest 后生成的命令仍绑定一个固定版本；安装期间 latest 更新不会改变已选包。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
 
@@ -69,7 +69,8 @@ rumable/
     rumable_<version>_linux_amd64.tar.gz
     rumable_<version>_linux_arm64.tar.gz
     rumable_<version>_windows_amd64.zip
-    ...其他包与文档
+    sdk.json
+    ...其他平台包（文档、配置示例和许可证位于包内）
     setup/
       index.html
       app.mjs

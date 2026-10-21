@@ -1,6 +1,6 @@
 # Windows / IIS 验收
 
-以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](../scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
+以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.2/scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
 
 发布包提供 Windows x86/x64/ARM64 CLI；本手册的 IIS 流程仍要求 64 位 Windows 与 64 位 Windows PowerShell。x86 CLI 在 x64 系统经 Sysnative 运行管理桥接；真正 32 位 Windows 不运行本 IIS 验收。脚本核对实际架构与 build.json，ARM64 必须在对应原生系统独立验收。
 
@@ -18,12 +18,12 @@
 
 本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 64 位 Windows PowerShell 5.1、Windows 10 / Server 2016+ x64、IIS 与 URL Rewrite 2.x。旧 Windows、x86 或 ARM64 包按后面的手工流程分别验收。
 
-1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.1` 为例。选 IIS，填写真实测试应用的 applicationId、OpenWay / DataKit 配置、网站地址、IIS 站点/应用路径，并为测试设置独立接入标识，例如 `windows-test`。网站验收路径必须返回带标准 `<head>` 的 HTML；按实际需要勾选静态压缩变更许可。
+1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.2` 为例。选 IIS，填写真实测试应用的 applicationId、OpenWay / DataKit 配置、网站地址、IIS 站点/应用路径，并为测试设置独立接入标识，例如 `windows-test`。网站验收路径必须返回带标准 `<head>` 的 HTML；按实际需要勾选静态压缩变更许可。
 2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，校验同版本 x64 ZIP，安装 CLI，再运行 `setup`。记录命令退出结果；日志或截图中不要暴露令牌。
 3. 检查状态及页面资源：
 
    ```powershell
-   $rumable = Join-Path $env:ProgramFiles 'Rumable\0.1.1\rumable.exe'
+   $rumable = Join-Path $env:ProgramFiles 'Rumable\0.1.2\rumable.exe'
    $state = Join-Path $env:ProgramData 'Rumable'
    $site = 'windows-test' # 与页面中的接入标识保持一致
    & $rumable version
@@ -36,7 +36,7 @@
 5. 执行 `disable --state-dir $state --site $site`，确认新请求的 HTML 不再注入；旧版本静态资源应保留给缓存页面。再次执行 `rollback` 应恢复刚停用前的状态，最后再 `disable` 清理测试站点的注入。以上命令均由 `& $rumable` 调用，状态目录和接入标识保持一致。
 6. 如出现未完成事务，保留 `%ProgramData%\Rumable` 中的状态、日志和备份，记录失败阶段，再用 CLI 的 `rollback` 恢复；不要删除状态后盲目重装。需要验证原生提交故障、压缩继承和多应用隔离时，继续运行下方完整自动验收。
 
-一键安装不提取测试工具。完整工具另从 `https://static.guance.com/rumable/0.1.1/rumable_0.1.1_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压，执行后面的 `scripts/windows-smoke.ps1`。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
+一键安装和 Windows ZIP 均不包含测试源码或验收脚本。自动验收脚本从仓库对应版本 tag 获取（见第 3 节）；测试的 CLI 从 `https://static.guance.com/rumable/0.1.2/rumable_0.1.2_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
 
 反馈结果请包含 Windows / IIS / PowerShell 版本、Rumable 版本、下载包 SHA-256、接入标识、首次/重复安装、停用、配置回滚、业务页面与数据上报结果；完整自动验收另附 `report.json` 和脱敏的 `cli.log`。
 
@@ -73,19 +73,25 @@ Windows 10 / Windows 7 可在“启用或关闭 Windows 功能”准备相应 II
 
 ## 3. 执行完整验收
 
-用资源管理器完整解压 Windows ZIP 到对应目录，保留 scripts、docs、build.json；旧 PS 3 不需要使用 Expand-Archive。先核对 ZIP 的 SHA-256 与随发布提供的 SHA256SUMS。
+先核对 Windows ZIP 的 SHA-256 与随发布提供的 SHA256SUMS，再用资源管理器完整解压到对应目录，保留 docs 和 build.json；旧 PS 3 不需要使用 Expand-Archive。验收脚本及其夹具只在仓库中提供，必须与 CLI 的版本一致。以下示例将源码检出到 `C:\Rumable\source`，不向安装目录复制测试源码：
+
+```powershell
+git clone --depth 1 --branch release-oss-v0.1.2 ssh://git@gitlab.jiagouyun.com:40022/guance/rumable.git C:\Rumable\source
+```
+
+也可以登录 GitLab 下载该 tag 的源码归档，完整解压到上述目录；需有仓库读取权限。下面的脚本使用绝对路径，`-Binary` 始终指向单独解压的正式安装包。
 
 以下命令在“以管理员身份运行”的命令行执行，使用系统 64 位 Windows PowerShell：
 
 ~~~powershell
 # Windows 7 SP1 / Server 2008 R2 SP1，进入解压好的 legacy 包
 Set-Location C:\Rumable\legacy
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -ResultDir C:\RumableResults\iis75-legacy-01
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -ResultDir C:\RumableResults\iis75-legacy-01
 $LASTEXITCODE
 
 # IIS 10，进入解压好的现代包
 Set-Location C:\Rumable\modern
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-modern-01
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-modern-01
 $LASTEXITCODE
 ~~~
 
@@ -95,7 +101,7 @@ $LASTEXITCODE
 
 ~~~powershell
 Set-Location C:\Rumable\modern
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-smoke.ps1 -Binary .\rumable.exe -PreviousBinary C:\Rumable\legacy\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-upgrade-01
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -PreviousBinary C:\Rumable\legacy\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-upgrade-01
 ~~~
 
 PreviousBinary 必须支持相同 TOML schema 和 CLI。每个应用会先由旧包 render / enable，再由新包改变初始化配置、enable / rollback。未提供 PreviousBinary 时，仍测试当前包的配置升级与回滚。旧 Windows 上不得提供现代包作为 PreviousBinary。
@@ -103,7 +109,7 @@ PreviousBinary 必须支持相同 TOML schema 和 CLI。每个应用会先由旧
 只安装静态站点角色时可先运行部分验收：
 
 ~~~powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -StaticOnly -ResultDir C:\RumableResults\iis75-static-01
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -StaticOnly -ResultDir C:\RumableResults\iis75-static-01
 ~~~
 
 StaticOnly 跳过动态、chunked、源 gzip 和提交后 HTTP 失败恢复，结果固定为 partial、退出码 2；它不能替代完整验收。ExpectedIISVersion 对 IIS 8 / 8.5 分别填写 8.0 / 8.5。
@@ -173,18 +179,18 @@ go build -buildvcs=false -o C:\RumableTest\rumable.exe .\cmd\rumable
 ```powershell
 $ps="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $agent='C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
-& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
   -Binary C:\RumableTest\rumable.exe -AgentPath $agent `
   -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x64-01
 $LASTEXITCODE
 
 # 32 位应用池；Agent 须带 win-x86 profiler。WithRUM 同时验证独立开关。
-& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
   -Binary C:\RumableTest\rumable.exe -AgentPath $agent -X86 -WithRUM `
   -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x86-rum-01
 
 # 当前进程已安全设置 RUMABLE_DATAWAY_TOKEN 后，另跑 Dataway：
-& $ps -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-otel-smoke.ps1 `
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
   -Binary C:\RumableTest\rumable.exe -AgentPath $agent -WithRUM `
   -Backend dataway -Endpoint https://dataway.example.com/otel -ResultDir C:\RumableResults\otel-dataway-01
 ```
@@ -216,7 +222,7 @@ Keep 会保留两组站点/池与受限状态目录。之后在同一账户的�
 
 ```powershell
 Add-Type -Path "$env:SystemRoot\System32\inetsrv\Microsoft.Web.Administration.dll"
-. .\scripts\windows-iis-helpers.ps1
+. C:\Rumable\source\scripts\windows-iis-helpers.ps1
 Remove-TestDeployment $report.site (Join-Path $env:TEMP $report.site)
 Remove-TestDeployment $report.peer (Join-Path $env:TEMP $report.peer)
 ```

@@ -58,7 +58,17 @@ export function artifactsFromDirectory(directory, version, revision) {
   for (const installer of Object.values(manifest.installers)) {
     if (installer.sha256 !== entries.get(installer.file)) throw Error('Installer hash does not match the release');
   }
-  for (const name of ['setup/index.html', 'setup/app.mjs', 'setup/generator.mjs', 'setup/styles.css', 'sdk.json']) {
+  const publicFiles = new Set([
+    'manifest.json', 'sdk.json', 'install.sh', 'install.ps1',
+    'setup/index.html', 'setup/app.mjs', 'setup/generator.mjs', 'setup/styles.css',
+    ...manifest.packages.map(p => p.file),
+  ]);
+  // Checksums prove integrity, not eligibility for public distribution. Reject
+  // extra files even when they were accidentally added to SHA256SUMS too.
+  for (const name of files.keys()) {
+    if (!publicFiles.has(name)) throw Error(`Unexpected public artifact: ${name}`);
+  }
+  for (const name of publicFiles) {
     if (!files.has(name)) throw Error(`Missing release artifact: ${name}`);
   }
   if (JSON.stringify(manifest.sdk) !== JSON.stringify(JSON.parse(files.get('sdk.json')))) throw Error('Manifest SDK metadata differs from sdk.json');

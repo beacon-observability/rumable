@@ -97,6 +97,29 @@ func TestReleaseRevisionCannotDescribeDifferentOrDirtySource(t *testing.T) {
 	}
 }
 
+func TestReleaseSupportFilesExcludeRepositorySourceAndTests(t *testing.T) {
+	files, err := releaseSupportFiles("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range files {
+		if strings.HasPrefix(name, "scripts/") || strings.HasPrefix(name, "internal/") ||
+			strings.HasSuffix(name, ".go") || strings.HasSuffix(name, ".aspx") {
+			t.Fatalf("repository source or test fixture leaked into archives: %s", name)
+		}
+		if !(strings.HasSuffix(name, ".md") || strings.HasPrefix(name, "examples/") && strings.HasSuffix(name, ".toml") ||
+			strings.HasSuffix(name, "LICENSE") || name == "sdk.json") {
+			t.Fatalf("unexpected archive support file: %s", name)
+		}
+	}
+	for _, required := range []string{"USER-GUIDE.md", "docs/windows-acceptance.md", "examples/iis.toml", "SDK-LICENSE",
+		"third_party/BurntSushi-toml-LICENSE", "third_party/tdewolff-parse-LICENSE", "sdk.json"} {
+		if len(files[required]) == 0 {
+			t.Fatalf("missing installation support file: %s", required)
+		}
+	}
+}
+
 func TestReleaseArchivesPreserveExecutableAndUserDocuments(t *testing.T) {
 	files := map[string][]byte{"rumable": []byte("executable"), "USER-GUIDE.md": []byte("用户指南"), "docs/configuration.md": []byte("TOML configuration")}
 	b, err := tarFiles(files, "rumable")

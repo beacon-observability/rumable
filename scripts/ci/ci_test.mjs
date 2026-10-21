@@ -83,6 +83,20 @@ test('preflight rejects missing/tampered files, incorrect platform hashes and co
   assert.throws(f.load, /supported platform/);
 });
 
+test('publication allowlist rejects source and test files even with valid checksums', async t => {
+  for (const name of ['internal/integration/otel-fixture.go', 'scripts/windows-smoke.ps1',
+    'scripts/windows-fixture.aspx', 'setup/generator_test.mjs', 'README.md', '.env']) {
+    await t.test(name, async t => {
+      const f = fixture(t), s = store();
+      f.files.set(name, Buffer.from('unexpected repository file'));
+      f.save();
+      await assert.rejects(runRelease({env, cwd:f.cwd, client:s.client, execute:() => {}}), /validate all release artifacts/);
+      assert.throws(f.load, /Unexpected public artifact/);
+      assert.equal(s.puts.length, 0);
+    });
+  }
+});
+
 test('manifest is uploaded last, all objects are read back, identical retry writes nothing', async t => {
   const f = fixture(t), s = store(), results = [];
   const artifacts = f.load();

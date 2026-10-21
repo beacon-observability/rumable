@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.1", "release version")
+	versionName := flag.String("version", "0.1.2", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -115,18 +115,12 @@ func run() error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	shared := map[string][]byte{}
-	for _, file := range []string{"USER-GUIDE.md", "CHANGELOG.md", "docs/compatibility.md", "docs/operations.md", "docs/configuration.md", "docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md", "docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md", "scripts/windows-smoke.ps1", "scripts/windows-otel-smoke.ps1", "scripts/smoke-otel.sh", "internal/integration/otel-fixture.go", "scripts/windows-iis-helpers.ps1", "scripts/windows-fixture.aspx", "scripts/windows-cleanup.ps1", "scripts/test-windows-scripts.ps1", "examples/nginx.toml", "examples/iis.toml", "examples/full.toml", "examples/otel-nginx.toml", "examples/otel-iis.toml", "third_party/BurntSushi-toml-LICENSE", "third_party/tdewolff-parse-LICENSE", "internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json"} {
-		b, e := os.ReadFile(file)
-		if e != nil {
-			return e
-		}
-		shared[strings.TrimPrefix(file, "internal/rumable/assets/")] = b
+	shared, err := releaseSupportFiles(".")
+	if err != nil {
+		return err
 	}
 	var sums []string
 	var packages []map[string]string
-	var downloads strings.Builder
-	fmt.Fprintf(&downloads, "# Rumable %s\n\n先阅读 [使用指南](USER-GUIDE.md) 和 [版本说明](CHANGELOG.md)。\n\n386 = Windows/Linux x86 32 位；amd64 = Intel/AMD x64；arm64 = ARM64。旧 Windows 选择 legacy；32 位 Windows 不支持 IIS 配置管理。包含 RUM 与服务端 OTel。OTel 模块和 .NET Agent 可用 install-otel 自动准备；外部 Collector 仍需自行运行。Windows 包已交叉编译，IIS 与 Windows 实机尚未验收；IIS OTel 不支持 ARM64。\n\n| 下载包 | 平台 | 编译器 |\n|---|---|---|\n", *versionName)
 	for _, target := range []struct{ os, arch, compiler, label string }{
 		{"linux", "386", *modern, mv}, {"linux", "amd64", *modern, mv}, {"linux", "arm64", *modern, mv},
 		{"windows", "386", *modern, mv}, {"windows", "amd64", *modern, mv}, {"windows", "arm64", *modern, mv},
@@ -208,14 +202,14 @@ func run() error {
 		h := sha256.Sum256(payload)
 		packages = append(packages, map[string]string{"os": target.os, "arch": target.arch, "flavor": flavor, "file": filename, "sha256": hex.EncodeToString(h[:])})
 		sums = append(sums, hex.EncodeToString(h[:])+"  "+filename)
-		fmt.Fprintf(&downloads, "| [%s](%s) | %s/%s | %s |\n", filename, filename, target.os, target.arch, info.GoVersion)
 		fmt.Println(filename)
 	}
-	fmt.Fprint(&downloads, "\n在此目录执行 `sha256sum -c SHA256SUMS` 校验；Windows 校验方法见使用指南。每个压缩包均含使用指南、TOML 示例、SDK 元数据和第三方许可。Windows 与旧内核需在目标机器验收；IIS OTel 的系统/Agent 限制见 OTel 手册，ARM64 不支持；交叉编译不等于实机运行。\n")
-	shared["README.md"] = []byte(downloads.String())
+	// Only installation artifacts are exposed as standalone OSS objects.
+	// User documents, examples and licenses stay inside the platform archives.
+	public := map[string][]byte{"sdk.json": shared["sdk.json"]}
 	// Publish the matching configuration page alongside this immutable version.
 	for _, name := range []string{"index.html", "app.mjs", "generator.mjs", "styles.css"} {
-		shared["setup/"+name], err = os.ReadFile(filepath.Join("web", name))
+		public["setup/"+name], err = os.ReadFile(filepath.Join("web", name))
 		if err != nil {
 			return err
 		}
@@ -225,24 +219,24 @@ func run() error {
 		return err
 	}
 	for name, body := range installerFiles {
-		shared[name] = body
+		public[name] = body
 	}
-	shared["manifest.json"], err = json.MarshalIndent(map[string]any{
+	public["manifest.json"], err = json.MarshalIndent(map[string]any{
 		"schemaVersion": 1, "version": *versionName, "revision": *revision,
 		"artifactBase": "../" + *versionName + "/",
-		"capabilities": []string{"rum-setup-v1", "rum-install-v1"}, "sdk": json.RawMessage(shared["sdk.json"]), "packages": packages, "installers": installers,
+		"capabilities": []string{"rum-setup-v1", "rum-install-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
 	}, "", "  ")
 	if err != nil {
 		return err
 	}
-	for _, name := range keys(shared) {
+	for _, name := range keys(public) {
 		if err = os.MkdirAll(filepath.Dir(filepath.Join(*out, name)), 0755); err != nil {
 			return err
 		}
-		if err = os.WriteFile(filepath.Join(*out, name), shared[name], 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(*out, name), public[name], 0644); err != nil {
 			return err
 		}
-		h := sha256.Sum256(shared[name])
+		h := sha256.Sum256(public[name])
 		sums = append(sums, hex.EncodeToString(h[:])+"  "+name)
 	}
 	sort.Strings(sums)
@@ -252,6 +246,28 @@ func run() error {
 		}
 	}
 	return os.WriteFile(filepath.Join(*out, "SHA256SUMS"), []byte(strings.Join(sums, "\n")+"\n"), 0644)
+}
+
+// Explicit archive allowlist: never distribute repository source or test fixtures.
+func releaseSupportFiles(root string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	for _, name := range []string{
+		"USER-GUIDE.md", "CHANGELOG.md",
+		"docs/compatibility.md", "docs/operations.md", "docs/configuration.md",
+		"docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md",
+		"docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md",
+		"examples/nginx.toml", "examples/iis.toml", "examples/full.toml",
+		"examples/otel-nginx.toml", "examples/otel-iis.toml",
+		"third_party/BurntSushi-toml-LICENSE", "third_party/tdewolff-parse-LICENSE",
+		"internal/rumable/assets/SDK-LICENSE", "internal/rumable/assets/sdk.json",
+	} {
+		body, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			return nil, err
+		}
+		files[strings.TrimPrefix(name, "internal/rumable/assets/")] = body
+	}
+	return files, nil
 }
 
 // The installer is bound to the archives from this build, but not to an OSS
