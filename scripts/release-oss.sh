@@ -9,8 +9,8 @@ Create and push release-oss-v<VERSION> for the current committed source.
 VERSION defaults to internal/rumable/config.go. The protected GitLab tag
 pipeline builds the packages and publishes them to OSS.
 
-  bash scripts/release-oss.sh 0.1.2 --dry-run
-  bash scripts/release-oss.sh 0.1.2
+  bash scripts/release-oss.sh --dry-run
+  bash scripts/release-oss.sh
 
 --dry-run checks local and remote state without creating or pushing a tag.
 This script does not commit changes, push branches, or overwrite tags.
