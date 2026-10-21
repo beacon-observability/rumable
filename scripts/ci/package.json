@@ -1,0 +1,9 @@
+{
+  "name": "rumable-release-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CI-only OSS publisher; no dependencies are needed by the configuration page",
+  "dependencies": {
+    "ali-oss": "6.22.0"
+  }
+}

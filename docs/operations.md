@@ -117,7 +117,7 @@ IIS OTel 先提交配置、持久化快照，再以独立调用校验并回收�
 | 结果 | 含义与处理 |
 |---|---|
 | `missing effective Nginx include` | include 未加载或路径不一致，按 ATTACH.md 检查真实 handler |
-| `no literal </head>` | 非完整 HTML、锚点写法不同或登录重定向，不能直接使用该页面验收 |
+| `no safe literal <head>` | 需要标准 `<head>` 开始标签（大小写不限，无属性或额外空白），且此前不能有同名文本。检查实际模板，勿改回可能误中 JS 字符串的 `</head>`；探测需覆盖全部受管模板 |
 | `existing RUM integration found` | 业务已有 SDK，应保留现有接入或先明确迁移 |
 | `encoded response` | 上游/静态源仍返回压缩内容，先解决源压缩 |
 | `CSP ... blocks` | 修改站点的实际安全策略后重试；工具不会自动放宽 |

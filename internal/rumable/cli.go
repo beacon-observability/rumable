@@ -13,7 +13,7 @@ import (
 
 func Run(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "rumable init|install-otel|render|attach|check|enable|disable|uninstall|status|rollback|probe|version\nStart: init --server nginx|iis --reporting openway|datakit; edit TOML; install-otel (optional); render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach/install-otel/uninstall: --dry-run previews; --yes confirms without a prompt\nattach: --target FILE:LINE selects a candidate\nuninstall: detach the whole site; --remove-dependencies also removes unchanged, unshared managed dependencies\nrollback --attachment: undo first attachment after disable\nenable/disable: --component all|rum|otel (default all)\nrender --collector-config: print Dataway Collector JSON without deployment changes\ninit: --full lists advanced SDK options; probe: --path / (optional)")
+		fmt.Fprintln(out, "rumable init|setup|install-otel|render|attach|check|enable|disable|uninstall|status|rollback|probe|version\nOne command: setup --config rumable.toml --state-dir /var/lib/rumable --yes (RUM only)\nStart: init --server nginx|iis --reporting openway|datakit; edit TOML; install-otel (optional); render; attach; enable\nFlags: --config rumable.toml --state-dir .rumable --site ID (optional for one site)\nattach/install-otel/uninstall: --dry-run previews; --yes confirms without a prompt\nattach: --target FILE:LINE selects a candidate\nuninstall: detach the whole site; --remove-dependencies also removes unchanged, unshared managed dependencies\nrollback --attachment: undo first attachment after disable\nenable/disable: --component all|rum|otel (default all)\nrender --collector-config: print Dataway Collector JSON without deployment changes\ninit: --full lists advanced SDK options; probe: --path / (optional)")
 		return nil
 	}
 	if args[0] == "version" {
@@ -25,7 +25,7 @@ func Run(args []string, out io.Writer) error {
 	}
 	cmd := args[0]
 	switch cmd {
-	case "init", "install-otel", "uninstall", "render", "attach", "check", "enable", "disable", "status", "rollback", "probe":
+	case "init", "setup", "install-otel", "uninstall", "render", "attach", "check", "enable", "disable", "status", "rollback", "probe":
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
@@ -47,15 +47,17 @@ func Run(args []string, out io.Writer) error {
 	}
 	var target *string
 	var yes, dry, attachmentUndo *bool
-	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" {
+	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" || cmd == "setup" {
 		yes = f.Bool("yes", false, "confirm the displayed changes (noninteractive)")
+	}
+	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" {
 		dry = f.Bool("dry-run", false, "preview changes without applying")
 	}
 	var removeDependencies *bool
 	if cmd == "uninstall" {
 		removeDependencies = f.Bool("remove-dependencies", false, "also remove unchanged, unshared dependencies installed by Rumable")
 	}
-	if cmd == "attach" {
+	if cmd == "attach" || cmd == "setup" {
 		target = f.String("target", "", "candidate FILE:LINE when automatic site selection is ambiguous")
 	}
 	if cmd == "rollback" {
@@ -234,6 +236,9 @@ func Run(args []string, out io.Writer) error {
 	s, err := loadConfig(*config, *id)
 	if err != nil {
 		return err
+	}
+	if cmd == "setup" {
+		return setupSite(root, s, *target, *yes, os.Stdin, out)
 	}
 	if cmd == "install-otel" {
 		return installOTel(root, s, *yes, *dry, os.Stdin, out)

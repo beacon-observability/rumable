@@ -1,5 +1,28 @@
 # 实现验证记录
 
+## 0.1.0 短命令安装器与本地测试包（2026-10-21）
+
+- 安装逻辑独立为 `install.sh` / `install.ps1`，版本号使用 `0.1.0`。CI 不再要求公开下载域名；页面从清单地址推导下载目录。Linux 安装脚本自动识别 386 / amd64 / arm64，Windows 一键入口使用 amd64。
+- 页面、CI 与安装器边界的 10 项 Node 测试通过。真实 shell 覆盖 32 位及 64 位架构选择、非 root、非法地址、无效配置和缺失参数拒绝；Go 发布安装器契约测试及 shell 语法检查通过。
+- 最终 smoke-onboarding 在 OrbStack Nginx 容器通过：实际执行短命令读取脚本、归档摘要校验、安装、首次 setup、预检失败重试、幂等、升级、回滚、停用与精确撤销。下载替身提供本地脚本与归档，没有连接真实 OSS。日志 `/tmp/rumable-short-installer-smoke-final.log`。
+- 本机 Go 1.26.1 / Go 1.20.14 生成全部 10 个平台归档，候选版本 `0.1.0`、revision `uncommitted`。46 个发布文件（含两个安装器、配置页和清单）通过实际 SHA256SUMS / manifest 校验，内存 OSS 替身完成 46 个文件上传回读，manifest 最后处理。日志 `/tmp/rumable-short-installer-release.log`。
+- Chrome 复核当前页面无 PREVIEW 标记，显示 Linux 32 位 / x64 / ARM64 自动识别提示，未发现控制台错误。
+- 新增发布打 tag 脚本后，全部 15 项 Node 测试通过。5 组实际临时 Git / bare remote 用例验证只推送指定附注 tag、预演不写入、版本与未提交文件拒绝、同名 tag 冲突拒绝、服务端拒绝后重试，以及独立 push URL / 多目标检查；未对项目远端推送。发布说明补入压缩包，避免包内一键接入手册链接缺失。
+
+Windows 包仍仅完成构建与包校验，未执行 Windows PowerShell 5.1、`install.ps1` 或 IIS 原生验收；详见 [Windows 验收流程及 OrbStack 边界](windows-acceptance.md)。本地测试包来自未提交源码，不代表 Git tag 或 OSS 已发布。真实 OSS / GitLab Runner 与观测云入库仍待验收。
+
+## 注入、IIS 恢复与页面接入（2026-10-21，未发布源码）
+
+- Go 1.26.1 / Go 1.20.14：全量 test/vet 通过。新增 HTML 上下文、伪标签、歧义锚点、IIS 保留映射后恢复重试及外部变更拒绝回归；Web 页面输出通过实际 Go TOML/SDK 配置校验。测试约 15 秒，其中 IIS 故障恢复用例包含真实探测重试等待。
+- Nginx 1.28.3 / Docker ARM64：完整 smoke-nginx 通过，涵盖静态/反代、分块开始标签、identity/gzip、缓存/HEAD、启停、升级回滚和配置/重载/HTTP 故障恢复。原始 `window.template="</head>"` 字符串保持完整。
+- Chrome 实际打开 `/script-head`：可见 `Business script passed`，单个 `script[data-rumable]`，初始化状态 `initialized`，没有 JavaScript 错误。验收夹具的业务内联脚本使用测试 nonce；SDK 使用同域资源。
+- 页面浏览器验收：OpenWay/DataKit 互斥、回放开关和小数采样、超范围采样拒绝、IIS 字段展开、会话存储回退联动及 TOML 预览均通过。Node 生成器回归通过，验证配置转义、清单平台/路径/摘要、Linux shell 语法与 Windows 命令内容。
+- smoke-onboarding：在临时 Nginx 容器中执行页面生成的实际 Linux 命令，覆盖安装包校验失败不改站点、首次 setup、预检失败后重试、幂等、升级、回滚、停用和恢复原配置。下载以本地归档替代 OSS，校验、解包、安装和 CLI/Nginx 路径实际执行。
+- CI/发布逻辑：9 项 Node 测试通过（页面 4 项、CI 5 项），涵盖受保护 tag/版本校验、缺包/坏摘要、远端冲突、失败后重试、回读失败不发布清单及报告不含凭据。Shell 语法检查与 CI YAML 解析通过。
+- 实际候选打包：本机 Go 1.26.1 / Go 1.20.14 生成全部 10 个平台包；候选标识为 `0.1.0-preview.4 / uncommitted`，不代表已准备/发布该版本。44 个发布文件（含配置页）通过真实 SHA256SUMS/manifest 预检，并用内存 OSS 替身验证上传/回读顺序，manifest 最后处理。日志 `/tmp/rumable-onboarding-release-check.log`。
+
+Windows/IIS 原生 API、PowerShell 安装命令实机运行、旧系统内核以及真实观测云入库未在本轮验收；IIS 恢复仍为原生桥接 mock 边界测试。没有发布 OSS 包，因此未验证真实 OSS 下载/CORS/CI 上传。CI 镜像构建因镜像下载过慢在本地停止，完整容器流程及 GitLab Runner 尚未运行通过。当前文本过滤器要求标准 `<head>`；探测覆盖不能替代所有动态 HTML 模板的约束。
+
 日期：2026-10-19–20（Asia/Singapore）。此记录区分代码检查、本地运行与真实观测云验收。
 
 ## 0.1.0-preview.3 发行候选复验（2026-10-20）

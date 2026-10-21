@@ -4,12 +4,10 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"mime"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -118,14 +116,21 @@ func checkPage(s Site, p Page) error {
 	if strings.Contains(strings.ToLower(p.Header.Get("Content-Disposition")), "attachment") {
 		return errors.New("probe page is a download")
 	}
-	if !strings.Contains(strings.ToLower(string(p.Body)), "</head>") {
-		return fmt.Errorf("%s: no literal </head> injection anchor", p.URL)
+	doc, err := inspectHTML(p.Body)
+	if err != nil {
+		return err
+	}
+	if err = doc.checkAnchor(p.Body); err != nil {
+		return fmt.Errorf("%s: %w", p.URL, err)
 	}
 	if err := checkCSP(s, p); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
 	}
-	for _, tag := range scriptPattern.FindAllString(string(p.Body), -1) {
-		a := attributes(tag)
+	for _, tag := range doc.elements {
+		if tag.name != "script" {
+			continue
+		}
+		a := tag.attrs
 		if owner, ok := a["data-rumable"]; ok && owner != s.ID {
 			return errors.New("another Rumable deployment already instruments this page")
 		}
@@ -133,32 +138,11 @@ func checkPage(s Site, p Page) error {
 		if strings.Contains(src, "dataflux-rum") || strings.Contains(src, "browser-sdk/") {
 			return errors.New("existing RUM integration found; do not take over a business-owned SDK")
 		}
-	}
-	for _, block := range inlineScriptPattern.FindAllStringSubmatch(string(p.Body), -1) {
-		if strings.Contains(block[1], "DATAFLUX_RUM") {
+		if strings.Contains(tag.text, "DATAFLUX_RUM") {
 			return errors.New("existing RUM integration found; do not take over a business-owned SDK")
 		}
 	}
 	return nil
-}
-
-var scriptPattern = regexp.MustCompile(`(?is)<script\b[^>]*>`)
-var inlineScriptPattern = regexp.MustCompile(`(?is)<script\b[^>]*>(.*?)</script\s*>`)
-var attrPattern = regexp.MustCompile(`(?is)([a-zA-Z][a-zA-Z0-9_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
-
-func attributes(tag string) map[string]string {
-	a := map[string]string{}
-	for _, m := range attrPattern.FindAllStringSubmatch(tag, -1) {
-		v := m[2]
-		if v == "" {
-			v = m[3]
-		}
-		if v == "" {
-			v = m[4]
-		}
-		a[strings.ToLower(m[1])] = html.UnescapeString(v)
-	}
-	return a
 }
 
 func probePages(s Site, paths []string, expected *Snapshot) ([]ProbeResult, error) {
@@ -224,8 +208,15 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 	}
 	count := 0
 	total := 0
-	for _, tag := range scriptPattern.FindAllString(string(p.Body), -1) {
-		a := attributes(tag)
+	doc, err := inspectHTML(p.Body)
+	if err != nil {
+		return r, err
+	}
+	for _, tag := range doc.elements {
+		if tag.name != "script" {
+			continue
+		}
+		a := tag.attrs
 		if _, exists := a["data-rumable"]; exists {
 			total++
 		}

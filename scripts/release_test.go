@@ -7,6 +7,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +16,41 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestReleaseInstallersPinArchivesWithoutBindingADomain(t *testing.T) {
+	var packages []map[string]string
+	for i, target := range []struct{ os, arch string }{{"linux", "386"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}} {
+		packages = append(packages, map[string]string{"os": target.os, "arch": target.arch, "flavor": "modern", "sha256": strings.Repeat(string(rune('a'+i)), 64)})
+	}
+	files, metadata, err := releaseInstallers(".", "0.1.0", packages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for platform, m := range metadata {
+		body := files[m["file"]]
+		hash := sha256.Sum256(body)
+		if hex.EncodeToString(hash[:]) != m["sha256"] || !bytes.Contains(body, []byte("'0.1.0'")) || bytes.Contains(body, []byte("@@VERSION@@")) {
+			t.Fatal("installer metadata/version mismatch", platform)
+		}
+	}
+	for _, p := range packages {
+		file := "install.sh"
+		if p["os"] == "windows" {
+			file = "install.ps1"
+		}
+		if !bytes.Contains(files[file], []byte(p["sha256"])) {
+			t.Fatal("installer lost archive integrity pin", p)
+		}
+	}
+	if _, _, err = releaseInstallers(".", "0.1.0", packages[:3]); err == nil {
+		t.Fatal("missing Windows package was accepted")
+	}
+	cmd := exec.Command("sh", "-n")
+	cmd.Stdin = bytes.NewReader(files["install.sh"])
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("installer syntax: %v: %s", err, b)
+	}
+}
 
 func TestReleaseRevisionCannotDescribeDifferentOrDirtySource(t *testing.T) {
 	if err := exec.Command("git", "--version").Run(); err != nil {

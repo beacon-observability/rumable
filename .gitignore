@@ -5,3 +5,5 @@
 /rumable.toml
 .DS_Store
 /rumable-iis-results/
+/scripts/ci/node_modules/
+/release-report.json

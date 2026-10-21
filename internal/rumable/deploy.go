@@ -303,7 +303,11 @@ func restoreTransaction(root string, t transaction) error {
 		if err != nil {
 			return err
 		}
-		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) {
+		recovered, err := retainedIISRecovery(t)
+		if err != nil {
+			return err
+		}
+		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) && !sameJSON(live, recovered) {
 			return errors.New("IIS state differs from journal; manual review required before recovery")
 		}
 		nativeExpected = live
@@ -327,6 +331,31 @@ func restoreTransaction(root string, t transaction) error {
 		return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w", err)
 	}
 	return saveState(root, t.Before)
+}
+
+// Restore-Nodes deliberately retains the first asset mapping for cached pages.
+// Its exact recovery result is derivable from the durable before/committed
+// snapshots, even if the restore process dies before returning its result.
+// Accept only this one combination, never arbitrary mixtures of owned settings.
+// This also recovers interrupted journals written by earlier CLI versions.
+func retainedIISRecovery(t transaction) (json.RawMessage, error) {
+	if !t.NativeCommitted || t.Before.Current.Uninstall {
+		return t.Before.Current.Native, nil
+	}
+	var before, after map[string]json.RawMessage
+	if err := json.Unmarshal(t.Before.Current.Native, &before); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(t.After.Native, &after); err != nil {
+		return nil, err
+	}
+	old, oldOK := before["virtualDirectory"]
+	next, nextOK := after["virtualDirectory"]
+	if oldOK && nextOK && bytes.Equal(bytes.TrimSpace(old), []byte("null")) && !bytes.Equal(bytes.TrimSpace(next), []byte("null")) {
+		before["virtualDirectory"] = next
+		return json.Marshal(before)
+	}
+	return t.Before.Current.Native, nil
 }
 
 func rollback(root string, st State, w io.Writer) error {

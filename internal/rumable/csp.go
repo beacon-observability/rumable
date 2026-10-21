@@ -3,17 +3,20 @@ package rumable
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 )
 
-var metaPattern = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
-var basePattern = regexp.MustCompile(`(?is)<base\b[^>]*>`)
-
 func checkCSP(s Site, p Page, scripts ...string) error {
+	doc, err := inspectHTML(p.Body)
+	if err != nil {
+		return err
+	}
 	// Root-relative script/worker URLs follow the document base, not always its origin.
-	for _, tag := range basePattern.FindAllString(string(p.Body), -1) {
-		href, exists := attributes(tag)["href"]
+	for _, tag := range doc.elements {
+		if tag.name != "base" {
+			continue
+		}
+		href, exists := tag.attrs["href"]
 		if !exists {
 			continue
 		}
@@ -59,8 +62,11 @@ func checkCSP(s Site, p Page, scripts ...string) error {
 		checks = append(checks, requirement{[]string{"connect-src", "default-src"}, strings.TrimRight(s.reportURL(), "/") + path})
 	}
 	policies := append([]string{}, p.Header.Values("Content-Security-Policy")...)
-	for _, m := range metaPattern.FindAllString(string(p.Body), -1) {
-		a := attributes(m)
+	for _, tag := range doc.elements {
+		if tag.name != "meta" {
+			continue
+		}
+		a := tag.attrs
 		if strings.EqualFold(a["http-equiv"], "Content-Security-Policy") {
 			policies = append(policies, a["content"])
 		}

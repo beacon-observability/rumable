@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RUM 一键接入 · Rumable</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <aside class="nav"><a class="brand" href="#"><span class="brand-icon">r</span> rumable</a><div class="nav-label">应用可观测性</div><a class="active" href="#">◎ <span>浏览器 RUM 接入</span></a><div class="nav-bottom">从用户体验出发<br><small>无需修改业务代码</small></div></aside>
+  <main>
+    <header><div class="breadcrumb">应用监测 <span>/</span> 接入新应用</div><span class="subtle">Web SDK · 自动注入</span></header>
+    <div class="page-title"><div><div class="eyebrow">REAL USER MONITORING</div><h1>让每一次用户体验，都有迹可循</h1><p>配置 Web SDK，在服务器执行生成的命令，即可接入浏览器监测。</p></div><span class="tag">Nginx / IIS</span></div>
+    <div class="layout">
+      <form id="config-form" autocomplete="off">
+        <section class="card"><div class="section-heading"><span class="step">01</span><div><h2>连接你的应用</h2><p>使用应用管理中创建的 RUM 应用信息。</p></div></div>
+          <div class="grid">
+            <label class="wide">应用 ID <span class="required">*</span><input name="applicationId" required placeholder="填写 applicationId"><small>对应 Web SDK 的 applicationId</small></label>
+            <label>上报方式<select name="reporting"><option value="openway">OpenWay</option><option value="datakit">DataKit</option></select></label>
+            <label>上报地址 <span class="required">*</span><input name="endpoint" type="url" required placeholder="https://openway.example.com"><small id="endpoint-help">对应 site，仅填写 origin</small></label>
+            <label class="wide" id="token-field">浏览器令牌 <span class="required">*</span><input name="clientToken" required placeholder="填写 clientToken"><small>使用浏览器 Client Token，不是管理 API Key。</small></label>
+            <label>服务名称<input name="service" placeholder="如 web-store"><small>service</small></label><label>环境<input name="env" placeholder="如 production"><small>env</small></label>
+            <label class="wide">应用版本<input name="version" placeholder="如 1.0.0"><small>业务应用版本，与 Rumable 安装包版本独立。</small></label>
+          </div>
+        </section>
+        <section class="card"><div class="section-heading"><span class="step">02</span><div><h2>决定采集什么</h2><p>性能、资源和错误由 SDK 自动采集，以下控制采样与录制。</p></div></div>
+          <div class="grid"><label>会话采样率 <span class="unit">%</span><input name="sessionSampleRate" type="number" min="0" max="100" step="any" value="100" required><small>sessionSampleRate · 0–100</small></label><label>错误会话补偿采样率 <span class="unit">%</span><input name="sessionOnErrorSampleRate" type="number" min="0" max="100" step="any" value="0" required><small>sessionOnErrorSampleRate</small></label></div>
+          <label class="toggle-row"><div><strong>采集用户交互</strong><small>自动记录点击等用户操作 · trackUserInteractions</small></div><input name="trackUserInteractions" type="checkbox" checked role="switch"></label>
+          <label class="toggle-row"><div><strong>Session Replay</strong><small>录制会话回放，帮助还原用户遇到的问题。</small></div><input name="sessionReplayEnabled" type="checkbox" role="switch"></label>
+          <div id="replay-fields" class="nested" hidden><div class="grid"><label>回放采样率 <span class="unit">%</span><input name="sessionReplaySampleRate" type="number" min="0" max="100" step="any" value="20"><small>sessionReplaySampleRate</small></label><label>错误回放补偿采样率 <span class="unit">%</span><input name="sessionReplayOnErrorSampleRate" type="number" min="0" max="100" step="any" value="0"><small>sessionReplayOnErrorSampleRate</small></label></div><p class="hint">先采样 RUM 会话，再决定是否录制。回放需要站点 CSP 允许相应 Worker。</p></div>
+          <div class="grid space-top"><label>默认隐私等级<select name="defaultPrivacyLevel"><option value="mask">遮罩所有文本（推荐）</option><option value="mask-user-input">仅遮罩用户输入</option><option value="allow">显示允许采集的内容</option></select><small>defaultPrivacyLevel</small></label><label>会话存储<select name="sessionPersistence"><option value="cookie">Cookie</option><option value="local-storage">Local Storage</option><option value="auto">自动选择（支持存储回退）</option></select><small>sessionPersistence</small></label></div>
+          <details><summary>高级 Web SDK 配置</summary><div class="grid space-top">
+            <label>交互名称属性<input name="actionNameAttribute" placeholder="如 data-rum-action"><small>actionNameAttribute</small></label><label>Worker 地址<input name="workerUrl" placeholder="留空使用内置 Blob Worker"><small>同源地址 · workerUrl</small></label>
+            <label class="wide">链路匹配地址<textarea name="allowedTracingUrls" rows="2" placeholder="每行一个完整 URL，如 https://api.example.com/"></textarea><small>allowedTracingUrls · 未填写时不注入链路请求头</small></label>
+            <label>链路协议<select name="traceType"><option value="ddtrace">ddtrace</option><option value="w3c_traceparent">W3C Trace Context</option><option value="w3c_traceparent_64bit">W3C 64 bit</option><option value="zipkin">Zipkin</option><option value="zipkin_single_header">Zipkin single header</option><option value="skywalking_v3">SkyWalking v3</option><option value="jaeger">Jaeger</option></select></label>
+            <label>链路采样率 <span class="unit">%</span><input name="tracingSampleRate" type="number" min="0" max="100" step="any" value="100"></label>
+          </div>
+          <div class="checks"><label><input name="enablePrivacyForActionName" type="checkbox"> 遮罩交互名称</label><label><input name="enableLongAnimationFrame" type="checkbox"> 采集长动画帧</label><label><input name="compressIntakeRequests" type="checkbox"> 压缩上报请求（需要 Worker）</label><label><input name="remoteConfiguration" type="checkbox"> 启用 SDK 远程配置</label><label><input name="trackSessionAcrossSubdomains" type="checkbox"> 跨子域共享会话</label><label><input name="useSecureSessionCookie" type="checkbox"> 仅 HTTPS 传输会话 Cookie</label><label><input name="allowFallbackToLocalStorage" type="checkbox"> 自动选择时允许回退 Local Storage</label></div>
+          <p class="hint">远程配置可能覆盖静态参数。setUser、自定义 startView、beforeSend 等需要业务调用，不通过服务器注入自动实现。</p></details>
+        </section>
+        <section class="card"><div class="section-heading"><span class="step">03</span><div><h2>选择接入位置</h2><p>确定网站和服务器，命令会检查环境并自动挂接。</p></div></div>
+          <div class="grid"><label>网站地址 <span class="required">*</span><input name="publicURL" type="url" required placeholder="https://www.example.com/"><small>以 / 结尾，需可访问验收页面。</small></label><label>接入标识<input name="id" required value="website" pattern="[a-z][a-z0-9-]{0,47}"><small>用于后续启停和回滚，同一站点保持不变。</small></label>
+          <label>Web 服务器<select name="server"><option value="nginx">Nginx · Linux</option><option value="iis">IIS · Windows</option></select></label><div id="arch-field" class="hint">安装时自动识别 Linux x86（32 位）/ x64 / ARM64 架构。</div></div>
+          <details id="server-details"><summary>站点路径与服务器选项</summary><div class="grid space-top"><label>注入路径<textarea name="includePaths" rows="2">/</textarea><small>每行一个路径前缀，区分大小写。</small></label><label>排除路径<textarea name="excludePaths" rows="2" placeholder="如 /api/"></textarea><small>排除优先。</small></label><label class="wide">验收路径<textarea name="probePaths" rows="2">/</textarea><small>需要匿名返回完整 HTML，覆盖每种页面模板。</small></label></div>
+          <div id="nginx-fields" class="grid space-top"><label>Nginx 程序<input name="nginxBinary" value="/usr/sbin/nginx"></label><label>Nginx 配置文件<input name="nginxConfig" placeholder="留空使用 Nginx 默认配置"></label></div>
+          <div id="iis-fields" hidden><div class="grid space-top"><label>IIS 站点名称<input name="iisSite" value="Default Web Site"></label><label>IIS 应用路径<input name="iisApplication" value="/"></label></div><label class="check"><input name="allowCompressionChanges" type="checkbox"> 允许调整所选应用的静态压缩设置</label><p class="hint">IIS 需要 URL Rewrite 和静态资源读取权限；安装命令使用 Windows x64 包，以管理员身份运行 PowerShell 5.1。</p></div>
+          </details><p class="hint">页面需含标准 &lt;head&gt; 开始标签。部署会检查 CSP、SDK 冲突和验收页面；不兼容时停止并保留恢复记录。</p>
+        </section>
+      </form>
+      <aside class="output"><section class="card sticky"><div class="output-title"><span class="terminal-icon">›_</span><div><h2>生成接入命令</h2><p>复制一条命令 → 自动接入</p></div></div>
+        <div class="summary-grid"><span>SDK 托管</span><strong>网站同域</strong><span>会话采样</span><strong id="sample-summary">100%</strong><span>会话回放</span><strong id="replay-summary">关闭</strong></div>
+        <label>发布清单地址<input id="manifest-url" type="url" placeholder="https://OSS域名/rumable/版本/manifest.json"><small>CI 发布的固定版本清单，包含 SDK 版本和安装包摘要。</small></label><button id="load-release" class="secondary" type="button">读取发布版本</button><p id="release-status" class="hint" role="status">尚未连接 OSS，可先配置并下载 TOML。</p>
+        <p id="form-error" class="error" role="alert"></p><div class="output-tabs"><button id="tab-config" class="selected" type="button">配置预览</button><button id="tab-command" type="button">接入命令</button></div>
+        <pre id="output-text" tabindex="0" aria-label="生成内容">填写应用 ID、上报地址和网站地址后生成配置。</pre>
+        <button id="copy-command" class="primary" type="button" disabled>复制接入命令 <span>↗</span></button><button id="download-config" class="secondary" type="button" disabled>下载 rumable.toml</button><p id="action-status" role="status" class="hint"></p>
+        <div class="next"><strong>执行之后</strong><p>在服务器查看接入结果，再打开网站确认 SDK 运行，并在观测云确认收到数据。</p><p class="subtle">配置仅在当前浏览器生成。命令包含浏览器令牌，Base64 不是加密。</p></div>
+      </section></aside>
+    </div><footer>Rumable 自动接入 · 执行命令会修改目标站点配置，保留备份供启停和回滚。</footer>
+  </main>
+</body>
+</html>

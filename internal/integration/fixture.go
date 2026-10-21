@@ -192,11 +192,16 @@ document.querySelector('#canvas').onclick=function(){var c=document.querySelecto
 			return
 		}
 		if r.URL.Path == "/split-head" {
-			for _, part := range []string{"<html><head></He", "Ad><body>BUSINESS_ORIGINAL</body></html>"} {
+			for _, part := range []string{"<html><He", "Ad></head><body>BUSINESS_ORIGINAL</body></html>"} {
 				io.WriteString(w, part)
 				w.(http.Flusher).Flush()
 				time.Sleep(20 * time.Millisecond)
 			}
+			return
+		}
+		if r.URL.Path == "/script-head" {
+			w.Header().Set("Content-Security-Policy", "script-src 'self' 'nonce-dGVzdA=='; worker-src blob:; connect-src 'self' http://127.0.0.1:19181")
+			io.WriteString(w, `<!doctype html><html><head><title>Head anchor regression</title><script nonce="dGVzdA==">window.template="</head>";window.businessRan=true;</script></head><body><h1>Head anchor regression</h1><p id="business"></p><button id="inspect">Inspect SDK</button><pre id="sdk"></pre><script nonce="dGVzdA==">document.querySelector('#business').textContent=window.businessRan&&window.template==="</head>"?'Business script passed':'Business script FAILED';document.querySelector('#inspect').onclick=function(){document.querySelector('#sdk').textContent=JSON.stringify({rumable:window.__RUMABLE__,sdk:!!window.DATAFLUX_RUM})};</script></body></html>`)
 			return
 		}
 		if r.URL.Path == "/business" {

@@ -251,8 +251,8 @@ try {
                 $rule.SetAttributeValue('preCondition', ($prefix + 'html'))
                 $match = $rule.GetChildElement('match')
                 if ($kind -eq 'inject') {
-                    $match.SetAttributeValue('filterByTags', 'None'); $match.SetAttributeValue('pattern', '</head>'); $match.SetAttributeValue('occurrences', 1)
-                    $value = '<script async data-rumable="' + $site.id + '" src="' + $request.script + '"></script></head>'
+                    $match.SetAttributeValue('filterByTags', 'None'); $match.SetAttributeValue('pattern', '<head>'); $match.SetAttributeValue('occurrences', 1)
+                    $value = '<head><script async data-rumable="' + $site.id + '" src="' + $request.script + '"></script>'
                 } else {
                     $header = 'RESPONSE_ETag'; if ($kind -eq 'modified') { $header = 'RESPONSE_Last_Modified' }
                     $match.SetAttributeValue('serverVariable', $header); $match.SetAttributeValue('pattern', '.+')

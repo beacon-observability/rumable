@@ -1,6 +1,6 @@
-# Rumable Preview 使用指南
+# Rumable 使用指南
 
-版本：**0.1.0-preview.3**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
+版本：**0.1.0**。本工具面向测试和接入验证；请先在独立测试站点完成浏览器与观测云数据验收，再用于正式站点。
 
 Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，无需修改业务代码。它是一次执行后退出的命令行工具，无需安装 Go、Node.js、数据库或常驻服务。
 
@@ -10,7 +10,7 @@ Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，�
 
 ## 1. 选择下载包
 
-在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0-preview.3_` 开头。
+在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0_` 开头。
 
 | 系统 / CPU | 文件名后缀 | 适用条件 |
 |---|---|---|
@@ -25,7 +25,7 @@ Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，�
 | 旧 Linux x86 | `linux_386_legacy.tar.gz` | 32 位 Linux，内核 2.6.32+、SSE2；旧内核需实机验收 |
 | 旧 Linux x64 | `linux_amd64_legacy.tar.gz` | 64 位 Linux，内核 2.6.32+；旧内核需实机验收 |
 
-现代包使用 Go 1.26.9，legacy 包使用 Go 1.20.14，均为无 CGO 依赖的独立可执行文件。Go 1.20 已停止维护；旧系统兼容范围不等于完成了旧系统安全和运行验收。完整约束见[兼容性矩阵](docs/compatibility.md)。
+现代包使用 Go 1.26.x，legacy 包使用 Go 1.20.14，均为无 CGO 依赖的独立可执行文件。Go 1.20 已停止维护；旧系统兼容范围不等于完成了旧系统安全和运行验收。完整约束见[兼容性矩阵](docs/compatibility.md)。
 
 Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；在真正的 32 位 Windows 上可执行 `version`、`init`、`render`、`status`、`probe`，不支持 IIS 的 check/enable/disable/rollback。Windows ARM64 包不代表已验证 ARM64 IIS；版本检查成功也不代表 IIS 模块可用。
 
@@ -35,17 +35,17 @@ Windows x86 CLI 在 64 位系统上通过 Sysnative 选择 64 位 PowerShell；�
 
 ```sh
 sha256sum -c SHA256SUMS
-mkdir rumable-0.1.0-preview.3
-tar -xzf rumable_0.1.0-preview.3_linux_amd64.tar.gz -C rumable-0.1.0-preview.3
-cd rumable-0.1.0-preview.3
+mkdir rumable-0.1.0
+tar -xzf rumable_0.1.0_linux_amd64.tar.gz -C rumable-0.1.0
+cd rumable-0.1.0
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-FileHash .\rumable_0.1.0-preview.3_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\rumable_0.1.0_windows_amd64.zip -Algorithm SHA256
 # 与 SHA256SUMS 内同名文件的摘要比较，然后解压到新目录。
-Expand-Archive .\rumable_0.1.0-preview.3_windows_amd64.zip -DestinationPath C:\Tools\Rumable
+Expand-Archive .\rumable_0.1.0_windows_amd64.zip -DestinationPath C:\Tools\Rumable
 C:\Tools\Rumable\rumable.exe version
 ```
 
@@ -290,7 +290,7 @@ Windows 将命令改为 `& $rumable`，使用原 `$state` 和站点 ID。默认�
 | 候选不唯一 / 站点未识别 | 核对 publicURL、监听端口、binary/args，使用输出中的明确 target |
 | 缺少模块 / http 层 sub_filter 风险 | 按具体错误修复服务器能力或配置，不能用 attachmentReviewed 绕过 |
 | CSP / 压缩 / SDK 摘要失败 | 按错误位置检查策略、源压缩或过期脚本缓存，修复后再 enable |
-| 页面没有 `</head>` | 保持正文不变；完整 HTML 才可接入，片段和流式 SSR 不支持 |
+| 页面没有安全的字面量 `<head>` | 预检拒绝；需要不带属性或额外空白的真实 head 开始标签，且此前注释/属性中不能有同名文本。所有受管模板都需符合，片段和流式 SSR 不支持 |
 | 停用/回滚后浏览器仍是旧状态 | 清理 HTML 缓存并打开新页面；已打开的页面不会即时撤销 SDK |
 | external change / 恢复冲突 | 保留现场和备份，审查外部修改；不要覆盖状态或强行删除事务 |
 | operation.lock | 先确认没有正在运行的 Rumable，再按[恢复流程](docs/operations.md)处理遗留锁 |

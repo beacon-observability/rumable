@@ -73,7 +73,7 @@ use_config() {
 docker exec "$server" /work/smoke/rumable init --server nginx --reporting datakit --site smoke --config /work/smoke/config.toml
 awk '
   /^publicURL =/ {print "publicURL = \"http://127.0.0.1:19180/\""; next}
-  /^probePaths =/ {print "probePaths = [\"/\", \"/static.html\", \"/stream\", \"/split-head\", \"/conditional\", \"/validators\", \"/cache\", \"/inherit/page\", \"/business\"]"; next}
+  /^probePaths =/ {print "probePaths = [\"/\", \"/static.html\", \"/stream\", \"/split-head\", \"/script-head\", \"/conditional\", \"/validators\", \"/cache\", \"/inherit/page\", \"/business\"]"; next}
   /^excludePaths =/ {print "excludePaths = [\"/api/\"]"; next}
   /^binary =/ {print "binary = \"/work/smoke/nginx-wrapper\""; print "args = [\"-c\", \"/work/smoke/nginx.conf\"]"; next}
   /^applicationId =/ {print "applicationId = \"rumable-local-verification\""; next}
@@ -295,6 +295,9 @@ for path in /static.html /validators /conditional /cache; do
   done
 done
 fetch "$base/split-head"; grep -q BUSINESS_FILTERED "$work/body"
+fetch "$base/script-head"; injected
+grep -q '<head><script async data-rumable=' "$work/body" || fail 'Bootstrap was not inserted at the opening head'
+grep -q 'window.template="</head>";window.businessRan=true;' "$work/body" || fail 'Injection corrupted a closing head inside JavaScript'
 fetch "$base/business"; grep -q BUSINESS_FILTERED "$work/body"
 fetch "$base/cache"; test "$(header X-Fixture-Request)" = "$cache_request" || fail 'Enable invalidated upstream cache unexpectedly'
 fetch "$base$old_script"; grep -q 'max-age=31536000' "$work/headers"
@@ -320,7 +323,7 @@ docker exec "$server" cp /work/smoke/config.toml /work/smoke/before.toml
 for path in /forced-gzip /missinghead; do
   sed "s|probePaths = .*|probePaths = [\"$path\"]|" "$work/before.toml" > "$work/config.next"
   use_config config.next
-  if [ "$path" = /forced-gzip ]; then reason='encoded response'; else reason='no literal </head>'; fi
+  if [ "$path" = /forced-gzip ]; then reason='encoded response'; else reason='no safe literal <head>'; fi
   expect_failure "$reason" cli check
 done
 use_config before.toml

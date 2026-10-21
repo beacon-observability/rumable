@@ -105,7 +105,7 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 		}
 		h.WriteString("}\n")
 		// Empty dynamic matches bypass the filter; excluded HTML must keep its bytes.
-		fmt.Fprintf(&h, "map $%s_tag $%s_anchor {\n    default '</head>';\n    \"\" \"\";\n}\n", v, v)
+		fmt.Fprintf(&h, "map $%s_tag $%s_anchor {\n    default '<head>';\n    \"\" \"\";\n}\n", v, v)
 		n.Files["http.conf"] = h.Bytes()
 		assetDir := filepath.ToSlash(filepath.Join(siteDir(root, s), "public", s.ID)) + "/"
 		// The reserved path always has an empty dynamic anchor. Override inherited
@@ -121,7 +121,7 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 			n.Files["server.conf"] = []byte(strings.ReplaceAll(string(n.Files["server.conf"]), fmt.Sprintf("    sub_filter '$%s_anchor' '';\n", v), ""))
 		}
 		if enabled {
-			filter = fmt.Sprintf("# Managed by Rumable. HTML is gated independently of inherited sub_filter_types.\nsub_filter_once on;\nsub_filter_last_modified off;\nsub_filter '$%s_anchor' '$%s_tag</head>';\netag off;\nif_modified_since off;\n", v, v)
+			filter = fmt.Sprintf("# Managed by Rumable. HTML is gated independently of inherited sub_filter_types.\nsub_filter_once on;\nsub_filter_last_modified off;\nsub_filter '$%s_anchor' '<head>$%s_tag';\netag off;\nif_modified_since off;\n", v, v)
 		}
 		n.Files["location.conf"] = []byte(filter)
 		renderNginxOTel(&n)
