@@ -79,6 +79,7 @@ Nginx 最低要求 **1.9.4 + http_sub_module**。1.9.4 的 `check`、`enable` �
 ## 配置与命令
 
 - 可使用[配置页](web/index.html)填写 Web SDK 参数，下载 TOML 或读取 CI/OSS 发布清单生成安装命令。当前支持 Nginx/Linux 和 IIS/Windows RUM；本地预览及发布约定见[一键接入说明](docs/one-click-onboarding.md)。
+- `0.1.0` 发布后使用[在线配置页](https://static.guance.com/rumable/0.1.0/setup/index.html)；Windows 一键安装、重复接入、停用与回滚的具体步骤见 [Windows 验收手册](docs/windows-acceptance.md)。
 - 新增 `setup --config rumable.toml --state-dir /var/lib/rumable --yes`：依次准备状态、自动挂接 Nginx、启用并探测；重复执行更新相同目标。发生故障复用部署恢复机制，保留资源映射与备份。
 - [GitLab CI 发布](docs/gitlab-ci-release.md)沿用 browser-sdk 的 Runner、受保护 tag 与 OSS 变量约定；install.sh / install.ps1、版本包和配置页一起发布，全部摘要回读通过后才发布清单。
 - 提交待发布源码后执行 `bash scripts/release-oss.sh 0.1.0` 创建并推送发布 tag；加 `--dry-run` 只做预演。脚本不提交代码或推送分支，OSS 上传由 tag 对应 CI 完成。

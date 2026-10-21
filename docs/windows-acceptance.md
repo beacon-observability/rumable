@@ -14,6 +14,32 @@
 
 完整验收应准备独立的 x64 Windows Server 2016+ / IIS 10 测试机，按下方步骤运行。现有 `windows-smoke.ps1` 覆盖 CLI 的注入、启停、升级和回滚；新的一键 `install.ps1` 下载、校验、安装及 `setup` 入口还需单独在该测试机验收，不能由现有 CLI 脚本通过推断安装器已通过。
 
+## 一键安装入口验收（Windows x64）
+
+本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 64 位 Windows PowerShell 5.1、Windows 10 / Server 2016+ x64、IIS 与 URL Rewrite 2.x。旧 Windows、x86 或 ARM64 包按后面的手工流程分别验收。
+
+1. 发布成功后打开 `https://static.guance.com/rumable/0.1.0/setup/index.html`，读取发布版本，确认 `0.1.0`。选 IIS，填写真实测试应用的 applicationId、OpenWay / DataKit 配置、网站地址、IIS 站点/应用路径，并为测试设置独立接入标识，例如 `windows-test`。网站验收路径必须返回带标准 `<head>` 的 HTML；按实际需要勾选静态压缩变更许可。
+2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，校验同版本 x64 ZIP，安装 CLI，再运行 `setup`。记录命令退出结果；日志或截图中不要暴露令牌。
+3. 检查状态及页面资源：
+
+   ```powershell
+   $rumable = Join-Path $env:ProgramFiles 'Rumable\0.1.0\rumable.exe'
+   $state = Join-Path $env:ProgramData 'Rumable'
+   $site = 'windows-test' # 与页面中的接入标识保持一致
+   & $rumable version
+   & $rumable status --state-dir $state --site $site
+   & $rumable probe --state-dir $state --site $site
+   ```
+
+   要求 `rumEnabled=true`、`drift` 为空、`pendingTransaction=false`，探测成功。同源初始化脚本和 SDK 返回 200。浏览器中只出现一个本次部署的 `script[data-rumable]`，原有业务功能正常；额外验证包含 JavaScript 字符串 `"</head>"` 的页面未被改坏。
+4. 再次执行相同一键命令，确认没有重复注入。修改测试环境 env，重新生成命令更新，再执行 `rollback --state-dir $state --site $site`；验证恢复上一配置的初始化脚本 URL。
+5. 执行 `disable --state-dir $state --site $site`，确认新请求的 HTML 不再注入；旧版本静态资源应保留给缓存页面。再次执行 `rollback` 应恢复刚停用前的状态，最后再 `disable` 清理测试站点的注入。以上命令均由 `& $rumable` 调用，状态目录和接入标识保持一致。
+6. 如出现未完成事务，保留 `%ProgramData%\Rumable` 中的状态、日志和备份，记录失败阶段，再用 CLI 的 `rollback` 恢复；不要删除状态后盲目重装。需要验证原生提交故障、压缩继承和多应用隔离时，继续运行下方完整自动验收。
+
+一键安装不提取测试工具。完整工具另从 `https://static.guance.com/rumable/0.1.0/rumable_0.1.0_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压，执行后面的 `scripts/windows-smoke.ps1`。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
+
+反馈结果请包含 Windows / IIS / PowerShell 版本、Rumable 版本、下载包 SHA-256、接入标识、首次/重复安装、停用、配置回滚、业务页面与数据上报结果；完整自动验收另附 `report.json` 和脱敏的 `cli.log`。
+
 ## 1. 选择环境和发布包
 
 | 目标环境（x64） | IIS | Rumable 包 | PowerShell 验收 |

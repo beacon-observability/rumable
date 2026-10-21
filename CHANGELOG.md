@@ -1,11 +1,12 @@
 # 版本说明
 
-## 0.1.0 · 未发布
+## 0.1.0 · 2026-10-21
 
 - 新增 Web SDK 配置页，按 OpenWay/DataKit、采样、回放、隐私及链路参数生成 TOML；从固定版本 OSS manifest 生成带摘要校验的 Linux/Windows 安装命令。
-- 新增 RUM-only `setup` 命令，组合首次准备、Nginx 自动挂接、启用及故障恢复；发布脚本新增 manifest.json 和独立 install.sh / install.ps1，页面只生成带配置的短命令。尚未配置或发布到真实 OSS。
+- 新增 RUM-only `setup` 命令，组合首次准备、Nginx 自动挂接、启用及故障恢复；发布脚本新增 manifest.json 和独立 install.sh / install.ps1，页面只生成带配置的短命令。
 - 新增 GitLab CI / OSS 发布流程，沿用 browser-sdk 的 cloudcare-tools、Docker、受保护发布 tag 和 OSS_* 变量；固定版本文件集、同版本配置页、摘要回读和 manifest 最后发布，支持相同内容重试。
 - 新增 `scripts/release-oss.sh`：校验版本与干净工作区，支持预演，创建并推送唯一发布 tag、回读目标提交；拒绝版本冲突，推送失败可复用本地 tag 重试。
+- 补充 main 合并发布流程、公开下载路径和 Windows 一键安装验收步骤。Windows/IIS 原生验收由目标测试机执行，发布构建不代表 Windows 已通过。
 
 - RUM 注入改为标准 `<head>` 后插入，防止破坏 JavaScript 中的 `</head>` 字符串；预检拒绝不支持或有歧义的锚点。HTTP 探测和 CSP 检查使用 HTML 分词，忽略脚本文本、注释和惰性模板中的伪标签。
 - 修复 IIS 首次启用失败后保留资源映射、恢复再次中断时无法重试 rollback 的问题；仅接受日志能精确推导的恢复状态，继续拒绝外部修改。

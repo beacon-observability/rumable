@@ -8,6 +8,12 @@ Rumable 在 Nginx 或 IIS 返回的完整 HTML 中加入观测云 RUM 脚本，�
 
 本版仅支持 Nginx 和 IIS。升级包含 RUM 独立启停、旧脚本继承保护、OTel 操作保留浏览器 SDK、分离 main/http 配置挂接及中断回滚修复；旧版 Apache 配置不适用于本版。
 
+## 一键接入
+
+`0.1.0` 发布后，打开[配置页](https://static.guance.com/rumable/0.1.0/setup/index.html)，读取发布版本，填写 RUM 配置并选择 Nginx / IIS，再执行生成的安装命令。安装器负责下载、摘要校验、安装 CLI 和 `setup`；不自动安装 Web 服务器或 IIS URL Rewrite。完整说明见[页面接入](docs/one-click-onboarding.md)。
+
+Windows 一键入口使用管理员身份的 64 位 Windows PowerShell 5.1，CLI 路径为 `%ProgramFiles%\Rumable\0.1.0\rumable.exe`，状态目录为 `%ProgramData%\Rumable`。请保留下载的 TOML；按 [Windows 验收手册](docs/windows-acceptance.md)检查重复安装、注入、启停和回滚。其他架构及旧系统继续按下面的下载包流程执行。
+
 ## 1. 选择下载包
 
 在发布目录的 README 中点击对应压缩包。文件名中的 `386` 是真正的 **x86 32 位**，`amd64` 是 Intel/AMD **x64 64 位**，`arm64` 是 **ARM64**；这些架构不能随意替换。下表文件名均以 `rumable_0.1.0_` 开头。

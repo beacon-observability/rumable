@@ -2,6 +2,8 @@
 
 页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
 
+`0.1.0` 发布完成后，使用[在线配置页](https://static.guance.com/rumable/0.1.0/setup/index.html)，默认读取同版本的[发布清单](https://static.guance.com/rumable/0.1.0/manifest.json)。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
+
 ## 当前可用流程
 
 1. 页面填写 SDK 配置与接入目标，立即生成可下载的 TOML。
@@ -21,6 +23,14 @@ Linux 命令结构如下（域名和配置为示意，实际由页面填入）�
 ```sh
 curl --proto '=https' --proto-redir '=https' -fsSL 'https://下载域名/rumable/0.1.0/install.sh' | sudo sh -s -- --base-url 'https://下载域名/rumable/0.1.0/' --config '<Base64 RUM 配置>'
 ```
+
+Windows 在管理员身份的 64 位 Windows PowerShell 5.1 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
+
+```powershell
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.0/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.0/' -Config '<Base64 RUM 配置>'
+```
+
+Windows CLI 安装到 `%ProgramFiles%\Rumable\0.1.0\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；如需完整自动验收脚本，另下载并解压同版本 Windows ZIP。
 
 只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 所在目录推导，不需要 CI 配置公开下载域名。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 使用 x64 PowerShell 安装脚本。脚本与安装包使用同一个固定版本目录，不依赖 latest。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
 
@@ -67,7 +77,7 @@ rumable/
 
 CI 先验证、打包并上传安装脚本、全部包和配置页，核对远端摘要，再发布 manifest；报告输出固定版本的 OSS 路径，供控制台选择。相同版本内容变化会被拒绝；下一次发布使用新版本号，不覆盖已有版本。OSS 使用 HTTPS；跨域部署页面时允许页面域名 GET manifest。同版本 `setup/index.html` 自动预填清单地址；也可用 `?manifest=https://<OSS域名>/rumable/<version>/manifest.json` 指定，在控制台集成时由平台注入地址。
 
-本地尚未执行远程发布；实际 OSS 凭据由项目 CI 管理，不需要公开域名变量。页面在未读到有效清单时禁用“复制接入命令”，仍可预览/下载 TOML；不会生成指向不存在安装包的假成功命令。安装脚本使用所选固定版本及构建时写入的包摘要，不在执行时漂移到 latest。
+实际 OSS 凭据由项目 CI 管理，不需要公开域名变量。页面在未读到有效清单时禁用“复制接入命令”，仍可预览/下载 TOML；不会生成指向不存在安装包的假成功命令。安装脚本使用所选固定版本及构建时写入的包摘要，不在执行时漂移到 latest。
 
 ## 恢复行为
 

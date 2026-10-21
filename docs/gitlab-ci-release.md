@@ -27,9 +27,12 @@ CI 不配置公开下载域名，只按固定 object key 上传。页面由所�
 
 先更新并审核源码、`internal/rumable/config.go` 的 `Version` 和版本说明；如需升级内置 SDK，在准备阶段运行 `go run scripts/sync-sdk.go`，将 SDK 与元数据一并提交。CI 验证其摘要，使用 tag 中已提交的 SDK，不在重试时下载变化的 latest。
 
-确认目标源码已审核、提交且工作区干净，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.0`：
+将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.0`：
 
 ```sh
+git switch main
+git pull --ff-only origin main
+
 # 只检查版本、工作区和远端 tag，不创建或推送 tag
 bash scripts/release-oss.sh 0.1.0 --dry-run
 
@@ -52,6 +55,15 @@ bash scripts/release-oss.sh 0.1.0
 
 当前目录为 `rumable/0.1.0/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页会预填同版本清单地址；用户读取版本、填写 Web SDK 参数后即可复制接入命令。
 
+发布完成后的公开入口：
+
+- 配置页：`https://static.guance.com/rumable/0.1.0/setup/index.html`
+- 清单：`https://static.guance.com/rumable/0.1.0/manifest.json`
+- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.0/install.sh`、`https://static.guance.com/rumable/0.1.0/install.ps1`
+- Windows x64：`https://static.guance.com/rumable/0.1.0/rumable_0.1.0_windows_amd64.zip`
+
+公开域名仅用于文档与接入入口，不成为 CI 变量。发布后同时核对清单中的 revision 与 tag 提交、公开下载的 SHA-256 与 SHA256SUMS；本地旧测试包的 revision 为 `uncommitted` 时，不要用它替代 CI 的正式构建产物。
+
 上传设置 `x-oss-forbid-overwrite`，同时由 `rumable-oss-release` resource group 串行执行。该头在已开启/暂停版本控制的 bucket 上无效，参见 [OSS PutObject 说明](https://www.alibabacloud.com/help/zh/oss/developer-reference/putobject)；因此同一 `rumable/*` 前缀须仅由这套流水线写入，禁止其他发布者并发修改。脚本仍会预读拒绝不同内容并回读核对，不会修改 bucket 的版本控制设置。
 
 ## 重试与验收
@@ -60,7 +72,7 @@ bash scripts/release-oss.sh 0.1.0
 
 报告 `release-report.json` 和 `dist/` 作为 GitLab artifacts 保留 30 天，失败也保留。`status=verified` 表示完整文件集已在 OSS API 回读确认；还须从公开地址访问配置页、读取清单、下载核对包，并在目标服务器验收接入、停用和回滚。Windows/IIS 和真实观测云事件入库需对应环境验证。
 
-本次只提供 CI 配置和本地验证，不会替用户设置 GitLab Variables、创建发布 tag 或执行远程发布。
+推送 `main` 本身不发布。创建受保护发布 tag 才会启动发布流水线；Windows/IIS 验收另按 [Windows 测试手册](windows-acceptance.md)执行，不能由 CI 成功推断 Windows 已通过。
 
 本地发布逻辑测试不需要真实凭据：
 
