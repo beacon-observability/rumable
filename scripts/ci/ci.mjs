@@ -30,8 +30,6 @@ export async function runRelease({env = process.env, cwd = root, execute, client
     run('npm', ['ci', '--prefix', 'scripts/ci', '--ignore-scripts', '--no-audit', '--no-fund']);
     report.step = 'test page and CI scripts';
     run('node', ['--test', 'web/generator_test.mjs', 'scripts/ci/ci_test.mjs', 'scripts/installer_test.mjs', 'scripts/release-oss_test.mjs']);
-    report.step = 'test Windows installer contracts';
-    run('pwsh', ['-NoLogo', '-NoProfile', '-File', 'scripts/test-windows-installer.ps1']);
     report.step = 'build and test modern/legacy packages';
     // Sync SDK during version preparation, then commit it. A tag rebuild uses
     // those approved bytes, never whatever latest happens to mean on retry.

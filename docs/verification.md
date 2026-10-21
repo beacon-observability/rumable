@@ -1,11 +1,11 @@
 # 实现验证记录
 
-## 0.1.3 简洁接入与 Windows 自动识别（2026-10-21）
+## 0.1.4 简洁接入与 Windows 自动识别（2026-10-21）
 
 - 本地 Go 全量 test/vet、发布归档测试与 28 项 Node 测试通过。新增自动发现配置严格解析、实际页面输出到 Go 的契约、单/多站点、绑定歧义、无终端拒绝、稳定 ID、已有路径保留、HTTPS 上报限制及 IIS 压缩许可等覆盖。
 - OrbStack Nginx：`smoke-discovery.sh` 实际执行生成的一键命令，覆盖自动发现、首次注入、重复安装、配置更新/回滚、停用与精确撤销。双站点场景中，无终端不修改配置；带终端的管道安装只注入选中的站点，未选中站点不变。`smoke-onboarding.sh` 原手动模式也通过，含错误摘要拒绝及不支持 HTML 的失败后重试。此轮下载先使用本地包替身，校验/解压/安装/注入实际执行；脚本支持发布后以 `RUMABLE_PUBLIC_MANIFEST` 切换真实 OSS 下载验收。
 - Chrome 验证默认无需网站地址即可生成 Linux/IIS 自动发现 TOML，高级手动模式才显示并校验网站字段；旧 0.1.2 清单明确拒绝自动发现命令。线上页面自动读取匹配版本清单。
-- Windows PowerShell 契约测试在官方 Linux PowerShell 7.4 镜像及实际 CI 镜像通过：现代/legacy 与 x86/x64/ARM64 选包、WOW64 原生目录、原生桥接编译、发现参数传递、真实 ZIP 与 SHA-256 校验、重复安装、错误输入和失败清理。CI 镜像补齐 PowerShell 所需 ICU 依赖。Windows API、IIS 和 Windows PowerShell 5.1 未在本机执行，需按 Windows 验收手册完成原生测试。
+- Windows PowerShell 契约测试在官方 Linux PowerShell 7.4 镜像及实际 CI 镜像通过：现代/legacy 与 x86/x64/ARM64 选包、WOW64 原生目录、原生桥接编译、发现参数传递、真实 ZIP 与 SHA-256 校验、重复安装、错误输入和失败清理。早期 CI 镜像补齐 ICU 后本地测试通过，但 0.1.3 流水线 319770 在 Runner 下载 apt 依赖时停滞、尚未上传 OSS；因此取消该次任务，0.1.4 改为官方 PowerShell 独立容器执行同一测试，去掉额外 apt 依赖。Windows API、IIS 和 Windows PowerShell 5.1 未在本机执行，需按 Windows 验收手册完成原生测试。
 - 发布器测试覆盖固定版/latest HTML 的 MIME 与 inline 头；使用自定义域名访问配置页，OSS 原始域名的强制下载策略不能由页面 HTML 修复。公开文件清单仍为 19 个固定版文件加 4 个 latest 入口，无测试源码上传。
 
 实际发布与公开下载结果以对应 tag 流水线、release-report.json 及公开地址验收记录为准。HTTP 注入验证不等于浏览器真实事件已入库。

@@ -43,7 +43,7 @@ while [ "$#" -gt 0 ]; do
 done
 case "$source" in
   */install.sh) cat /work/install.sh ;;
-  */rumable_0.1.3_linux_*.tar.gz) cp /work/package.tar.gz "$destination" ;;
+  */rumable_0.1.4_linux_*.tar.gz) cp /work/package.tar.gz "$destination" ;;
   *) echo 'Unexpected download URL' >&2; exit 1 ;;
 esac
 SH
@@ -66,12 +66,12 @@ if (source) {
   const response = await fetch(source, {redirect:'error'});
   if (!response.ok) throw Error(`Public manifest returned ${response.status}`);
   manifest = await response.json();
-  if (manifest.version !== '0.1.3') throw Error('This smoke fixture expects version 0.1.3');
+  if (manifest.version !== '0.1.4') throw Error('This smoke fixture expects version 0.1.4');
 } else {
   const digest = crypto.createHash('sha256').update(fs.readFileSync(work+'/package.tar.gz')).digest('hex');
-  const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.3').replaceAll(/@@LINUX_(?:386|AMD64|ARM64)_SHA256@@/g,digest);
+  const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.4').replaceAll(/@@LINUX_(?:386|AMD64|ARM64)_SHA256@@/g,digest);
   fs.writeFileSync(work+'/install.sh',script);
-  manifest = {schemaVersion:1,version:'0.1.3',artifactBase:'../0.1.3/',capabilities:['rum-setup-v1','rum-install-v1','rum-discovery-v1'],installers:{linux:{file:'install.sh',sha256:digest},windows:{file:'install.ps1',sha256:digest}},sdk:{version:'3.3.21'},packages:[{os:'linux',arch,flavor:'modern',file:`rumable_0.1.3_linux_${arch}.tar.gz`,sha256:digest}]};
+  manifest = {schemaVersion:1,version:'0.1.4',artifactBase:'../0.1.4/',capabilities:['rum-setup-v1','rum-install-v1','rum-discovery-v1'],installers:{linux:{file:'install.sh',sha256:digest},windows:{file:'install.ps1',sha256:digest}},sdk:{version:'3.3.21'},packages:[{os:'linux',arch,flavor:'modern',file:`rumable_0.1.4_linux_${arch}.tar.gz`,sha256:digest}]};
   source = 'https://oss.example.test/rumable/latest/manifest.json';
 }
 const m = {applicationId:'fixture',reporting:'datakit',endpoint:'http://127.0.0.1:18080',service,server:'nginx',sessionSampleRate:100,sessionReplayEnabled:false,defaultPrivacyLevel:'mask',sessionPersistence:'cookie'};
@@ -79,7 +79,7 @@ fs.writeFileSync(work+'/command.sh',makeCommand(m,manifest,source));
 JS
 }
 run_generated() { docker exec -e PATH=/work/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "$server" sh /work/command.sh; }
-cli() { docker exec "$server" /opt/rumable/0.1.3/rumable "$@" --state-dir /var/lib/rumable; }
+cli() { docker exec "$server" /opt/rumable/0.1.4/rumable "$@" --state-dir /var/lib/rumable; }
 generate fixture
 run_generated
 cli probe

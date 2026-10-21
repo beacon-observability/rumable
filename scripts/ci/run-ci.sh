@@ -15,16 +15,25 @@ command -v docker >/dev/null || { echo 'The release Runner requires Docker' >&2;
 : "${CI_JOB_ID:?Missing CI_JOB_ID}"
 release_container="rumable-release-${CI_JOB_ID}"
 release_image="rumable-ci:${CI_JOB_ID}"
-trap 'docker rm -f "$release_container" >/dev/null 2>&1 || true; docker image rm "$release_image" >/dev/null 2>&1 || true' EXIT
+trap 'docker rm -f "$release_container" "${release_container}-powershell" >/dev/null 2>&1 || true; docker image rm "$release_image" >/dev/null 2>&1 || true' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # No credentials enter the image or Docker build arguments.
+# Run Windows installer contracts in the vendor's complete PowerShell runtime.
+# This read-only test container has no network or release credentials and needs
+# no apt downloads or cross-distribution runtime/library copies.
+docker run --rm --init --name "${release_container}-powershell" \
+  --network none --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp/rumable-powershell \
+  --mount "type=bind,source=${CI_PROJECT_DIR},target=${CI_PROJECT_DIR},readonly" \
+  --workdir "$CI_PROJECT_DIR" \
+  "${RELEASE_POWERSHELL_IMAGE:-mcr.microsoft.com/powershell:7.4-ubuntu-22.04}" \
+  pwsh -NoLogo -NoProfile -File scripts/test-windows-installer.ps1
 docker build -t "$release_image" \
   --build-arg "MODERN_GO_IMAGE=${MODERN_GO_IMAGE:-golang:1.26.1-bookworm}" \
   --build-arg "LEGACY_GO_IMAGE=${LEGACY_GO_IMAGE:-golang:1.20.14-bookworm}" \
   --build-arg "RELEASE_NODE_IMAGE=${RELEASE_NODE_IMAGE:-node:22-bookworm}" \
-  --build-arg "RELEASE_POWERSHELL_IMAGE=${RELEASE_POWERSHELL_IMAGE:-mcr.microsoft.com/powershell:7.4-ubuntu-22.04}" \
   scripts/ci
 docker run --rm --init --name "$release_container" \
   --user "$(id -u):$(id -g)" \

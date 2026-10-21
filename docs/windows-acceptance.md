@@ -1,6 +1,6 @@
 # Windows / IIS 验收
 
-以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.3/scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
+以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.4/scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
 
 发布包提供 Windows x86/x64/ARM64 CLI；本手册的 IIS 流程仍要求 64 位 Windows 与 64 位 Windows PowerShell。x86 CLI 在 x64 系统经 Sysnative 运行管理桥接；真正 32 位 Windows 不运行本 IIS 验收。脚本核对实际架构与 build.json，ARM64 必须在对应原生系统独立验收。
 
@@ -16,16 +16,16 @@
 
 ## 一键安装入口验收（Windows x64）
 
-本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 PowerShell 5.1+、64 位 Windows、IIS 与 URL Rewrite 2.x。0.1.3 安装器自动选择原生 x64 / ARM64 和 modern / legacy 包；旧系统也要先安装适用的 PowerShell 5.1。真正 32 位 Windows 在下载前拒绝 IIS 接入。下方手工 CLI 验收仍覆盖 PS 3 基线。
+本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 PowerShell 5.1+、64 位 Windows、IIS 与 URL Rewrite 2.x。0.1.4 安装器自动选择原生 x64 / ARM64 和 modern / legacy 包；旧系统也要先安装适用的 PowerShell 5.1。真正 32 位 Windows 在下载前拒绝 IIS 接入。下方手工 CLI 验收仍覆盖 PS 3 基线。
 
-1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.3` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
+1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.4` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
 2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，按检测结果下载并校验同版本 ZIP，安装原生 CLI，再运行 `setup --discover`（手动模式为 `setup`）。记录命令退出结果；日志或截图中不要暴露令牌。
 3. 检查状态及页面资源：
 
    ```powershell
    $nativePrograms = $env:ProgramFiles
    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { $nativePrograms = $env:ProgramW6432 }
-   $rumable = Join-Path $nativePrograms 'Rumable\0.1.3\rumable.exe'
+   $rumable = Join-Path $nativePrograms 'Rumable\0.1.4\rumable.exe'
    $state = Join-Path $env:ProgramData 'Rumable'
    $site = 'auto-替换为安装输出的标识' # 手动模式则使用页面填写的标识
    & $rumable version
@@ -38,7 +38,7 @@
 5. 执行 `disable --state-dir $state --site $site`，确认新请求的 HTML 不再注入；旧版本静态资源应保留给缓存页面。再次执行 `rollback` 应恢复刚停用前的状态，最后再 `disable` 清理测试站点的注入。以上命令均由 `& $rumable` 调用，状态目录和接入标识保持一致。
 6. 如出现未完成事务，保留 `%ProgramData%\Rumable` 中的状态、日志和备份，记录失败阶段，再用 CLI 的 `rollback` 恢复；不要删除状态后盲目重装。需要验证原生提交故障、压缩继承和多应用隔离时，继续运行下方完整自动验收。
 
-一键安装和 Windows ZIP 均不包含测试源码或验收脚本。自动验收脚本从仓库对应版本 tag 获取（见第 3 节）；测试的 CLI 从 `https://static.guance.com/rumable/0.1.3/rumable_0.1.3_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
+一键安装和 Windows ZIP 均不包含测试源码或验收脚本。自动验收脚本从仓库对应版本 tag 获取（见第 3 节）；测试的 CLI 从 `https://static.guance.com/rumable/0.1.4/rumable_0.1.4_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
 
 必须单独验证的自动识别分支：x64 系统原生 PS、x64 系统 32 位 PS、ARM64 原生及模拟进程、旧系统 legacy 包、非管理员/PS 版本过低/32 位 Windows 拒绝。检查日志中检测到的版本/架构及包名，确保 32 位进程没有安装到 Program Files (x86)。单站点、多站点、多绑定、通配绑定输入、压缩确认拒绝/同意、无终端歧义拒绝、重复安装与原 ID/路径保持分别记录。
 
@@ -82,7 +82,7 @@ Windows 10 / Windows 7 可在“启用或关闭 Windows 功能”准备相应 II
 先核对 Windows ZIP 的 SHA-256 与随发布提供的 SHA256SUMS，再用资源管理器完整解压到对应目录，保留 docs 和 build.json；旧 PS 3 不需要使用 Expand-Archive。验收脚本及其夹具只在仓库中提供，必须与 CLI 的版本一致。以下示例将源码检出到 `C:\Rumable\source`，不向安装目录复制测试源码：
 
 ```powershell
-git clone --depth 1 --branch release-oss-v0.1.3 ssh://git@gitlab.jiagouyun.com:40022/guance/rumable.git C:\Rumable\source
+git clone --depth 1 --branch release-oss-v0.1.4 ssh://git@gitlab.jiagouyun.com:40022/guance/rumable.git C:\Rumable\source
 ```
 
 也可以登录 GitLab 下载该 tag 的源码归档，完整解压到上述目录；需有仓库读取权限。下面的脚本使用绝对路径，`-Binary` 始终指向单独解压的正式安装包。

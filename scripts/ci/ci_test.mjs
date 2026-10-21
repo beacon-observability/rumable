@@ -144,7 +144,6 @@ test('CI builds the pinned SDK and matching commit, and emits a credential-free 
   assert(build.includes('--skip-sdk-sync'));
   assert(build.includes(revision));
   assert(build.includes('/opt/go-legacy/bin/go'));
-  assert(commands.some(([command]) => command === 'pwsh'));
   assert.equal(report.status, 'verified');
   const content = fs.readFileSync(path.join(f.cwd, 'release-report.json'), 'utf8');
   assert(!content.includes(env.OSS_ACCESS_KEY_SECRET));

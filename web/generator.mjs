@@ -117,7 +117,7 @@ function base64(text) {
 // until the user runs this command; the base URL follows the selected manifest.
 export function makeCommand(m, manifest, manifestURL) {
   validateManifest(manifest, manifestURL);
-  if (!m.manualTarget && !manifest.capabilities.includes('rum-discovery-v1')) throw Error('此版本不支持自动发现站点，请选择 0.1.3 或更新版本，或启用手动指定站点');
+  if (!m.manualTarget && !manifest.capabilities.includes('rum-discovery-v1')) throw Error('此版本不支持自动发现站点，请选择 0.1.4 或更新版本，或启用手动指定站点');
   const config = base64(makeConfig(m));
   const base = new URL(manifest.artifactBase || '.', manifestURL).href;
   if (m.server === 'iis') {
