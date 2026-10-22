@@ -27,7 +27,7 @@ function fixture(t, version = '0.1.0') {
     files.set(file, Buffer.from(file));
     packages.push({os, arch, flavor, file, sha256:sha256(files.get(file))});
   }
-  for (const name of ['index.html', 'app.mjs', 'generator.mjs', 'styles.css']) files.set(`setup/${name}`, Buffer.from('page fixture'));
+  for (const name of ['index.html', 'app.mjs', 'generator.mjs', 'i18n.mjs', 'styles.css']) files.set(`setup/${name}`, Buffer.from('page fixture'));
   const installers = {};
   for (const [platform,file] of [['linux','install.sh'],['windows','install.ps1']]) {
     const content = Buffer.from('installer fixture'); files.set(file, content);
@@ -67,11 +67,11 @@ test('preflight rejects missing/tampered files, incorrect platform hashes and co
   const f = fixture(t);
   const artifacts = f.load();
   assert.equal(artifacts.at(-1).name, 'manifest.json');
-  assert.equal(artifacts.length, 19);
+  assert.equal(artifacts.length, 20);
   fs.writeFileSync(path.join(f.directory, 'setup/app.mjs'), 'tampered');
   assert.throws(f.load, /checksum/);
   f.save();
-  fs.unlinkSync(path.join(f.directory, 'setup/styles.css'));
+  fs.unlinkSync(path.join(f.directory, 'setup/i18n.mjs'));
   assert.throws(f.load, /Missing/);
   f.save();
   assert.throws(() => artifactsFromDirectory(f.directory, version, 'b'.repeat(40)), /commit/);

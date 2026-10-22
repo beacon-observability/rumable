@@ -60,7 +60,7 @@ export function artifactsFromDirectory(directory, version, revision) {
   }
   const publicFiles = new Set([
     'manifest.json', 'sdk.json', 'install.sh', 'install.ps1',
-    'setup/index.html', 'setup/app.mjs', 'setup/generator.mjs', 'setup/styles.css',
+    'setup/index.html', 'setup/app.mjs', 'setup/generator.mjs', 'setup/i18n.mjs', 'setup/styles.css',
     ...manifest.packages.map(p => p.file),
   ]);
   // Checksums prove integrity, not eligibility for public distribution. Reject

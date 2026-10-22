@@ -208,7 +208,7 @@ func run() error {
 	// User documents, examples and licenses stay inside the platform archives.
 	public := map[string][]byte{"sdk.json": shared["sdk.json"]}
 	// Publish the matching configuration page alongside this immutable version.
-	for _, name := range []string{"index.html", "app.mjs", "generator.mjs", "styles.css"} {
+	for _, name := range []string{"index.html", "app.mjs", "generator.mjs", "i18n.mjs", "styles.css"} {
 		public["setup/"+name], err = os.ReadFile(filepath.Join("web", name))
 		if err != nil {
 			return err
