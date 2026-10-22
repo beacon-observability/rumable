@@ -210,7 +210,7 @@ document.querySelector('#canvas').onclick=function(){var c=document.querySelecto
 		}
 		if r.URL.Path == "/script-head" {
 			w.Header().Set("Content-Security-Policy", "script-src 'self' 'nonce-dGVzdA=='; worker-src blob:; connect-src 'self' http://127.0.0.1:19181")
-			io.WriteString(w, `<!doctype html><html><head><title>Head anchor regression</title><script nonce="dGVzdA==">window.template="</head>";window.businessRan=true;</script></head><body><h1>Head anchor regression</h1><p id="business"></p><button id="inspect">Inspect SDK</button><pre id="sdk"></pre><script nonce="dGVzdA==">document.querySelector('#business').textContent=window.businessRan&&window.template==="</head>"?'Business script passed':'Business script FAILED';document.querySelector('#inspect').onclick=function(){document.querySelector('#sdk').textContent=JSON.stringify({rumable:window.__RUMABLE__,sdk:!!window.DATAFLUX_RUM})};</script></body></html>`)
+			io.WriteString(w, `<!doctype html><html><head><title>Head anchor regression</title><script nonce="dGVzdA==">window.template="</head>";window.businessRan=true;</script></head><body><h1>Head anchor regression</h1><p id="business"></p><button id="inspect">Inspect injection</button><pre id="sdk"></pre><script nonce="dGVzdA==">document.querySelector('#business').textContent=window.businessRan&&window.template==="</head>"?'Business script passed':'Business script FAILED';document.querySelector('#inspect').onclick=function(){document.querySelector('#sdk').textContent=JSON.stringify({rumable:window.__RUMABLE__})};</script></body></html>`)
 			return
 		}
 		if r.URL.Path == "/business" {

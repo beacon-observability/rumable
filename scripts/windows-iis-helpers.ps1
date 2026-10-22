@@ -14,7 +14,7 @@ function Get-SHA256([byte[]]$Bytes) {
     finally { $sha.Dispose() }
 }
 
-function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity') {
+function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity', [switch]$UseCache) {
     $uri = [uri]$Url
     Assert-That ($uri.Scheme -eq 'http' -and $uri.Host -eq '127.0.0.1') 'Acceptance HTTP requests must stay on loopback.'
     $request = [Net.HttpWebRequest]::Create($uri)
@@ -24,7 +24,7 @@ function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity') {
     $request.Timeout = 5000
     $request.ReadWriteTimeout = 5000
     $request.Headers['Accept-Encoding'] = $Encoding
-    $request.Headers['Cache-Control'] = 'no-cache'
+    if (-not $UseCache) { $request.Headers['Cache-Control'] = 'no-cache' }
     $request.AutomaticDecompression = [Net.DecompressionMethods]::None
     $response = $null
     try {
@@ -96,9 +96,11 @@ function Get-DeploymentKey($State) {
 
 function Get-TestLocalCompression([string]$SiteName, [string]$App) {
     [xml]$xml = [IO.File]::ReadAllText((Join-Path $env:SystemRoot 'System32/inetsrv/config/applicationHost.config'))
-    $location = @($xml.configuration.location | Where-Object { $_.path -ieq ($SiteName + $App) }) | Select-Object -First 1
+    $target = $SiteName
+    if ($App -ne '/') { $target += $App }
+    $location = $xml.SelectNodes('/configuration/location') | Where-Object { $_.GetAttribute('path') -ieq $target } | Select-Object -First 1
     $compression = $null
-    if ($null -ne $location) { $compression = $location.'system.webServer'.urlCompression }
+    if ($null -ne $location) { $compression = $location.SelectSingleNode('system.webServer/urlCompression') }
     $present = $null -ne $compression -and $compression.HasAttribute('doStaticCompression')
     $value = $null
     if ($present) { $value = $compression.GetAttribute('doStaticCompression') }
@@ -158,16 +160,21 @@ function Set-TestRuleValue([string]$SiteName, [string]$App, [string]$Name, [stri
 }
 
 function Assert-TestPage([string]$BaseUrl, [string]$Path, [string]$Id, $State, [bool]$Enabled, [string]$ParentValue) {
-    $page = Invoke-TestHttp ($BaseUrl + $Path)
-    Assert-That ($page.status -eq 200) ('HTTP ' + $page.status + ': ' + $Path)
-    Assert-That ($page.headers['X-Rumable-Parent'] -eq $ParentValue) 'Inherited business rule changed.'
-    Assert-That ($page.headers['X-Rumable-Child'] -eq 'child') 'Local business rule changed.'
-    $count = [regex]::Matches($page.text, ('data-rumable="' + $Id + '"')).Count
-    if ($Enabled) {
-        Assert-That ($count -eq 1 -and $page.text.Contains($State.current.script)) ('Expected one current injection: ' + $Path)
-        Assert-That (-not $page.headers['ETag'] -or $page.headers['ETag'].StartsWith('W/')) 'Rewritten HTML kept a strong ETag.'
-    } else { Assert-That ($count -eq 0) ('Injection survived disable: ' + $Path) }
-    return $page
+    $identity = $null
+    foreach ($attempt in @(0,1,2,3)) {
+        if ($attempt -eq 0) { $page = Invoke-TestHttp ($BaseUrl + $Path); $identity = $page }
+        else { $page = Invoke-TestHttp ($BaseUrl + $Path) 'gzip, deflate, br, zstd' -UseCache }
+        $evidence = ' variant=' + $attempt + ' headers=' + ($page.headers | ConvertTo-Json -Compress)
+        Assert-That ($page.status -eq 200) ('HTTP ' + $page.status + ': ' + $Path)
+        Assert-That ($page.headers['X-Rumable-Parent'] -eq $ParentValue) 'Inherited business rule changed.'
+        Assert-That ($page.headers['X-Rumable-Child'] -eq 'child') 'Local business rule changed.'
+        $count = [regex]::Matches($page.text, ('data-rumable="' + $Id + '"')).Count
+        if ($Enabled) {
+            Assert-That ($count -eq 1 -and $page.text.Contains($State.current.script)) ('Expected one current injection: ' + $Path + $evidence)
+            Assert-That (-not $page.headers['ETag'] -or $page.headers['ETag'].StartsWith('W/')) 'Rewritten HTML kept a strong ETag.'
+        } else { Assert-That ($count -eq 0) ('Injection survived disable: ' + $Path + $evidence) }
+    }
+    return $identity
 }
 
 function Assert-TestAssets([string]$BaseUrl, [string]$Id, $State) {

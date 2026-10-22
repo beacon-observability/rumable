@@ -82,6 +82,20 @@ public class TestVirtualCollection {
     $virtuals.Value.PhysicalPath = Join-Path $request.root 'foreign-public'
     try { Restore-Nodes $restore; throw 'Foreign mapping removed.' } catch { if ($_.Exception.Message -notlike '*owned by another deployment*') { throw } }
     if ($null -eq $virtuals.Value) { throw 'Uninstall deleted a foreign resource mapping.' }
+    # Windows 5.1 XML adaptation turns empty elements into System.String.
+    # Both forms occur after Delete() removes the last local attribute.
+    $fixture = [IO.File]::ReadAllText($configPath)
+    foreach ($emptyCompression in @('<urlCompression />', '<urlCompression></urlCompression>', '', '<urlCompression doDynamicCompression="false" />')) {
+        [IO.File]::WriteAllText($configPath, $fixture.Replace('<urlCompression doStaticCompression="true" doDynamicCompression="false" />', $emptyCompression))
+        $empty = Read-Snapshot
+        if ($empty.compressionPresent -or $null -ne $empty.compressionValue) { throw 'Empty/absent static compression override changed snapshot semantics.' }
+        if ($empty.rules.Count -ne 1 -or $empty.preconditions.Count -ne 1) { throw 'Empty compression node lost owned rules.' }
+        Assert-Snapshot ($empty | ConvertTo-Json -Depth 30 | ConvertFrom-Json) $empty
+    }
+    [IO.File]::WriteAllText($configPath, '<configuration><location path="Default Web Site/App"><system.webServer><rewrite><outboundRules><preConditions></preConditions></outboundRules></rewrite><urlCompression /></system.webServer></location></configuration>')
+    $empty = Read-Snapshot
+    if ($empty.compressionPresent -or $empty.rules.Count -or $empty.preconditions.Count -or $null -ne $empty.virtualDirectory) { throw 'Committed disable with empty XML nodes was not readable.' }
+    [IO.File]::WriteAllText($configPath, $fixture)
     $target = 'Other Site'; $site.iis.site = 'Other Site'
     $empty = Read-Snapshot
     if ($empty.compressionPresent -or $empty.rules.Count -or $null -ne $empty.virtualDirectory) { throw 'Snapshot captured another site.' }

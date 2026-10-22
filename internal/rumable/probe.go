@@ -14,6 +14,11 @@ import (
 
 var httpClient = &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
 
+// Match the browser negotiation that exposed the IIS 0.1.5 cached HTML gap.
+// An unsupported response encoding fails closed; never inspect compressed bytes
+// as HTML or claim that a variant we could not decode passed.
+const browserAcceptEncoding = "gzip, deflate, br, zstd"
+
 type Page struct {
 	URL    string
 	Header http.Header
@@ -49,8 +54,8 @@ func getPage(raw string, headers http.Header) (Page, error) {
 	}
 	var body io.Reader = resp.Body
 	if e := resp.Header.Get("Content-Encoding"); e != "" && e != "identity" {
-		if e != "gzip" || r.Header.Get("Accept-Encoding") != "gzip" {
-			return Page{}, fmt.Errorf("%s: encoded response %q for Accept-Encoding %q; fix source compression", raw, e, r.Header.Get("Accept-Encoding"))
+		if e != "gzip" || (r.Header.Get("Accept-Encoding") != "gzip" && r.Header.Get("Accept-Encoding") != browserAcceptEncoding) {
+			return Page{}, fmt.Errorf("%s: cannot verify encoded response %q for Accept-Encoding %q; review source compression (%s)", raw, e, r.Header.Get("Accept-Encoding"), responseEvidence(resp.Header))
 		}
 		decoded, err := gzip.NewReader(resp.Body)
 		if err != nil {
@@ -209,7 +214,41 @@ func probePage(s Site, path string, expected *Snapshot) (ProbeResult, error) {
 	if other.Script != r.Script {
 		return r, errors.New("gzip variant uses a different bootstrap URL; clear HTML caches")
 	}
+	// no-cache and a single cold gzip request can both hide stale IIS/edge cache
+	// entries. Reuse the exact URL with normal browser negotiation and no cache
+	// bypass, checking every response, including after the cache warms up.
+	for attempt := 1; attempt <= 3; attempt++ {
+		browser, err := getPage(pageURL(s, path), http.Header{
+			"Accept-Encoding": {browserAcceptEncoding},
+			"Accept":          {"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+			"Cache-Control":   nil,
+		})
+		if err != nil {
+			return r, fmt.Errorf("browser cache variant %d: %w", attempt, err)
+		}
+		cached, err := inspectInjection(s, browser, expected)
+		if err == nil && cached.Script != r.Script {
+			err = errors.New("uses a different bootstrap URL")
+		}
+		if err != nil {
+			return r, fmt.Errorf("browser cache variant %d (%s): %w; inspect effective per-URL compression and HTML caches", attempt, responseEvidence(browser.Header), err)
+		}
+	}
 	return r, nil
+}
+
+// Record only headers needed to diagnose compression/cache variants. Avoid
+// response bodies, cookies and other potentially secret response headers.
+func responseEvidence(h http.Header) string {
+	var fields []string
+	for _, name := range []string{"Content-Type", "Content-Encoding", "Vary", "Age", "ETag", "Last-Modified", "Server"} {
+		value := h.Get(name)
+		if len(value) > 256 {
+			value = value[:256]
+		}
+		fields = append(fields, fmt.Sprintf("%s=%q", name, value))
+	}
+	return strings.Join(fields, ", ")
 }
 
 func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {

@@ -1,6 +1,8 @@
 #requires -Version 3.0
 param([string]$Binary, [string]$FixtureBaseUrl)
 $ErrorActionPreference = 'Stop'
+# Windows has TEMP; the portable Linux contract host may not.
+if (-not $env:TEMP) { $env:TEMP = [IO.Path]::GetTempPath() }
 . (Join-Path $PSScriptRoot 'windows-iis-helpers.ps1')
 foreach ($path in @('windows-smoke.ps1','windows-iis-helpers.ps1','windows-cleanup.ps1')) {
     $tokens = $null; $errors = $null
@@ -17,6 +19,34 @@ try {
     $bytes = [IO.File]::ReadAllBytes($configPath)
     Assert-That (-not ($bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191)) 'Config unexpectedly has a BOM.'
     Assert-That ((Get-SHA256 ([Text.Encoding]::UTF8.GetBytes('abc'))) -eq 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') 'SHA-256 contract failed.'
+    $savedSystemRoot = $env:SystemRoot
+    try {
+        $env:SystemRoot = $temporary
+        foreach ($app in @('/', '/app')) {
+            $target = 'Test'; if ($app -ne '/') { $target += $app }
+            foreach ($node in @('', '<urlCompression />', '<urlCompression doStaticCompression="false" />')) {
+                Write-Utf8 (Join-Path $temporary 'System32/inetsrv/config/applicationHost.config') ('<configuration><location path="'+$target+'"><system.webServer>'+$node+'</system.webServer></location></configuration>')
+                $local = Get-TestLocalCompression 'test' $app
+                Assert-That ($local.present -eq $node.Contains('doStaticCompression')) 'Acceptance helper lost empty/root/subapp compression state.'
+                if ($local.present) { Assert-That ($local.value -ceq 'false') 'Acceptance helper changed local compression value.' }
+            }
+        }
+    } finally { $env:SystemRoot = $savedSystemRoot }
+    & {
+        function Invoke-TestHttp([string]$Url, [string]$Encoding='identity', [switch]$UseCache) {
+            $script:variantCalls++
+            if ($script:variantCalls -gt 1) { Assert-That ($UseCache -and $Encoding -ceq 'gzip, deflate, br, zstd') 'Acceptance bypassed browser cache variant.' }
+            $text = '<script data-rumable="test" src="/init.js"></script>'
+            if ($script:missWarmCache -and $script:variantCalls -eq 4) { $text = '<html><head></head></html>' }
+            return @{status=200;headers=@{'X-Rumable-Parent'='parent';'X-Rumable-Child'='child';'Content-Encoding'='gzip'};text=$text}
+        }
+        foreach ($script:missWarmCache in @($false, $true)) {
+            $script:variantCalls=0; $rejected=$false
+            try { [void](Assert-TestPage 'http://127.0.0.1' '/index.html' 'test' @{current=@{script='/init.js'}} $true 'parent') }
+            catch { if ($_.Exception.Message -notlike 'Expected one current injection:*') { throw }; $rejected=$true }
+            Assert-That ($script:variantCalls -eq 4 -and $rejected -eq $script:missWarmCache) 'Acceptance failed to detect warm cached HTML without injection.'
+        }
+    }
     if ($Binary) {
         $Binary = (Resolve-Path -LiteralPath $Binary).Path
         $log = Join-Path $temporary 'cli.log'

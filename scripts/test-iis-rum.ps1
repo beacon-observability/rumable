@@ -49,6 +49,11 @@ foreach ($legacy in @($false,$true)) {
 }
 $request.injection=''
 Assert-That ((ConvertTo-CanonicalOwnedXml '<add input="{URL}" pattern="/" negate="false" />') -ceq (ConvertTo-CanonicalOwnedXml '<add pattern="/" input="{URL}" />')) 'MWA default attributes do not compare'
+foreach ($tag in @('rule','preCondition')) {
+    $defaults = if ($tag -eq 'rule') { ' enabled="true" stopProcessing="false" patternSyntax="ECMAScript"' } else { ' logicalGrouping="MatchAll" patternSyntax="ECMAScript"' }
+    Assert-That ((ConvertTo-CanonicalOwnedXml ('<'+$tag+' name="rumable-test-owned"'+$defaults+' />')) -ceq (ConvertTo-CanonicalOwnedXml ('<'+$tag+' name="rumable-test-owned" />'))) ('XML name attribute hid the '+$tag+' tag during canonical comparison')
+}
+Assert-That ((ConvertTo-CanonicalOwnedXml '<rule name="a" />') -cne (ConvertTo-CanonicalOwnedXml '<preCondition name="a" />')) 'Different XML tag names compared equal'
 Assert-That ((ConvertTo-CanonicalOwnedXml '<rule name="a"><match pattern="x" /></rule>') -cne (ConvertTo-CanonicalOwnedXml '<rule name="a" enabled="false"><match pattern="x" /></rule>')) 'Unknown behavioral change ignored'
 
 # Exercise the real Import-Element/Restore-Nodes against returning collection
@@ -65,10 +70,14 @@ using System.Collections;
 public class ReturningElement {
     public Hashtable Values = new Hashtable();
     public ReturningCollection Collection = new ReturningCollection();
+    public Hashtable Children = new Hashtable();
     public void SetAttributeValue(string k, object v) { Values[k]=v; }
     public object GetAttributeValue(string k) { return Values[k]; }
     public ReturningCollection GetCollection() { return Collection; }
-    public ReturningElement GetChildElement(string name) { return new ReturningElement(); }
+    public ReturningElement GetChildElement(string name) {
+        if (!Children.ContainsKey(name)) Children[name] = new ReturningElement();
+        return (ReturningElement)Children[name];
+    }
 }
 public class ReturningCollection : IEnumerable {
     public ArrayList Items = new ArrayList();
@@ -106,4 +115,31 @@ $request.snapshot=$original
 $restore=@($apply.Clauses | Where-Object { $_.Item1.Extent.Text -eq "`$request.action -eq 'restore'" })[0].Item2.Extent.Text
 $output=@(& ([scriptblock]::Create($restore.Substring(1,$restore.Length-2))))
 Assert-That ($output.Count -eq 1 -and $rules.Count -eq 0 -and $preconditions.Count -eq 0) 'Real restore branch leaked output or retained rules'
+# Restore a real nonempty snapshot after JSON persistence (the 0.1.5 rollback
+# failed here because XML's name attribute shadowed DocumentElement.Name).
+$nodes=Get-RumNodes
+$request.snapshot=@{rules=$nodes.rules;preconditions=$nodes.preconditions;virtualDirectory=$null;compressionPresent=$false;compressionValue=$null} | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+$business=$rules.CreateElement('rule');$business.SetAttributeValue('name','business-rule');[void]$rules.Add($business)
+foreach ($attempt in @(1,2)) {
+    $output=@(& ([scriptblock]::Create($restore.Substring(1,$restore.Length-2))))
+    Assert-That ($output.Count -eq 1 -and $null -ne ($output[0] | ConvertFrom-Json).rules) 'Nonempty restore contaminated JSON output'
+    Assert-That ($rules.Count -eq 4 -and $preconditions.Count -eq 1 -and $rules[0].GetAttributeValue('name') -ceq 'business-rule') 'Nonempty restore lost owned or business rules'
+    Assert-That ($rules[1].GetChildElement('match').Values['occurrences'] -is [int]) 'Restore lost numeric schema type'
+    Assert-That ($rules[1].GetChildElement('conditions').Collection[1].Values['negate'] -eq $true) 'Restore lost exclusion condition'
+    Assert-That ($rules[2].GetChildElement('action').Values['value'] -ceq '') 'Restore lost empty response-header action'
+}
+foreach ($field in @('rules','preconditions')) {
+    foreach ($foreign in @('<rule name="foreign" />','<preCondition name="foreign" />','<unexpected name="rumable-test-owned" />')) {
+        $bad=@{rules=@();preconditions=@();virtualDirectory=$null;compressionPresent=$false;compressionValue=$null};$bad[$field]=@($foreign)
+        $rejected=$false
+        try { Restore-Nodes $bad } catch { $rejected=$_.Exception.Message -like 'Invalid owned * in snapshot.' }
+        Assert-That $rejected ('Restore accepted foreign '+$field)
+    }
+}
+# A disable can commit before its bridge output fails. Recovery must recognize
+# exactly that result, retaining assets, and reject unrelated changes.
+$request.previous=@{rules=$nodes.rules;preconditions=$nodes.preconditions;virtualDirectory=$live.virtualDirectory;compressionPresent=$true;compressionValue='false'}
+$request.enabled=$false
+$disabled=@{rules=@();preconditions=@();virtualDirectory=$live.virtualDirectory;compressionPresent=$false;compressionValue=$null}
+Assert-PendingRumSnapshot ($disabled | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
 Write-Host 'PASS: null/empty/custom path rules, subapplication paths, exact old-journal recovery, drift rejection, and MWA collection output suppression.'

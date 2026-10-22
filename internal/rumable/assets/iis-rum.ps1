@@ -62,10 +62,11 @@ function ConvertTo-CanonicalOwnedXml([string]$text) {
             'preCondition/logicalGrouping'='MatchAll'; 'preCondition/patternSyntax'='ECMAScript'
             'add/negate'='false'; 'add/ignoreCase'='true'; 'action/value'=''
         }
-        $attributes = @($node.Attributes | Where-Object { $defaults[($node.Name + '/' + $_.Name)] -cne $_.Value } | Sort-Object Name | ForEach-Object { @($_.Name, $_.Value) })
+        $nodeName = $node.get_Name()
+        $attributes = @($node.Attributes | Where-Object { $defaults[($nodeName + '/' + $_.Name)] -cne $_.Value } | Sort-Object Name | ForEach-Object { @($_.Name, $_.Value) })
         $children = @($node.ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element } | ForEach-Object { Canonical-Node $_ })
         if (@($node.ChildNodes | Where-Object { $_.NodeType -notin @([Xml.XmlNodeType]::Element,[Xml.XmlNodeType]::Whitespace,[Xml.XmlNodeType]::SignificantWhitespace) }).Count) { throw 'Unexpected content in owned IIS XML.' }
-        return ,@($node.Name, $attributes, $children)
+        return ,@($nodeName, $attributes, $children)
     }
     return ConvertTo-Json -InputObject (Canonical-Node $doc.DocumentElement) -Depth 40 -Compress
 }

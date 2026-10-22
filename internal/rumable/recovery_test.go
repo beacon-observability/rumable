@@ -7,10 +7,107 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+// 0.1.5 could remove the rules and commit disable, then crash while reading
+// <urlCompression />. The journal has neither a receipt nor after.native.
+func TestIISDisableUnacknowledgedCommitRecovery(t *testing.T) {
+	root := t.TempDir()
+	s := testSite()
+	s.Nginx, s.IIS = nil, &IIS{Site: "Website", Application: "/"}
+	original := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":null,"compressionPresent":false,"compressionValue":null}`)
+	active := json.RawMessage(`{"rules":["owned rules"],"preconditions":["owned preconditions"],"virtualDirectory":"owned mapping","compressionPresent":true,"compressionValue":"false"}`)
+	disabled := json.RawMessage(`{"rules":[],"preconditions":[],"virtualDirectory":"owned mapping","compressionPresent":false,"compressionValue":null}`)
+	live := active
+	var enabled Snapshot
+	var assets map[string][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, s.assetPrefix()) {
+			w.Header().Set("Content-Type", "application/javascript")
+			w.Write(assets["public/"+s.ID+"/"+strings.TrimPrefix(r.URL.Path, s.assetPrefix())])
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, "<html><head>")
+		if sameJSON(live, active) {
+			io.WriteString(w, injectionTags(enabled))
+		}
+		io.WriteString(w, "</head><body>Original</body></html>")
+	}))
+	defer server.Close()
+	s.PublicURL = server.URL + "/"
+	st, err := prepare(root, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled, assets, err = render(root, s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled.Native = active
+	st.Current, st.OriginalIIS = enabled, original
+	if err = deployAssets(root, s, assets); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range enabled.Files {
+		if err = atomicWrite(filepath.Join(siteDir(root, s), name), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = saveState(root, st); err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := render(root, s, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = writeJSON(journalPath(root, s), transaction{Before: st, After: target}); err != nil {
+		t.Fatal(err)
+	}
+	live = disabled
+	checks := 0
+	bridge := iisCommand
+	t.Cleanup(func() { iisCommand = bridge })
+	iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
+		switch action {
+		case "inspect":
+			return live, nil
+		case "recover-pending-check":
+			checks++
+			if extra["enabled"] != false || !sameJSON(extra["previous"].(json.RawMessage), active) {
+				t.Fatal("disable recovery lost saved operation")
+			}
+			return live, nil
+		case "restore":
+			if !sameJSON(extra["expected"].(json.RawMessage), live) {
+				t.Fatal("recovery lost drift guard")
+			}
+			data, _ := os.ReadFile(journalPath(root, s))
+			var receipt transaction
+			if json.Unmarshal(data, &receipt) != nil || !receipt.NativeCommitted || !sameJSON(receipt.After.Native, disabled) {
+				t.Fatal("disable receipt not durable before restore")
+			}
+			live = extra["snapshot"].(json.RawMessage)
+			return live, nil
+		default:
+			return nil, errors.New("unexpected action: " + action)
+		}
+	}
+	if err = rollback(root, st, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadState(root, s.ID)
+	if err != nil || !got.Current.Enabled || !sameJSON(got.Current.Native, active) || checks != 1 {
+		t.Fatal("disable failure did not recover enabled baseline", err)
+	}
+	if _, err = os.Stat(journalPath(root, s)); !os.IsNotExist(err) {
+		t.Fatal("recovered disable retained transaction", err)
+	}
+}
 
 func TestIISFirstEnableRecoveryRetainsMapping(t *testing.T) {
 	root := t.TempDir()

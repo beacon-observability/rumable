@@ -36,23 +36,26 @@ try {
     function Read-Snapshot {
         # Capture only owned XML nodes and the exact local compression attribute.
         [xml]$xml = [IO.File]::ReadAllText($configPath)
-        $location = @($xml.configuration.location | Where-Object { $_.path -ieq $target }) | Select-Object -First 1
+        # Use DOM methods: PowerShell's XML adapter turns empty elements into
+        # strings and lets attributes (notably name) hide DOM properties.
+        $location = $xml.SelectNodes('/configuration/location') | Where-Object { $_.GetAttribute('path') -ieq $target } | Select-Object -First 1
         $ownedRules = @()
         $ownedPreconditions = @()
         if ($null -ne $location) {
-            $ownedRules = @($location.'system.webServer'.rewrite.outboundRules.rule | Where-Object { $null -ne $_ -and $_.name.StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.OuterXml })
-            $ownedPreconditions = @($location.'system.webServer'.rewrite.outboundRules.preConditions.preCondition | Where-Object { $null -ne $_ -and $_.name.StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.OuterXml })
+            $ownedRules = @($location.SelectNodes('system.webServer/rewrite/outboundRules/rule') | Where-Object { $_.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.get_OuterXml() })
+            $ownedPreconditions = @($location.SelectNodes('system.webServer/rewrite/outboundRules/preConditions/preCondition') | Where-Object { $_.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.get_OuterXml() })
         }
         $localCompression = $null
-        if ($null -ne $location) { $localCompression = $location.'system.webServer'.urlCompression }
+        if ($null -ne $location) { $localCompression = $location.SelectSingleNode('system.webServer/urlCompression') }
         $present = $null -ne $localCompression -and $localCompression.HasAttribute('doStaticCompression')
         $value = $null
         if ($present) { $value = $localCompression.GetAttribute('doStaticCompression') }
-        $xmlSite = @($xml.configuration.'system.applicationHost'.sites.site | Where-Object { $_.name -ieq $site.iis.site }) | Select-Object -First 1
-        $xmlApp = @($xmlSite.application | Where-Object { $_.path -ieq $site.iis.application }) | Select-Object -First 1
-        $virtual = @($xmlApp.virtualDirectory | Where-Object { $_.path -ieq $vpath }) | Select-Object -First 1
+        $xmlSite = $xml.SelectNodes('/configuration/system.applicationHost/sites/site') | Where-Object { $_.GetAttribute('name') -ieq $site.iis.site } | Select-Object -First 1
+        $xmlApp = $null; $virtual = $null
+        if ($null -ne $xmlSite) { $xmlApp = $xmlSite.SelectNodes('application') | Where-Object { $_.GetAttribute('path') -ieq $site.iis.application } | Select-Object -First 1 }
+        if ($null -ne $xmlApp) { $virtual = $xmlApp.SelectNodes('virtualDirectory') | Where-Object { $_.GetAttribute('path') -ieq $vpath } | Select-Object -First 1 }
         $virtualXml = $null
-        if ($null -ne $virtual) { $virtualXml = $virtual.OuterXml }
+        if ($null -ne $virtual) { $virtualXml = $virtual.get_OuterXml() }
         $snapshot = @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value }
         if ($null -ne $site.otel) { $snapshot.otel = Read-OTelSnapshot }
         return $snapshot
@@ -73,13 +76,13 @@ try {
         }
         foreach ($child in $xmlNode.ChildNodes) {
             if ($child.NodeType -ne [Xml.XmlNodeType]::Element) { continue }
-            if ($child.Name -eq 'add') {
+            if ($child.get_Name() -eq 'add') {
                 $collection = $element.GetCollection()
                 $new = $collection.CreateElement('add')
                 Import-Element $new $child
                 [void]$collection.Add($new)
             } else {
-                Import-Element ($element.GetChildElement($child.Name)) $child
+                Import-Element ($element.GetChildElement($child.get_Name())) $child
             }
         }
     }
@@ -101,7 +104,7 @@ try {
         foreach ($text in @($snapshot.rules)) {
             if ([string]::IsNullOrEmpty($text)) { continue }
             [xml]$doc = $text
-            if ($doc.DocumentElement.Name -ne 'rule' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned rule in snapshot.' }
+            if ($doc.DocumentElement.get_Name() -cne 'rule' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned rule in snapshot.' }
             $element = $rules.CreateElement('rule')
             Import-Element $element $doc.DocumentElement
             [void]$rules.Add($element)
@@ -109,7 +112,7 @@ try {
         foreach ($text in @($snapshot.preconditions)) {
             if ([string]::IsNullOrEmpty($text)) { continue }
             [xml]$doc = $text
-            if ($doc.DocumentElement.Name -ne 'preCondition' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned precondition in snapshot.' }
+            if ($doc.DocumentElement.get_Name() -cne 'preCondition' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned precondition in snapshot.' }
             $element = $preconditions.CreateElement('preCondition')
             Import-Element $element $doc.DocumentElement
             [void]$preconditions.Add($element)

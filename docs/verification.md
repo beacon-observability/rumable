@@ -1,5 +1,23 @@
 # 实现验证记录
 
+## 0.1.6 XML 恢复与浏览器缓存验收修复（2026-10-22）
+
+0.1.5 Windows 实测为 51 项中通过 36、失败 9、未验证 6。用户提供的 PowerShell 5.1 证据确认：空 `<urlCompression />` 被适配成字符串；带 name 属性的 rule/preCondition 遮盖了 DOM Name；浏览器请求静态 second.html 收到未注入的 gzip，而 identity 请求有注入。真实 IIS 未在本机运行。
+
+本轮修复 DOM 空节点读取、非空规则/前置条件恢复以及带 name 属性的规范化比较。恢复逻辑保留原事务与外部变更保护；停用已提交但无 after.native 的日志，仍按原事务精确核对后恢复启用基线。Windows 验收辅助程序同步修正空节点和根应用读取。
+
+探测增加每个 URL 三次不绕过缓存的浏览器压缩组合请求，核查首次及热缓存响应；发现缺少/重复注入、旧脚本或停用残留时非零失败并走既有回滚。解码支持 identity/gzip，其他编码明确拒绝验收，错误仅包含白名单响应头。**没有证据确定原 Windows gzip 来自哪一层；本轮没有自动清缓存或改变全局压缩，因此不能把验收漏洞修复描述成 gzip 根因已消除。** 原生复测见 [0.1.4 / 0.1.5 恢复指南](windows-0.1.4-recovery.md)。
+
+已完成的发布前验证：
+
+- 新回归在修复前复现 HasAttribute、命名规则默认值比较错误及浏览器缓存漏检；修复后通过。
+- Go 1.26.1 / Go 1.20.14 全量 test/vet 通过，含停用提交响应丢失后的真实事务/HTTP 恢复，现代编译器约 16 秒、legacy 约 17 秒。
+- 官方 PowerShell 7.4/Linux 容器五组测试通过：安装器、快照、RUM 规则、OTel 和 Windows 验收程序边界。包含空/缺失/非空压缩节点、真实 apply/restore 分支、三条非空规则与 preCondition JSON 往返恢复、重复恢复、外部规则拒绝、旧日志及停用丢失响应、热缓存失败识别。MWA API 使用返回对象的集合替身，不能代替 Windows PowerShell 5.1 / 原生 IIS。
+- Node 页面、安装器、发布工具与 CI 共 32 项通过。
+- Linux ARM64 / Nginx 1.28.3 完整 smoke 通过，含静态/反代/压缩/缓存/启停/回滚/故障恢复；一键发现流程通过安装、幂等、env 更新、回滚、停用、精确撤销和未选站点隔离，发布前下载采用本地归档替身。修正 /script-head 测试页中 SDK 查看按钮触发已有接入检测的问题，保留业务 `</head>` 字符串验证。
+
+性能边界：每个 probe URL 增加三次串行 HTTP 请求；脚本和 SDK 摘要仍每轮去重，不额外重复下载。三次有限请求无法覆盖任意延迟压缩、所有缓存和业务 URL。原生 Windows、ARM64/旧 Windows 及真实观测云入库仍需各自环境验收。
+
 ## 0.1.5 Windows 实测反馈修复（2026-10-22）
 
 用户的 42 项 Windows 报告确认：0.1.4 下载/安装/发现通过，IIS 注入为 0，桥接 JSON 前出现 ConfigurationElement 输出，IIS 已提交但日志 nativeCommitted=false；官方 rollback/disable 无法继续。排除表达式实测为 `^(?:|/__rumable__/)`。该报告来自用户的 Windows 测试机，本机没有执行其原生 IIS。

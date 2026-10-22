@@ -4,7 +4,7 @@
 
 页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
 
-产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.5` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
+产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.6` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
 
 ## 当前可用流程
 
@@ -20,7 +20,7 @@
 
 ## 页面生成的短命令
 
-0.1.5 生成的 Linux 命令自带 Bash pipefail，需安装 Bash。Windows 同版补齐私有文件 DACL 和公共资源读取权限，并修复桥接输出、空排除条件及旧事务恢复。旧 0.1.4 的失败现场必须先按[恢复与复测流程](windows-0.1.4-recovery.md)处理，再执行新的一键命令。
+0.1.6 生成的 Linux 命令自带 Bash pipefail，需安装 Bash。Windows 同版补齐私有文件 DACL 和公共资源读取权限，并修复桥接输出、空排除条件及旧事务恢复。旧 0.1.4 / 0.1.5 的失败现场必须先按[恢复与复测流程](windows-0.1.4-recovery.md)处理，再执行新的一键命令。
 
 Linux 命令结构如下（域名和配置为示意，实际由页面填入）：
 
@@ -31,10 +31,10 @@ bash -o pipefail -c 'curl --proto "=https" --proto-redir "=https" -fsSL "https:/
 Windows 在管理员身份的 PowerShell 5.1+ 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.5/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.5/' -Config '<Base64 RUM 配置>' -Discover
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.6/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.6/' -Config '<Base64 RUM 配置>' -Discover
 ```
 
-Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.5\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；完整文档和配置示例在平台包中。发布包不含自动验收脚本；普通用户无需仓库权限，可按用户指南手动验收。开发者完整自动验收脚本从仓库同版本 tag 获取，详见 Windows 验收手册。
+Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.6\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；完整文档和配置示例在平台包中。发布包不含自动验收脚本；普通用户无需仓库权限，可按用户指南手动验收。开发者完整自动验收脚本从仓库同版本 tag 获取，详见 Windows 验收手册。
 
 只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 的 `artifactBase` 相对地址推导，不需要 CI 配置公开下载域名；旧固定版本清单没有此字段时沿用清单目录。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 自动识别原生 x64 / ARM64 及 modern / legacy 包。读取 latest 后生成的命令仍绑定一个固定版本；安装期间 latest 更新不会改变已选包。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
 
@@ -45,7 +45,7 @@ Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.5\rumable.exe`，状态�
 - Nginx 从 PATH 或标准安装位置查找程序，读取其默认配置及有效 include；不会猜测自定义启动参数。使用自定义 `-c` / `-p`、非首页验收、仅部分路径或无法识别的布局时，使用高级手动配置。
 - IIS 只读枚举运行中的 HTTP(S) 站点和应用。端口、域名和应用路径来自绑定；无主机名的通配绑定不会冒用 localhost，会要求填写实际可访问 URL。
 - 安装脚本的 `--yes` 只确认接入操作，不会代替站点、地址或压缩调整的选择。交互从终端读取，不消费 Linux 管道中的脚本；无终端且有歧义时停止，不修改站点。
-- 0.1.5 的 Windows CLI 先检查标准输入是否是控制台；安装器识别重定向输入或 PowerShell 非交互启动并传递 `--non-interactive`。自动化也可显式给 install.ps1 传 `-NonInteractive`，或给 setup 传 `--non-interactive`；仍可自动接入唯一且信息完整的目标，歧义立即失败。
+- 0.1.6 的 Windows CLI 先检查标准输入是否是控制台；安装器识别重定向输入或 PowerShell 非交互启动并传递 `--non-interactive`。自动化也可显式给 install.ps1 传 `-NonInteractive`，或给 setup 传 `--non-interactive`；仍可自动接入唯一且信息完整的目标，歧义立即失败。
 - 新站点生成稳定的 `auto-...` 接入标识；重复安装恢复原 ID、URL、注入/排除/验收路径，继续复用同一状态目录。不会因为 Nginx 行号变化创建第二次接入。选择结束后重新检查目标，防止等待输入期间配置变化导致接错站点。
 - IIS 静态压缩开启时，只有已勾选高级选项或在终端同意后才调整；卸载/回滚继续使用原备份机制。已有管理状态的配置、外部修改和未完成事务仍会检查。
 - 自动模式默认验证网站或应用首页。需要登录、首页重定向、非完整 HTML、多种模板、HTTPS 上报或 Worker 同源限制导致验证失败时，按提示使用高级设置，补齐适合该网站的验收路径。自动发现不会跳过预检或放宽 TLS/CSP。
@@ -129,7 +129,7 @@ go test ./...
 bash scripts/smoke-onboarding.sh
 bash scripts/smoke-discovery.sh
 # 发布后，从真实 OSS 下载脚本与包，在临时容器验证注入和恢复：
-RUMABLE_PUBLIC_MANIFEST=https://static.guance.com/rumable/0.1.5/manifest.json bash scripts/smoke-discovery.sh
+RUMABLE_PUBLIC_MANIFEST=https://static.guance.com/rumable/0.1.6/manifest.json bash scripts/smoke-discovery.sh
 ```
 
 两项 smoke 在临时 Docker Nginx 中执行页面生成的真实 Linux 命令；OSS 下载用本地脚本和归档替代，实际执行校验、安装、首次接入、重复运行、升级、回滚、停用和撤销。不会对宿主机 /opt、/var/lib 或 Nginx 进行修改。自动发现 smoke 还覆盖多站点无终端拒绝、管道安装时终端选择、未选中站点不变。Windows 脚本契约测试见 `scripts/test-windows-installer.ps1`；Windows API 与 IIS 原生行为仍需 Windows 环境验收。
