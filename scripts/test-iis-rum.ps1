@@ -99,6 +99,9 @@ $output=@(Import-Element $element ([xml](Get-RumNodes).preconditions[0]).Documen
 Assert-That ($output.Count -eq 0 -and $element.Collection.Count -eq 4) 'MWA Add leaked objects into bridge output'
 function Set-RumPublicACL { $script:aclCalled=$true }
 function Apply-OTel { }
+# Cache guard writes have their own executable mock suite.
+function Assert-CacheGuardWritable { }
+function Restore-CacheGuard($wanted,$current) { }
 function Read-Snapshot { return $script:fakeSnapshot }
 $rules=New-Object ReturningCollection; $preconditions=New-Object ReturningCollection
 $compression=New-Object ReturningElement
@@ -109,6 +112,7 @@ $apply=$ast.Find({param($n) $n -is [Management.Automation.Language.IfStatementAs
 $body=@($apply.Clauses | Where-Object { $_.Item1.Extent.Text -eq "`$request.action -eq 'apply'" })[0].Item2.Extent.Text
 $request.enabled=$true
 $output=@(& ([scriptblock]::Create($body.Substring(1,$body.Length-2))))
+Assert-That ($compression.Values['doStaticCompression'] -eq $false -and $compression.Values['doDynamicCompression'] -eq $false) 'Apply did not disable both compression modes'
 Assert-That ($manager.Committed -and $script:aclCalled -and $rules.Count -eq 3 -and $preconditions.Count -eq 1) 'Real apply branch did not build all rules'
 Assert-That ($output.Count -eq 1 -and $null -ne ($output[0] | ConvertFrom-Json).rules) 'Real apply branch emitted non-JSON output'
 $request.snapshot=$original

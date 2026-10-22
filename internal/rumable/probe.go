@@ -50,7 +50,11 @@ func getPage(raw string, headers http.Header) (Page, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return Page{}, fmt.Errorf("%s: expected HTTP 200, got %d", raw, resp.StatusCode)
+		err := fmt.Errorf("%s: expected HTTP 200, got %d", raw, resp.StatusCode)
+		if resp.StatusCode == http.StatusNotModified {
+			return Page{}, &probeContentError{fmt.Errorf("%w; conditional request can reuse stale browser HTML", err)}
+		}
+		return Page{}, err
 	}
 	var body io.Reader = resp.Body
 	if e := resp.Header.Get("Content-Encoding"); e != "" && e != "identity" {
@@ -193,48 +197,90 @@ func probePages(s Site, paths []string, expected *Snapshot) ([]ProbeResult, erro
 	return results, nil
 }
 
+// An observed body mismatch on IIS must not be erased by a later warm-cache
+// success. Transport/readiness failures may still use the bounded retry loop.
+type probeContentError struct{ error }
+
+func browserProbeHeaders() http.Header {
+	return http.Header{
+		"Accept-Encoding": {browserAcceptEncoding},
+		"Accept":          {"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+		"Cache-Control":   nil,
+	}
+}
+
+func preflightPage(s Site, path string) (Page, error) {
+	if s.IIS != nil && s.RUM.isEnabled() {
+		// Identity before the commit can also warm the IIS response cache and
+		// mask the first compressed response after installing the rules.
+		return getPage(pageURL(s, path), browserProbeHeaders())
+	}
+	return getPage(pageURL(s, path), nil)
+}
+
 func probePage(s Site, path string, expected *Snapshot) (ProbeResult, error) {
-	p, err := getPage(pageURL(s, path), nil)
-	if err != nil {
-		return ProbeResult{}, err
-	}
-	r, err := inspectInjection(s, p, expected)
-	if err != nil {
-		return r, err
-	}
-	// Identity alone misses gzip_static and cached compressed HTML used by browsers.
-	compressed, err := getPage(pageURL(s, path), http.Header{"Accept-Encoding": []string{"gzip"}})
-	if err != nil {
-		return r, err
-	}
-	other, err := inspectInjection(s, compressed, expected)
-	if err != nil {
-		return r, fmt.Errorf("gzip variant: %w", err)
-	}
-	if other.Script != r.Script {
-		return r, errors.New("gzip variant uses a different bootstrap URL; clear HTML caches")
-	}
-	// no-cache and a single cold gzip request can both hide stale IIS/edge cache
-	// entries. Reuse the exact URL with normal browser negotiation and no cache
-	// bypass, checking every response, including after the cache warms up.
-	for attempt := 1; attempt <= 3; attempt++ {
-		browser, err := getPage(pageURL(s, path), http.Header{
-			"Accept-Encoding": {browserAcceptEncoding},
-			"Accept":          {"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
-			"Cache-Control":   nil,
-		})
+	var result ProbeResult
+	check := func(label string, headers http.Header) error {
+		page, err := getPage(pageURL(s, path), headers)
 		if err != nil {
-			return r, fmt.Errorf("browser cache variant %d: %w", attempt, err)
+			return fmt.Errorf("%s: %w", label, err)
 		}
-		cached, err := inspectInjection(s, browser, expected)
-		if err == nil && cached.Script != r.Script {
+		got, err := inspectInjection(s, page, expected)
+		if err == nil && result.URL != "" && got.Script != result.Script {
 			err = errors.New("uses a different bootstrap URL")
 		}
 		if err != nil {
-			return r, fmt.Errorf("browser cache variant %d (%s): %w; inspect effective per-URL compression and HTML caches", attempt, responseEvidence(browser.Header), err)
+			return &probeContentError{fmt.Errorf("%s (%s): %w; inspect effective per-URL compression and HTML caches", label, responseEvidence(page.Header), err)}
+		}
+		result = got
+		return nil
+	}
+	// Exact transaction recovery can restore a pre-0.1.7 deployment without
+	// this guard. Do not impose a newly introduced prerequisite on that old
+	// snapshot; normal enable/history rollback installs it before verification.
+	conditional := expected == nil || !expected.legacyIISRecovery
+	if s.IIS != nil && conditional && (expected == nil && s.RUM.isEnabled() || expected != nil && expected.Enabled) {
+		// A wildcard ETag matches any pre-existing representation; a future
+		// modification date covers old Last-Modified-only browser caches.
+		// Run these BEFORE unconditional requests can warm an IIS cache.
+		for _, variant := range []struct{ label, etag, modified string }{
+			{"conditional ETag reload", "*", ""},
+			{"conditional modified reload", "", "Thu, 01 Jan 2099 00:00:00 GMT"},
+			{"conditional combined reload", "*", "Thu, 01 Jan 2099 00:00:00 GMT"},
+		} {
+			headers := browserProbeHeaders()
+			headers.Set("Cache-Control", "max-age=0")
+			if variant.etag != "" {
+				headers.Set("If-None-Match", variant.etag)
+			}
+			if variant.modified != "" {
+				headers.Set("If-Modified-Since", variant.modified)
+			}
+			if err := check(variant.label, headers); err != nil {
+				return result, err
+			}
 		}
 	}
-	return r, nil
+	// IIS 0.1.6 native evidence: a single identity request can make subsequent
+	// gzip responses look healthy. Inspect cold browser variants FIRST, including
+	// the normal-refresh header; never continue to identity after a mismatch.
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err := check(fmt.Sprintf("browser cache variant %d", attempt), browserProbeHeaders()); err != nil {
+			return result, err
+		}
+	}
+	reload := browserProbeHeaders()
+	reload.Set("Cache-Control", "max-age=0")
+	if err := check("browser reload variant", reload); err != nil {
+		return result, err
+	}
+	if err := check("gzip variant", http.Header{"Accept-Encoding": {"gzip"}}); err != nil {
+		return result, err
+	}
+	if err := check("identity variant", nil); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // Record only headers needed to diagnose compression/cache variants. Avoid

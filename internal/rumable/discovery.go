@@ -30,10 +30,11 @@ type DiscoveryConfig struct {
 }
 
 type discoveredSite struct {
-	Site              Site
-	Label, Target     string
-	URLs              []string
-	StaticCompression bool
+	Site               Site
+	Label, Target      string
+	URLs               []string
+	StaticCompression  bool
+	DynamicCompression bool
 }
 
 func loadDiscoveryConfig(name string) (DiscoveryConfig, error) {
@@ -153,8 +154,8 @@ func resolveDiscoveredSite(c DiscoveryConfig, candidates []discoveredSite, in io
 	s.SDK = c.SDK
 	if s.IIS != nil {
 		s.IIS.AllowCompressionChanges = c.AllowCompressionChanges || s.IIS.AllowCompressionChanges
-		if selected.StaticCompression && !s.IIS.AllowCompressionChanges {
-			answer, err := p.line("IIS static compression must be disabled for this application (restored on uninstall). Allow? [y/N]: ")
+		if (selected.StaticCompression || selected.DynamicCompression) && !s.IIS.AllowCompressionChanges {
+			answer, err := p.line("IIS static and dynamic compression must be disabled for this application (restored on disable/uninstall). Allow? [y/N]: ")
 			if err != nil {
 				return Site{}, "", err
 			}
@@ -435,9 +436,10 @@ func nginxDiscoveredURLs(n *attachNode, names []string) []string {
 
 type iisDiscoveryResult struct {
 	Sites []struct {
-		Name, Application string
-		StaticCompression bool
-		Bindings          []struct {
+		Name, Application  string
+		StaticCompression  bool
+		DynamicCompression bool
+		Bindings           []struct {
 			Protocol, Host, Address string
 			Port                    int
 		}
@@ -479,7 +481,7 @@ func iisDiscoveredSites(data []byte) ([]discoveredSite, error) {
 			urls = append(urls, u)
 		}
 		sort.Strings(urls)
-		sites = append(sites, discoveredSite{Site: Site{ID: id, IIS: &IIS{Site: candidate.Name, Application: candidate.Application}}, Label: candidate.Name + " " + candidate.Application, URLs: urls, StaticCompression: candidate.StaticCompression})
+		sites = append(sites, discoveredSite{Site: Site{ID: id, IIS: &IIS{Site: candidate.Name, Application: candidate.Application}}, Label: candidate.Name + " " + candidate.Application, URLs: urls, StaticCompression: candidate.StaticCompression, DynamicCompression: candidate.DynamicCompression})
 	}
 	return sites, nil
 }

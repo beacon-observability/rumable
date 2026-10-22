@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../internal/rumable/assets/iis-rum.ps1')
 # Exercise XML ownership without requiring the Windows-only IIS configuration API.
 $bridge = Join-Path $PSScriptRoot '../internal/rumable/assets/iis.ps1'
 $tokens = $null; $parseErrors = $null

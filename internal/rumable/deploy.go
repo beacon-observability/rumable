@@ -24,7 +24,7 @@ func verifyNative(root string, n Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if !sameJSON(live, n.Native) {
+	if !sameIISSnapshot(live, n.Native) {
 		return errors.New("external change to owned IIS rules, resources, compression or OTel pool settings; refusing overwrite")
 	}
 	return nil
@@ -141,7 +141,7 @@ func preflight(root string, s Site) error {
 		managed = append(managed, st.Current)
 	}
 	for _, path := range s.ProbePaths {
-		p, err := getPage(pageURL(s, path), nil)
+		p, err := preflightPage(s, path)
 		if err != nil {
 			return err
 		}
@@ -208,6 +208,9 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		st.Current.Native = native
 		st.OriginalIIS = native
 	}
+	if err := adoptIISDynamicCompression(root, &st); err != nil {
+		return err
+	}
 	n, public, err := renderDeployment(root, s, enabled, &st.Current, component == "otel")
 	if err != nil {
 		return err
@@ -217,13 +220,19 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		n.Native = st.Current.Native
 		n.OTelTokenHash = st.Current.OTelTokenHash
 	}
-	if snapshotsEqual(st.Current, n) {
+	if component == "otel" && s.IIS != nil && n.Enabled {
+		if err := checkIISRumCompression(root, s); err != nil {
+			return err
+		}
+	}
+	if snapshotsEqual(st.Current, n) && (s.IIS == nil || !n.Enabled || (iisDynamicCompressionDisabled(st.Current.Native) && iisCacheGuardEnabled(st.Current.Native))) {
 		fmt.Fprintln(w, "Already in requested state; verifying HTTP probes.")
 		return waitProbes(st.Current)
 	}
 	fmt.Fprintf(w, "%s site %s (%s): SDK %s; managed files %s\n", map[bool]string{true: "Enable", false: "Disable"}[enabled], s.ID, s.platform(), n.SDK.Version, strings.Join(fileNames(n.Files), ", "))
 	if s.IIS != nil && n.Enabled {
-		fmt.Fprintln(w, "IIS: static compression will be disabled for this application; original local setting is saved.")
+		fmt.Fprintln(w, "IIS: static and dynamic compression will be disabled for this application; original local settings are saved and restored on disable/uninstall.")
+		fmt.Fprintln(w, "IIS: managed HTML navigation GETs clear old cache validators before local rewrites; original request-header permissions are saved and restored on disable/uninstall.")
 	}
 
 	return transact(root, st, n, public, false)
@@ -283,7 +292,7 @@ func transact(root string, st State, n Snapshot, public map[string][]byte, resto
 	old := st.Current
 	st.Previous = &old
 	st.Current = n
-	st.LastCheck = &CheckRecord{time.Now().UTC(), true, "configuration committed; HTTP/component state verified; browser execution and OTLP ingestion unverified"}
+	st.LastCheck = &CheckRecord{time.Now().UTC(), true, fmt.Sprintf("configuration committed; HTTP/component state verified for configured probePaths %v; browser cache, execution and OTLP ingestion unverified", n.Site.ProbePaths)}
 	if err = saveState(root, st); err != nil {
 		return fail(err)
 	}
@@ -314,7 +323,7 @@ func restoreTransaction(root string, t transaction) error {
 		if err != nil {
 			return err
 		}
-		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) && !sameJSON(live, recovered) {
+		if !sameIISSnapshot(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameIISSnapshot(live, t.After.Native)) && !sameIISSnapshot(live, recovered) {
 			// 0.1.4 could commit IIS, then fail to decode the polluted stdout,
 			// leaving no after snapshot. Reconstruct that exact RUM-only apply;
 			// never accept arbitrary live state as the transaction's result.
@@ -355,7 +364,9 @@ func restoreTransaction(root string, t transaction) error {
 			return err
 		}
 	}
-	if err := waitProbes(t.Before.Current); err != nil {
+	recoveryProbe := t.Before.Current
+	recoveryProbe.legacyIISRecovery = recoveryProbe.Site.IIS != nil && !iisCacheGuardEnabled(recoveryProbe.Native)
+	if err := waitProbes(recoveryProbe); err != nil {
 		return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w", err)
 	}
 	return saveState(root, t.Before)
@@ -444,7 +455,19 @@ func rollback(root string, st State, w io.Writer) error {
 		}
 	}
 	fmt.Fprintln(w, "Restoring previous successful deployment for", st.Current.Site.ID)
-	return transact(root, st, *st.Previous, nil, true)
+	if err := adoptIISDynamicCompression(root, &st); err != nil {
+		return err
+	}
+	n := *st.Previous
+	if n.Site.IIS != nil && n.Enabled {
+		if err := checkIISRumCompression(root, n.Site); err != nil {
+			return err
+		}
+	}
+	if err := protectIISRollback(root, &n); err != nil {
+		return err
+	}
+	return transact(root, st, n, nil, true)
 }
 func verifyFilesAssets(root string, n Snapshot) error { n.Files = nil; return verifyFiles(root, n) }
 
@@ -464,6 +487,10 @@ func waitProbes(n Snapshot) error {
 				return nil
 			}
 		} else {
+			var content *probeContentError
+			if n.Site.IIS != nil && errors.As(err, &content) {
+				return err
+			}
 			stable = 0
 		}
 		time.Sleep(200 * time.Millisecond)

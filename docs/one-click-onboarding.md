@@ -16,7 +16,7 @@
 
 配置在浏览器本地生成，无配置服务依赖，不上传到 OSS。命令中的 Base64 只是防止 shell 转义改变 TOML，不是加密；包含的 clientToken 是浏览器公开令牌，不得填写管理 API Key。临时配置在结束时删除；受管状态保存配置，后续 disable/rollback 不依赖临时文件。需要修改时重新生成命令。自动发现格式的 TOML 使用 `setup --discover --config rumable.toml --state-dir ... --yes`；手动模式的完整 TOML 才能直接交给 `enable`。
 
-当前一键入口仅做 RUM，默认同域 + 异步提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
+当前一键入口仅做 RUM，默认同域 + 异步提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态和动态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
 
 ## 页面生成的短命令
 
@@ -47,7 +47,7 @@ Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.6\rumable.exe`，状态�
 - 安装脚本的 `--yes` 只确认接入操作，不会代替站点、地址或压缩调整的选择。交互从终端读取，不消费 Linux 管道中的脚本；无终端且有歧义时停止，不修改站点。
 - 0.1.6 的 Windows CLI 先检查标准输入是否是控制台；安装器识别重定向输入或 PowerShell 非交互启动并传递 `--non-interactive`。自动化也可显式给 install.ps1 传 `-NonInteractive`，或给 setup 传 `--non-interactive`；仍可自动接入唯一且信息完整的目标，歧义立即失败。
 - 新站点生成稳定的 `auto-...` 接入标识；重复安装恢复原 ID、URL、注入/排除/验收路径，继续复用同一状态目录。不会因为 Nginx 行号变化创建第二次接入。选择结束后重新检查目标，防止等待输入期间配置变化导致接错站点。
-- IIS 静态压缩开启时，只有已勾选高级选项或在终端同意后才调整；卸载/回滚继续使用原备份机制。已有管理状态的配置、外部修改和未完成事务仍会检查。
+- IIS 静态或动态压缩开启时，只有已勾选高级选项或在终端同意后才调整；卸载/回滚继续使用原备份机制。已有管理状态的配置、外部修改和未完成事务仍会检查。
 - 自动模式默认验证网站或应用首页。需要登录、首页重定向、非完整 HTML、多种模板、HTTPS 上报或 Worker 同源限制导致验证失败时，按提示使用高级设置，补齐适合该网站的验收路径。自动发现不会跳过预检或放宽 TLS/CSP。
 - 老版本清单没有 `rum-discovery-v1` 时，页面拒绝生成自动发现命令；仍可用高级手动模式生成兼容配置。
 

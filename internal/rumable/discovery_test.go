@@ -194,3 +194,18 @@ func TestDiscoveryConfigWebContractAndStrictKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestIISDynamicOnlyCompressionRequiresConsent(t *testing.T) {
+	sites, err := iisDiscoveredSites([]byte(`{"Sites":[{"Name":"Website","Application":"/","StaticCompression":false,"DynamicCompression":true,"Bindings":[{"Protocol":"http","Address":"127.0.0.1","Port":8080}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := DiscoveryConfig{SchemaVersion: 1, Server: "iis", RUM: testSite().RUM}
+	if _, _, err = resolveDiscoveredSite(c, sites, nil, io.Discard); err == nil {
+		t.Fatal("dynamic-only compression was silently approved")
+	}
+	s, _, err := resolveDiscoveredSite(c, sites, strings.NewReader("y\n"), io.Discard)
+	if err != nil || !s.IIS.AllowCompressionChanges {
+		t.Fatal("dynamic consent lost", err)
+	}
+}

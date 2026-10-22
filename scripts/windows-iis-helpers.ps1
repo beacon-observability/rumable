@@ -14,7 +14,7 @@ function Get-SHA256([byte[]]$Bytes) {
     finally { $sha.Dispose() }
 }
 
-function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity', [switch]$UseCache) {
+function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity', [switch]$UseCache, [hashtable]$Validators = @{}) {
     $uri = [uri]$Url
     Assert-That ($uri.Scheme -eq 'http' -and $uri.Host -eq '127.0.0.1') 'Acceptance HTTP requests must stay on loopback.'
     $request = [Net.HttpWebRequest]::Create($uri)
@@ -24,6 +24,10 @@ function Invoke-TestHttp([string]$Url, [string]$Encoding = 'identity', [switch]$
     $request.Timeout = 5000
     $request.ReadWriteTimeout = 5000
     $request.Headers['Accept-Encoding'] = $Encoding
+    $request.Accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    if ($Validators['ETag']) { $request.Headers['If-None-Match'] = $Validators['ETag'] }
+    if ($Validators['Last-Modified']) { $request.IfModifiedSince = [DateTime]::Parse($Validators['Last-Modified'], [Globalization.CultureInfo]::InvariantCulture).ToUniversalTime() }
+    if ($Validators.Count) { $request.Headers['Cache-Control'] = 'max-age=0' }
     if (-not $UseCache) { $request.Headers['Cache-Control'] = 'no-cache' }
     $request.AutomaticDecompression = [Net.DecompressionMethods]::None
     $response = $null
@@ -104,7 +108,10 @@ function Get-TestLocalCompression([string]$SiteName, [string]$App) {
     $present = $null -ne $compression -and $compression.HasAttribute('doStaticCompression')
     $value = $null
     if ($present) { $value = $compression.GetAttribute('doStaticCompression') }
-    return @{ present = [bool]$present; value = $value }
+    $dynamicPresent = $null -ne $compression -and $compression.HasAttribute('doDynamicCompression')
+    $dynamicValue = $null
+    if ($dynamicPresent) { $dynamicValue = $compression.GetAttribute('doDynamicCompression') }
+    return @{ present = [bool]$present; value = $value; dynamicPresent = [bool]$dynamicPresent; dynamicValue = $dynamicValue }
 }
 
 function Get-TestBusinessRules([string]$SiteName) {
@@ -162,7 +169,7 @@ function Set-TestRuleValue([string]$SiteName, [string]$App, [string]$Name, [stri
 function Assert-TestPage([string]$BaseUrl, [string]$Path, [string]$Id, $State, [bool]$Enabled, [string]$ParentValue) {
     $identity = $null
     foreach ($attempt in @(0,1,2,3)) {
-        if ($attempt -eq 0) { $page = Invoke-TestHttp ($BaseUrl + $Path); $identity = $page }
+        if ($attempt -eq 3) { $page = Invoke-TestHttp ($BaseUrl + $Path); $identity = $page }
         else { $page = Invoke-TestHttp ($BaseUrl + $Path) 'gzip, deflate, br, zstd' -UseCache }
         $evidence = ' variant=' + $attempt + ' headers=' + ($page.headers | ConvertTo-Json -Compress)
         Assert-That ($page.status -eq 200) ('HTTP ' + $page.status + ': ' + $Path)
@@ -234,4 +241,17 @@ function Remove-TestDeployment([string]$SiteName, [string]$Work) {
         $manager.CommitChanges()
     } finally { $manager.Dispose() }
     if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force }
+}
+
+# Use the real validators captured before installation, including the gzip
+# representation. This runs before any unconditional post-enable second-page GET.
+function Assert-TestConditionalPage([string]$Url,[string]$Id,$State,$Baseline) {
+    Assert-That ($Baseline.status -eq 200 -and $Baseline.headers['ETag'] -and $Baseline.headers['Last-Modified']) 'Conditional baseline must have both real validators.'
+    foreach ($headers in @(@{'ETag'=$Baseline.headers['ETag']},@{'Last-Modified'=$Baseline.headers['Last-Modified']},@{'ETag'=$Baseline.headers['ETag'];'Last-Modified'=$Baseline.headers['Last-Modified']})) {
+        $page=Invoke-TestHttp $Url 'gzip, deflate, br, zstd' -UseCache -Validators $headers
+        Assert-That ($page.status -eq 200) ('Old browser validators reused HTTP '+$page.status)
+        Assert-That ([regex]::Matches($page.text,('data-rumable="'+$Id+'"')).Count -eq 1 -and $page.text.Contains($State.current.script)) 'Conditional reload kept stale HTML or bootstrap.'
+        Assert-That (-not $page.headers['Content-Encoding'] -and -not $page.headers['ETag'] -and -not $page.headers['Last-Modified']) 'Conditional HTML kept compression or validators.'
+        Assert-That ($page.text.Contains('window.businessLiteral="</head>"')) 'Conditional reload corrupted business JS.'
+    }
 }

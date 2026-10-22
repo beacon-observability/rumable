@@ -28,13 +28,18 @@ try {
         $preconditions = $rewrite.GetCollection('preConditions')
     } catch { if ($rumWanted) { throw } }
     if ($rumWanted -and $null -ne $rewrite -and $rewrite.GetAttributeValue('rewriteBeforeCache')) { throw 'rewriteBeforeCache=true conflicts with streaming/chunked responses; review it manually.' }
+    $inboundSection=$null; $allowedSection=$null; $inboundRules=@(); $allowedVariables=@()
+    try {
+        $inboundSection=$config.GetSection('system.webServer/rewrite/rules',$target); $inboundRules=$inboundSection.GetCollection()
+        $allowedSection=$config.GetSection('system.webServer/rewrite/allowedServerVariables',$target); $allowedVariables=$allowedSection.GetCollection()
+    } catch { if ($rumWanted) { throw } }
     $compression = $config.GetSection('system.webServer/urlCompression', $target)
     . (Join-Path $request.root 'otel-iis.ps1')
     . (Join-Path $request.root 'iis-rum.ps1')
     . (Join-Path $request.root 'iis-acl.ps1')
 
     function Read-Snapshot {
-        # Capture only owned XML nodes and the exact local compression attribute.
+        # Capture owned XML and exact local attributes, including inheritance.
         [xml]$xml = [IO.File]::ReadAllText($configPath)
         # Use DOM methods: PowerShell's XML adapter turns empty elements into
         # strings and lets attributes (notably name) hide DOM properties.
@@ -50,13 +55,17 @@ try {
         $present = $null -ne $localCompression -and $localCompression.HasAttribute('doStaticCompression')
         $value = $null
         if ($present) { $value = $localCompression.GetAttribute('doStaticCompression') }
+        $dynamicPresent = $null -ne $localCompression -and $localCompression.HasAttribute('doDynamicCompression')
+        $dynamicValue = $null
+        if ($dynamicPresent) { $dynamicValue = $localCompression.GetAttribute('doDynamicCompression') }
         $xmlSite = $xml.SelectNodes('/configuration/system.applicationHost/sites/site') | Where-Object { $_.GetAttribute('name') -ieq $site.iis.site } | Select-Object -First 1
         $xmlApp = $null; $virtual = $null
         if ($null -ne $xmlSite) { $xmlApp = $xmlSite.SelectNodes('application') | Where-Object { $_.GetAttribute('path') -ieq $site.iis.application } | Select-Object -First 1 }
         if ($null -ne $xmlApp) { $virtual = $xmlApp.SelectNodes('virtualDirectory') | Where-Object { $_.GetAttribute('path') -ieq $vpath } | Select-Object -First 1 }
         $virtualXml = $null
         if ($null -ne $virtual) { $virtualXml = $virtual.get_OuterXml() }
-        $snapshot = @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value }
+        $snapshot = @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value; dynamicCompressionPresent=[bool]$dynamicPresent; dynamicCompressionValue=$dynamicValue }
+        $snapshot.cacheGuard=Read-CacheGuard $location
         if ($null -ne $site.otel) { $snapshot.otel = Read-OTelSnapshot }
         return $snapshot
     }
@@ -70,15 +79,15 @@ try {
     function Import-Element($element, $xmlNode) {
         foreach ($attribute in $xmlNode.Attributes) {
             $value = [string]$attribute.Value
-            if (@('enabled', 'ignoreCase', 'negate', 'stopProcessing', 'trackAllCaptures') -contains $attribute.Name) { $value = [bool]::Parse($value) }
+            if (@('enabled', 'ignoreCase', 'negate', 'stopProcessing', 'trackAllCaptures', 'replace') -contains $attribute.Name) { $value = [bool]::Parse($value) }
             elseif ($attribute.Name -eq 'occurrences') { $value = [int]::Parse($value) }
             $element.SetAttributeValue($attribute.Name, $value)
         }
         foreach ($child in $xmlNode.ChildNodes) {
             if ($child.NodeType -ne [Xml.XmlNodeType]::Element) { continue }
-            if ($child.get_Name() -eq 'add') {
+            if (@('add','set') -ccontains $child.get_Name()) {
                 $collection = $element.GetCollection()
-                $new = $collection.CreateElement('add')
+                $new = $collection.CreateElement($child.get_Name())
                 Import-Element $new $child
                 [void]$collection.Add($new)
             } else {
@@ -89,11 +98,14 @@ try {
 
     function Restore-Compression($snapshot, $current) {
         # An OTel-only pool change must work even when URL compression is locked.
-        if ($snapshot.compressionPresent -eq $current.compressionPresent -and $snapshot.compressionValue -ceq $current.compressionValue) { return }
-        if ($snapshot.compressionPresent) {
-            $compression.SetAttributeValue('doStaticCompression', [bool]::Parse($snapshot.compressionValue))
-        } else {
-            $compression.GetAttribute('doStaticCompression').Delete()
+        foreach ($setting in @(@('doStaticCompression','compressionPresent','compressionValue'), @('doDynamicCompression','dynamicCompressionPresent','dynamicCompressionValue'))) {
+            $attribute=$setting[0]; $present=$setting[1]; $value=$setting[2]
+            # Old journals did not own dynamic compression. Never infer their
+            # missing field as false or delete an administrator's local value.
+            if ($null -eq $snapshot.$present) { continue }
+            if ($snapshot.$present -eq $current.$present -and $snapshot.$value -ceq $current.$value) { continue }
+            if ($snapshot.$present) { $compression.SetAttributeValue($attribute, [bool]::Parse($snapshot.$value)) }
+            else { $compression.GetAttribute($attribute).Delete() }
         }
     }
 
@@ -132,13 +144,20 @@ try {
                 if ($attribute.Name -ne 'path' -and $attribute.Name -ne 'physicalPath') { $virtual.SetAttributeValue($attribute.Name, [string]$attribute.Value) }
             }
         }
+        Restore-CacheGuard $snapshot.cacheGuard $current.cacheGuard
         Restore-Compression $snapshot $current
         if ($null -ne $site.otel) { Restore-OTel $snapshot.otel }
     }
 
     function Assert-Snapshot($expected, $actual) {
+        if (-not (Test-CacheGuard $expected.cacheGuard $actual.cacheGuard)) { throw 'IIS request revalidation changed before commit; refusing overwrite.' }
         foreach ($key in @('compressionPresent','compressionValue','virtualDirectory')) {
             if ($expected.$key -cne $actual.$key) { throw 'IIS configuration changed before commit; refusing overwrite.' }
+        }
+        if ($null -ne $expected.dynamicCompressionPresent) {
+            foreach ($key in @('dynamicCompressionPresent','dynamicCompressionValue')) {
+                if ($expected.$key -cne $actual.$key) { throw 'IIS dynamic compression changed before commit; refusing overwrite.' }
+            }
         }
         foreach ($key in @('rules','preconditions')) {
             if ((@($expected.$key) | ConvertTo-Json -Compress) -cne (@($actual.$key) | ConvertTo-Json -Compress)) { throw 'IIS owned rules changed before commit; refusing overwrite.' }
@@ -169,6 +188,7 @@ try {
             if ($entryName.StartsWith($prefix, [StringComparison]::Ordinal) -and -not ($localNames -ccontains $entryName)) { throw 'Inherited Rumable rule name conflict; use a unique site ID and review parent configuration.' }
         }
     }
+    Assert-LocalOwned $inboundRules $before.cacheGuard.rules
     Assert-LocalOwned $rules $before.rules
     Assert-LocalOwned $preconditions $before.preconditions
     if ($request.action -eq 'dependency-check') {
@@ -210,14 +230,17 @@ try {
         Assert-OTelExternalEnvironment
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'check') {
-        if ($request.checkingEnabled -and $rumWanted) { Get-RumAssetReaders | Out-Null }
+        if ($request.checkingEnabled -and $rumWanted) { Get-RumAssetReaders | Out-Null; Assert-CacheGuardWritable }
         if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
-        if ($rumWanted -and $compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
+        if ($request.checkingEnabled -and $rumWanted -and ($compression.GetAttributeValue('doStaticCompression') -or $compression.GetAttributeValue('doDynamicCompression')) -and -not $site.iis.allowCompressionChanges) { throw 'Static or dynamic compression is enabled; set allowCompressionChanges after reviewing its impact.' }
         if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool -SavedCredentials:([bool]$request.restoringOTel) }
         $virtual = $application.VirtualDirectories[$vpath]
         $expectedPath = Join-Path $request.root 'public'
         if ($rumWanted -and $null -ne $virtual -and $virtual.PhysicalPath -ne $expectedPath) { throw 'Reserved /__rumable__ virtual directory is already owned by another deployment.' }
         $before | ConvertTo-Json -Depth 30 -Compress
+    } elseif ($request.action -eq 'prepare-rum-rollback') {
+        $request.snapshot.cacheGuard=New-EnabledCacheGuard $request.snapshot.cacheGuard
+        $request.snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'inspect') {
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'recover-pending-check') {
@@ -233,11 +256,13 @@ try {
         $manager.CommitChanges()
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'apply') {
-        if ($request.enabled) { Set-RumPublicACL }
+        if ($request.enabled) { Set-RumPublicACL; Assert-CacheGuardWritable }
         Remove-Owned $rules
         Remove-Owned $preconditions
         if ($request.enabled) {
+            Restore-CacheGuard (New-EnabledCacheGuard $before.cacheGuard) $before.cacheGuard
             $compression.SetAttributeValue('doStaticCompression', $false)
+            $compression.SetAttributeValue('doDynamicCompression', $false)
             $nodes = Get-RumNodes
             foreach ($entry in @(@('preCondition', $preconditions, $nodes.preconditions), @('rule', $rules, $nodes.rules))) {
                 foreach ($text in $entry[2]) {
@@ -248,6 +273,7 @@ try {
                 }
             }
         } else {
+            Restore-CacheGuard $request.original.cacheGuard $before.cacheGuard
             Restore-Compression $request.original $before
         }
         if ($request.enabled -and $null -eq $application.VirtualDirectories[$vpath]) { [void]$application.VirtualDirectories.Add($vpath, (Join-Path $request.root 'public')) }

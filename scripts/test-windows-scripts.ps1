@@ -35,16 +35,16 @@ try {
     & {
         function Invoke-TestHttp([string]$Url, [string]$Encoding='identity', [switch]$UseCache) {
             $script:variantCalls++
-            if ($script:variantCalls -gt 1) { Assert-That ($UseCache -and $Encoding -ceq 'gzip, deflate, br, zstd') 'Acceptance bypassed browser cache variant.' }
+            if ($script:variantCalls -lt 4) { Assert-That ($UseCache -and $Encoding -ceq 'gzip, deflate, br, zstd') 'Acceptance bypassed browser cache variant.' }
             $text = '<script data-rumable="test" src="/init.js"></script>'
-            if ($script:missWarmCache -and $script:variantCalls -eq 4) { $text = '<html><head></head></html>' }
+            if ($script:failureAt -eq $script:variantCalls) { $text = '<html><head></head></html>' }
             return @{status=200;headers=@{'X-Rumable-Parent'='parent';'X-Rumable-Child'='child';'Content-Encoding'='gzip'};text=$text}
         }
-        foreach ($script:missWarmCache in @($false, $true)) {
+        foreach ($script:failureAt in @(0, 1, 3)) {
             $script:variantCalls=0; $rejected=$false
             try { [void](Assert-TestPage 'http://127.0.0.1' '/index.html' 'test' @{current=@{script='/init.js'}} $true 'parent') }
             catch { if ($_.Exception.Message -notlike 'Expected one current injection:*') { throw }; $rejected=$true }
-            Assert-That ($script:variantCalls -eq 4 -and $rejected -eq $script:missWarmCache) 'Acceptance failed to detect warm cached HTML without injection.'
+            Assert-That ($script:variantCalls -eq $(if ($script:failureAt) { $script:failureAt } else { 4 }) -and $rejected -eq ($script:failureAt -gt 0)) 'Acceptance failed to detect warm cached HTML without injection.'
         }
     }
     if ($Binary) {

@@ -13,6 +13,10 @@ import (
 )
 
 type Snapshot struct {
+	// Ephemeral probe policy used only while recovering an exact legacy journal.
+	// Never serialized, adopted by enable, or retained in successful history.
+	legacyIISRecovery bool
+
 	Uninstall     bool              `json:"uninstall,omitempty"`
 	Enabled       bool              `json:"enabled"`
 	OTelEnabled   bool              `json:"otelEnabled,omitempty"`

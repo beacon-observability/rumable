@@ -17,7 +17,7 @@ func setupSite(root string, s Site, target string, yes bool, in io.Reader, out i
 		if target != "" {
 			return errors.New("--target is only used for Nginx")
 		}
-		fmt.Fprintf(out, "Set up RUM on IIS %s%s; manage injection, resource mapping and application static compression.\n", s.IIS.Site, s.IIS.Application)
+		fmt.Fprintf(out, "Set up RUM on IIS %s%s; manage injection, resource mapping and application static/dynamic compression.\n", s.IIS.Site, s.IIS.Application)
 		if err := confirmAttachment(out, in, yes, false); err != nil {
 			return err
 		}
@@ -52,6 +52,10 @@ func setupSite(root string, s Site, target string, yes bool, in io.Reader, out i
 		// and its assets reachable; apply restores injection or leaves a journal.
 		return fmt.Errorf("setup failed (state, assets and attachment backups retained): %w", err)
 	}
-	fmt.Fprintln(out, "RUM setup complete; HTTP injection and assets verified. Verify browser execution and received events separately.")
+	fmt.Fprintln(out, "RUM setup complete; HTTP injection and assets verified for these URLs only:")
+	for _, path := range s.ProbePaths {
+		fmt.Fprintln(out, "  "+pageURL(s, path))
+	}
+	fmt.Fprintln(out, "Other pages and previously cached browser responses are not verified. Configure probePaths for every HTML handler; verify normal browser refresh and received events separately.")
 	return nil
 }

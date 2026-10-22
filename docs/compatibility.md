@@ -49,7 +49,7 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 - 使用系统 Microsoft.Web.Administration API 和 Windows PowerShell，不依赖 .NET 6/8、PowerShell 7、ASP.NET Core 或 ARR 来注入页面。
 - 需要 **64 位 PowerShell 3.0+**（建议 5.1）。Windows 7 / Server 2008 R2 的默认 PowerShell 2.0 不满足 CLI 与 IIS 桥接脚本的内部 JSON 接口要求，需要运维预先部署适用的 WMF；工具不会自动安装系统组件。
 - TOML 配置文件使用 UTF-8；旧 PowerShell 的 `Out-File` 默认可能生成 UTF-16，请使用 `rumable init` 或显式 UTF-8 写入配置。
-- 动态应用或反代生成的 HTML 必须在进入 URL Rewrite 时未压缩。工具只调整目标应用的 IIS 静态压缩；不擅自修改后端应用中间件。
+- 动态应用或反代生成的 HTML 必须在进入 URL Rewrite 时未压缩。工具在允许后关闭目标应用的 IIS 静态和动态压缩，并在停用时恢复原局部设置/继承关系；不擅自修改后端应用中间件。
 - 配置被锁定、已有保留路径映射、`rewriteBeforeCache=true`、ACL 或 MIME 条件不满足时，需先由运维解决。
 - 提供 Windows x86 32 位 CLI。它在 64 位 Windows 上经 Sysnative 调用 64 位 PowerShell；真正 32 位 Windows 只能执行版本、配置生成、状态读取与 HTTP 探测，不能管理 IIS。Windows ARM64 CLI 已交叉编译，ARM64 IIS 仍需原生配置 API / PowerShell 能力和实机验收。
 - HTTP 探测接受标准中的历史 JavaScript MIME（如 `application/x-javascript`），避免把旧站点的合法脚本误判成不可执行内容；依据 [MIME Sniffing 标准](https://mimesniff.spec.whatwg.org/#javascript-mime-type)。
@@ -75,3 +75,5 @@ Windows 的可执行步骤和逐系统验收矩阵见 [windows-acceptance.md](wi
 ### 自动依赖安装
 
 install-otel 在 Linux 支持 Nginx x64/ARM64 的准确版本 APT 包或校验过的离线包。Windows 安装固定 .NET Agent v1.17.0，仅 IIS 10 的 x64 Windows / x64、x86 池；不放宽旧 Windows/IIS 的 OTel 限制。CLI 的其他架构仍可用于 RUM/配置生成。平台矩阵和离线格式见[安装与卸载](otel-installation.md)。
+
+IIS 0.1.7 对接受 HTML 的受管 GET 清除旧缓存条件请求头，并关闭所选应用的静态和动态压缩；需要 URL Rewrite 的入站规则及两个应用级 allowedServerVariables 权限。启停/回滚范围、继承恢复、API 条件缓存影响及原生验证边界见[操作手册](operations.md#压缩与缓存)。

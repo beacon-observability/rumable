@@ -22,7 +22,7 @@
 
 无法访问 Git 的用户可以直接从 OSS 获取 CLI、文档和配置示例，按[用户指南](../USER-GUIDE.md#7-手动配置-windows--iis)自建临时站点并手动验收。下面“完整自动验收”的仓库脚本是开发者测试工具，不是安装依赖。0.1.5 一键安装自动隔离私有文件并开放公共脚本读取权限；验收时按用户指南核对实际身份和 NTFS ACL。
 
-1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.5` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
+1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.5` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态和动态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
 2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，按检测结果下载并校验同版本 ZIP，安装原生 CLI，再运行 `setup --discover`（手动模式为 `setup`）。记录命令退出结果；日志或截图中不要暴露令牌。
 3. 检查状态及页面资源：
 
@@ -74,7 +74,7 @@
 在一次性 Server 2016+ VM 上，可先用服务器角色安装命令准备 IIS / ASP.NET，再安装官方 URL Rewrite 2.x：
 
 ~~~powershell
-Install-WindowsFeature Web-Server,Web-Static-Content,Web-Stat-Compression,Web-Asp-Net45,Web-Mgmt-Console
+Install-WindowsFeature Web-Server,Web-Static-Content,Web-Stat-Compression,Web-Dyn-Compression,Web-Asp-Net45,Web-Mgmt-Console
 ~~~
 
 Windows 10 / Windows 7 可在“启用或关闭 Windows 功能”准备相应 IIS 功能；Server 2008 R2 使用服务器管理器安装 IIS 7.5 和静态压缩。旧系统另需适用的 .NET 4.x；微软的[旧 IIS ASP.NET 注册步骤](https://learn.microsoft.com/en-us/visualstudio/debugger/remote-debugging-aspnet-on-a-remote-iis-7-5-computer)使用 Framework64 下的 aspnet_regiis.exe -ir。组件安装和必要重启应在验收前完成，不要在已有生产服务器上试跑角色安装命令。
@@ -143,7 +143,7 @@ StaticOnly 跳过动态、chunked、源 gzip 和提交后 HTTP 失败恢复，�
 
 “提交后的恢复”测试制造的是 HTTP 验证失败，不等于模拟了所有 IIS 配置 API 提交异常、断电或并发管理员写入。ARR / 代理源、真实云上报、CSP nonce、不同浏览器和会话回放播放仍需业务环境验收。
 
-IIS 启停与升级后须按业务缓存策略清理旧 HTML。脚本使用无缓存请求核对新页面，不证明浏览器、CDN 或服务工作线程中已缓存的页面同步失效；尤其不要把旧 HTML 的条件请求 304 当成新内容已经完成注入。
+IIS 启停与升级后须按业务缓存策略处理旧 HTML。脚本核对无条件及旧校验头条件请求，不证明浏览器、CDN 或服务工作线程中已缓存的页面同步失效；尤其不要把旧 HTML 的条件请求 304 当成新内容已经完成注入。定向复现时先保留原缓存采证，不要提前清除故障证据。
 
 ## 5. 读取报告、保留与清理
 
@@ -238,3 +238,9 @@ Remove-TestDeployment $report.peer (Join-Path $env:TEMP $report.peer)
 ```
 
 本轮 macOS/OrbStack 没有 Windows/IIS。实际池回收、IIS API、Windows PowerShell 5.1、Agent 加载和真实入库，均需保存目标环境结果后才能标为通过。
+
+## 0.1.7 动态压缩、冷页面与 304 回归（待 Windows 实机验收）
+
+`windows-smoke.ps1` 要求静态和动态压缩模块均可用，覆盖两种属性的继承、显式 true、显式 false；启用后两者均关闭，停用后分别恢复原值及继承关系。`second.html` 刻意不加入 probePaths：安装前预热 gzip，保存真实 ETag、Last-Modified；首次启用后分别及组合携带旧校验头发起条件 GET，再检查无条件响应、重复启用和 identity，避免预热掩盖错误。便携 PowerShell 测试只验证逻辑和模拟 API，不能替代此原生测试。
+
+额外在真实浏览器保留安装前会话，覆盖 `/` 和 `/second.html` 的首次普通刷新，保存 CDP/NetLog、真实网络状态与正文。需要单独区分初始 200 gzip 漏注入，以及修正压缩配置后 304 复用旧正文。0.1.7 已加入目标应用的入站校验头清理；验收须证明首次普通刷新是 200 且恰好一条当前注入，不能用清缓存规避。同时检查新增入站规则及两项 allowedServerVariables 权限的快照、更新、回滚、停用恢复和外部漂移拒绝，保留旧 0.1.4–0.1.6 现场及证据。动态页面、chunked、JSON/下载旁路也须覆盖。

@@ -92,6 +92,7 @@ try {
             $config = $manager.GetApplicationHostConfiguration()
             [void]$config.GetSection('system.webServer/rewrite/outboundRules').GetCollection()
             $modules = @($config.GetSection('system.webServer/globalModules').GetCollection() | ForEach-Object { $_.GetAttributeValue('name') })
+            Assert-That ($modules -contains 'DynamicCompressionModule') 'Install IIS Dynamic Content Compression before full acceptance.'
             Assert-That ($modules -contains 'StaticCompressionModule') 'Install IIS Static Content Compression before full acceptance.'
             if (-not $StaticOnly) {
                 $handlers = @($config.GetSection('system.webServer/handlers').GetCollection() | ForEach-Object { $_.GetAttributeValue('name') })
@@ -135,6 +136,7 @@ try {
             $folder = Join-Path $web $p.id
             [void][IO.Directory]::CreateDirectory((Join-Path $folder 'data'))
             Write-Utf8 (Join-Path $folder 'index.html') $html
+            Write-Utf8 (Join-Path $folder 'second.html') ($html.Replace('</head>', '<script>window.businessLiteral="</head>";</script></head>'))
             Write-Utf8 (Join-Path $folder 'excluded/index.html') $html
             Write-Utf8 (Join-Path $folder 'nohead.html') '<html><body>No head</body></html>'
             Write-Utf8 (Join-Path $folder 'data.json') '{"value":"</head>"}'
@@ -155,14 +157,17 @@ try {
             $config = $manager.GetApplicationHostConfiguration()
             $compression = $config.GetSection('system.webServer/urlCompression', $name)
             $compression.SetAttributeValue('doStaticCompression', $true)
-            $compression.SetAttributeValue('doDynamicCompression', $false)
+            $compression.SetAttributeValue('doDynamicCompression', $true)
             $config.GetSection('system.webServer/rewrite/outboundRules', $name).SetAttributeValue('rewriteBeforeCache', $false)
             Add-TestHeaderRule $config $name 'acceptance-parent' 'RESPONSE_X_Rumable_Parent' $parentValue
             foreach ($p in $scenarios) {
                 $app = $site.Applications.Add($p.app, (Join-Path $web $p.id))
                 $app.ApplicationPoolName = $name
                 Add-TestHeaderRule $config ($name + $p.app) 'acceptance-child' 'RESPONSE_X_Rumable_Child' 'child'
-                if ($p.present) { $config.GetSection('system.webServer/urlCompression', ($name + $p.app)).SetAttributeValue('doStaticCompression', [bool]::Parse($p.value)) }
+                if ($p.present) {
+                    $config.GetSection('system.webServer/urlCompression', ($name + $p.app)).SetAttributeValue('doStaticCompression', [bool]::Parse($p.value))
+                    $config.GetSection('system.webServer/urlCompression', ($name + $p.app)).SetAttributeValue('doDynamicCompression', [bool]::Parse($p.value))
+                }
             }
             $manager.CommitChanges()
             $script:created = $true
@@ -193,8 +198,11 @@ try {
         $business = Get-TestBusinessRules $name
         Invoke-Step ($scenario.id + '/baseline-and-render') {
             $effective = Get-TestEffective $name $scenario.app
-            Assert-That ($effective.static -eq $scenario.effective -and -not $effective.dynamic) 'Compression baseline mismatch.'
+            Assert-That ($effective.static -eq $scenario.effective -and $effective.dynamic -eq $scenario.effective) 'Compression baseline mismatch.'
             Assert-TestStaticGzip ($baseUrl + $scenario.app + '/index.html') $scenario.effective
+            Assert-TestStaticGzip ($baseUrl + $scenario.app + '/second.html') $scenario.effective
+            $script:oldSecond=Invoke-TestHttp ($baseUrl + $scenario.app + '/second.html') 'gzip, deflate, br, zstd' -UseCache
+            Write-Utf8 (Join-Path $work ($scenario.id+'-old-second-validators.json')) ($oldSecond.headers | ConvertTo-Json)
             Write-Utf8 $configPath $normalConfig
             $initialBinary = $Binary; if ($PreviousBinary) { $initialBinary = $PreviousBinary }
             [void](Invoke-Cli 'render' -Exe $initialBinary)
@@ -260,6 +268,10 @@ try {
             $initialBinary = $Binary; if ($PreviousBinary) { $initialBinary = $PreviousBinary }
             [void](Invoke-Cli 'enable' -Exe $initialBinary)
             $enabled = Read-TestState $stateDir $scenario.id
+            if ($initialBinary -eq $Binary) { Assert-TestConditionalPage ($baseUrl + $scenario.app + '/second.html') $scenario.id $enabled $oldSecond }
+            # Deliberately absent from probePaths: inspect its compressed variant
+            # before a repeat enable/probe/identity request can warm it.
+            [void](Assert-TestPage $baseUrl ($scenario.app + '/second.html') $scenario.id $enabled $true $parentValue)
             $key = Get-DeploymentKey $enabled
             [void](Invoke-Cli 'enable' -Exe $initialBinary)
             Assert-DeploymentUnchanged $key
@@ -268,7 +280,7 @@ try {
                 if ($path.EndsWith('/chunked.aspx')) { Assert-That ($page.headers['Transfer-Encoding'] -match '(?i)chunked') 'Dynamic fixture did not produce an actual chunked response.' }
             }
             $effective = Get-TestEffective $name $scenario.app
-            Assert-That (-not $effective.static -and -not $effective.dynamic -and -not $effective.rewriteBeforeCache) 'Enable changed compression/cache contract.'
+            Assert-That (-not $effective.static -and ($initialBinary -ne $Binary -or -not $effective.dynamic) -and -not $effective.rewriteBeforeCache) 'Enable changed compression/cache contract.'
             $page = Invoke-TestHttp ($baseUrl + $scenario.app + '/index.html') 'gzip'
             Assert-That (-not $page.headers['Content-Encoding']) 'Static compression was not disabled.'
             Assert-TestAssets $baseUrl $scenario.id $enabled
@@ -354,12 +366,18 @@ try {
             [void](Invoke-Cli 'disable')
             [void](Invoke-Cli 'disable')
             $local = Get-TestLocalCompression $name $scenario.app
-            Assert-That ($local.present -eq $scenario.present -and $local.value -eq $scenario.value) 'Disable failed to restore exact local compression/inheritance.'
+            Assert-That ($local.present -eq $scenario.present -and $local.value -eq $scenario.value -and $local.dynamicPresent -eq $scenario.present -and $local.dynamicValue -eq $scenario.value) 'Disable failed to restore exact local compression/inheritance.'
             Assert-That ((Get-TestEffective $name $scenario.app).static -eq $scenario.effective) 'Disable failed to restore effective compression.'
+            $disabledState=Read-TestState $stateDir $scenario.id
+            foreach ($key in @('rules','ruleIndex','permissions','effectivePermissions')) {
+                Assert-That ((ConvertTo-Json -InputObject $disabledState.current.native.cacheGuard.$key -Compress) -ceq (ConvertTo-Json -InputObject $disabledState.originalIIS.cacheGuard.$key -Compress)) ('Disable failed to restore inbound baseline: '+$key)
+            }
             Assert-TestStaticGzip ($baseUrl + $scenario.app + '/index.html') $scenario.effective
+            Assert-TestStaticGzip ($baseUrl + $scenario.app + '/second.html') $scenario.effective
             [void](Assert-TestPage $baseUrl $paths[0] $scenario.id (Read-TestState $stateDir $scenario.id) $false $parentValue)
             Assert-TestAssets $baseUrl $scenario.id $old
             [void](Invoke-Cli 'rollback')
+            Assert-TestConditionalPage ($baseUrl + $scenario.app + '/second.html') $scenario.id (Read-TestState $stateDir $scenario.id) $oldSecond
             [void](Invoke-Cli 'probe')
             [void](Assert-TestPage $baseUrl $paths[0] $scenario.id (Read-TestState $stateDir $scenario.id) $true $parentValue)
             [void](Invoke-Cli 'disable')
@@ -372,11 +390,11 @@ try {
         foreach ($p in $scenarios) {
             $saved = Read-TestState $stateDir $p.id
             $local = Get-TestLocalCompression $name $p.app
-            Assert-That (-not $saved.current.enabled -and $local.present -eq $p.present -and $local.value -eq $p.value) 'One application changed another application state/compression.'
+            Assert-That (-not $saved.current.enabled -and $local.present -eq $p.present -and $local.value -eq $p.value -and $local.dynamicPresent -eq $p.present -and $local.dynamicValue -eq $p.value) 'One application changed another application state/compression.'
             Assert-TestAssets $baseUrl $p.id $saved
         }
         $root = Get-TestEffective $name ''
-        Assert-That ($root.static -and -not $root.dynamic) 'Child deployment changed the parent compression baseline.'
+        Assert-That ($root.static -and $root.dynamic) 'Child deployment changed the parent compression baseline.'
     }
     if ($StaticOnly) {
         $report.steps += @{ name='dynamic-chunked-compressed-source-post-commit'; result='skipped'; reason='StaticOnly requested' }

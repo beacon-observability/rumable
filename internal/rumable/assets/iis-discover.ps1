@@ -16,7 +16,7 @@ try {
             $target = $site.Name
             if ($application.Path -ne '/') { $target += $application.Path }
             $compression = $manager.GetApplicationHostConfiguration().GetSection('system.webServer/urlCompression', $target)
-            $sites += @{Name=$site.Name;Application=$application.Path;Bindings=$bindings;StaticCompression=[bool]$compression.GetAttributeValue('doStaticCompression')}
+            $sites += @{Name=$site.Name;Application=$application.Path;Bindings=$bindings;StaticCompression=[bool]$compression.GetAttributeValue('doStaticCompression');DynamicCompression=[bool]$compression.GetAttributeValue('doDynamicCompression')}
         }
     }
     @{Sites=@($sites)} | ConvertTo-Json -Depth 8 -Compress
