@@ -108,7 +108,7 @@ func nativeApply(root string, n *Snapshot, original, expected json.RawMessage) e
 		_, err := command(x.Binary, append(append([]string{}, x.Args...), "-s", "reload")...)
 		return err
 	}
-	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "otelEnabled": n.OTelEnabled, "script": n.Script, "original": original, "expected": expected, "preserveOTel": len(n.Native) != 0})
+	data, err := iisCommand(root, n.Site, "apply", map[string]any{"enabled": n.Enabled, "otelEnabled": n.OTelEnabled, "script": n.Script, "injection": injectionTags(*n), "original": original, "expected": expected, "preserveOTel": len(n.Native) != 0})
 	if err == nil {
 		n.Native = data
 	}

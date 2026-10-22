@@ -2,6 +2,8 @@
 
 本手册以下流程默认浏览器 RUM。服务端 OTel 的模块安装、自动加载、实例/应用池共享边界、Dataway Collector、组件启停与回滚限制见 [OTel 操作手册](otel.md)。纯 OTel 挂接不为 RUM 改写压缩、缓存或上游业务请求头。已有 OTel 表时，Linux attach 可按预览加载指定原生模块；可先执行 install-otel 自动准备并校验受管依赖；完整站点卸载使用 uninstall，详见[安装与卸载](otel-installation.md)。显式指定的外部依赖仍由运维维护。
 
+SDK 来源和同步/异步的选择见[使用指南](../USER-GUIDE.md#1-sdk-注入加载与更新)，字段见[配置参考](configuration.md#sdk-加载方式)。切换来源或加载方式需重新 enable/setup；同步时探测会核对 SDK 在初始化脚本之前、无 async/defer 属性及正确的 SRI。两种脚本都会随停用移除，历史快照保留原加载方式。
+
 ## 首次挂接
 
 1. 创建观测云 Web 应用，取得对应上报方式的参数。只使用浏览器 Client Token，不使用管理 API Key。

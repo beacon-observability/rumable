@@ -157,7 +157,7 @@ func TestDiscoveryConfigWebContractAndStrictKeys(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node needed")
 	}
-	data, err := exec.Command("node", "--input-type=module", "-e", `import {makeConfig} from '../../web/generator.mjs'; console.log(JSON.stringify(['nginx','iis'].map(server=>makeConfig({server, applicationId:'test',reporting:'datakit',endpoint:'https://intake.example.com',defaultPrivacyLevel:'mask',sessionPersistence:'cookie'}))));`).CombinedOutput()
+	data, err := exec.Command("node", "--input-type=module", "-e", `import {makeConfig} from '../../web/generator.mjs'; console.log(JSON.stringify(['nginx','iis'].flatMap(server=>[{}, {sdkSource:'cdn'}, {sdkSource:'cdn',sdkURL:'https://cdn.example.com/pinned.js',sdkIntegrity:true}, {sdkLoading:'sync'}, {sdkSource:'cdn',sdkLoading:'sync'}].map(sdk=>makeConfig({...sdk,server, applicationId:'test',reporting:'datakit',endpoint:'https://intake.example.com',defaultPrivacyLevel:'mask',sessionPersistence:'cookie'})))));`).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v: %s", err, data)
 	}
@@ -173,6 +173,18 @@ func TestDiscoveryConfigWebContractAndStrictKeys(t *testing.T) {
 		c, err := loadDiscoveryConfig(name)
 		if err != nil || c.RUM.ApplicationID != "test" {
 			t.Fatal(c, err)
+		}
+		candidate := discoveredSite{Site: testSite(), URLs: []string{"https://example.com/"}}
+		if c.Server == "iis" {
+			candidate.Site.Nginx = nil
+			candidate.Site.IIS = &IIS{Site: "Fixture", Application: "/"}
+		}
+		selected, _, err := resolveDiscoveredSite(c, []discoveredSite{candidate}, nil, io.Discard)
+		if err != nil || selected.SDK != c.SDK {
+			t.Fatal("discovery lost SDK selection", selected.SDK, c.SDK, err)
+		}
+		if strings.Contains(config, `source = "cdn"`) && selected.SDK.Source != "cdn" || strings.Contains(config, `loading = "sync"`) && selected.SDK.Loading != "sync" {
+			t.Fatal("SDK options did not survive TOML decoding", selected.SDK)
 		}
 		if err := os.WriteFile(name, []byte("unexpected = true\n"+config), 0600); err != nil {
 			t.Fatal(err)

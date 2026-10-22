@@ -136,12 +136,16 @@ func preflight(root string, s Site) error {
 			return err
 		}
 	}
+	var managed []Snapshot
+	if st, err := loadState(root, s.ID); err == nil {
+		managed = append(managed, st.Current)
+	}
 	for _, path := range s.ProbePaths {
 		p, err := getPage(pageURL(s, path), nil)
 		if err != nil {
 			return err
 		}
-		if err = checkPage(s, p); err != nil {
+		if err = checkPage(s, p, managed...); err != nil {
 			return err
 		}
 	}
@@ -319,7 +323,7 @@ func restoreTransaction(root string, t transaction) error {
 			}
 			checked, err := iisCommand(root, t.After.Site, "recover-pending-check", map[string]any{
 				"previous": t.Before.Current.Native, "original": t.Before.OriginalIIS,
-				"enabled": t.After.Enabled, "script": t.After.Script,
+				"enabled": t.After.Enabled, "script": t.After.Script, "injection": injectionTags(t.After),
 			})
 			if err != nil {
 				return err

@@ -14,7 +14,7 @@
 
 ## 先恢复保留现场
 
-以管理员运行 **64 位 Windows PowerShell 5.1**。现代 x64 主机下载 [0.1.5 Windows x64 ZIP](https://static.guance.com/rumable/0.1.5/rumable_0.1.5_windows_amd64.zip) 和 [SHA256SUMS](https://static.guance.com/rumable/0.1.5/SHA256SUMS)，按[手动安装步骤](../USER-GUIDE.md#download)校验、解压到新目录；其他系统按指南选对应包。保留旧 0.1.4 程序以便比对。不要覆盖 Program Files 中的原版本，不重新 render，不删除 transaction.json、state.json 或 operation.lock。
+以管理员运行 **64 位 Windows PowerShell 5.1**。现代 x64 主机下载 [0.1.5 Windows x64 ZIP](https://static.guance.com/rumable/0.1.5/rumable_0.1.5_windows_amd64.zip) 和 [SHA256SUMS](https://static.guance.com/rumable/0.1.5/SHA256SUMS)，按[手动安装步骤](../USER-GUIDE.md#5-手动下载校验并安装-cli)校验、解压到新目录；其他系统按指南选对应包。保留旧 0.1.4 程序以便比对。不要覆盖 Program Files 中的原版本，不重新 render，不删除 transaction.json、state.json 或 operation.lock。
 
 将下面的 `$cli`、`$id` 替换为本次 0.1.5 包路径及原报告的接入 ID；`$state` 必须是原状态目录。先把该站点的 state.json、transaction.json 和原测试报告复制到仅管理员可读的证据目录。
 

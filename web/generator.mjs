@@ -1,5 +1,6 @@
 // These fields map to internal/rumable/rum.go and the bundled Web SDK's init.
 export const traceTypes = ['ddtrace', 'zipkin', 'zipkin_single_header', 'w3c_traceparent', 'w3c_traceparent_64bit', 'skywalking_v3', 'jaeger'];
+export const officialSDKURL = 'https://static.guance.com/browser-sdk/v3/dataflux-rum.js';
 const boolFields = ['trackUserInteractions', 'enablePrivacyForActionName', 'enableLongAnimationFrame', 'compressIntakeRequests', 'remoteConfiguration', 'trackSessionAcrossSubdomains', 'useSecureSessionCookie', 'allowFallbackToLocalStorage'];
 const rateFields = ['sessionSampleRate', 'sessionOnErrorSampleRate', 'sessionReplaySampleRate', 'sessionReplayOnErrorSampleRate', 'tracingSampleRate'];
 const stringFields = ['env', 'service', 'version', 'actionNameAttribute', 'workerUrl'];
@@ -19,6 +20,21 @@ function url(value, label, {origin = false, https = false} = {}) {
 
 export function makeConfig(m) {
   const manual = !!m.manualTarget;
+  const sdkSource = m.sdkSource || 'bundled';
+  if (!['bundled', 'cdn'].includes(sdkSource)) throw Error('请选择网站同域或 CDN 加载 SDK');
+  const sdkLoading = m.sdkLoading || 'async';
+  if (!['async', 'sync'].includes(sdkLoading)) throw Error('请选择异步或同步加载 SDK');
+  let sdkText = '';
+  if (sdkSource === 'cdn' || sdkLoading === 'sync') {
+    sdkText = `\n[${manual ? 'sites.sdk' : 'sdk'}]\nsource = ${encode(sdkSource)}\n`;
+  }
+  if (sdkSource === 'cdn') {
+    const raw = (m.sdkURL || officialSDKURL).trim();
+    const remote = url(raw, 'CDN 地址', {https: true});
+    if (raw.includes('?') || remote.pathname === '/') throw Error('CDN 地址需包含脚本路径，不能带查询参数');
+    sdkText += `url = ${encode(raw)}\nintegrity = ${!!m.sdkIntegrity}\n`;
+  }
+  if (sdkLoading === 'sync') sdkText += 'loading = "sync"\n';
   let base;
   if (manual) {
     if (!/^[a-z][a-z0-9-]{0,47}$/.test(m.id)) throw Error('接入标识需以小写字母开头，使用小写字母、数字或短横线，最多 48 位');
@@ -63,7 +79,7 @@ export function makeConfig(m) {
   }
   const rumText = Object.entries(rum).map(([k,v]) => `${k} = ${encode(v)}`).join('\n');
   if (!manual) {
-    return `schemaVersion = 1\nserver = ${encode(m.server)}\n${m.server === 'iis' ? `allowCompressionChanges = ${!!m.allowCompressionChanges}\n` : ''}\n[rum]\n${rumText}\n`;
+    return `schemaVersion = 1\nserver = ${encode(m.server)}\n${m.server === 'iis' ? `allowCompressionChanges = ${!!m.allowCompressionChanges}\n` : ''}\n[rum]\n${rumText}\n${sdkText}`;
   }
   const paths = key => {
     const values = lines(m[key]);
@@ -86,7 +102,7 @@ export function makeConfig(m) {
     if ((m.iisApplication === '/' ? '/' : m.iisApplication + '/') !== base.pathname) throw Error('网站地址的路径需与 IIS 应用路径一致');
     target = `[sites.iis]\nsite = ${encode(m.iisSite)}\napplication = ${encode(m.iisApplication)}\nallowCompressionChanges = ${!!m.allowCompressionChanges}`;
   }
-  return `schemaVersion = 1\n\n[[sites]]\nid = ${encode(m.id)}\npublicURL = ${encode(m.publicURL)}\nprobePaths = ${encode(probes)}\nincludePaths = ${encode(include)}\nexcludePaths = ${encode(exclude)}\n\n${target}\n\n[sites.rum]\n${rumText}\n`;
+  return `schemaVersion = 1\n\n[[sites]]\nid = ${encode(m.id)}\npublicURL = ${encode(m.publicURL)}\nprobePaths = ${encode(probes)}\nincludePaths = ${encode(include)}\nexcludePaths = ${encode(exclude)}\n\n${target}\n\n[sites.rum]\n${rumText}\n${sdkText}`;
 }
 
 export function validateManifest(m, manifestURL) {
@@ -118,6 +134,8 @@ function base64(text) {
 export function makeCommand(m, manifest, manifestURL) {
   validateManifest(manifest, manifestURL);
   if (!m.manualTarget && !manifest.capabilities.includes('rum-discovery-v1')) throw Error('此版本不支持自动发现站点，请选择 0.1.4 或更新版本，或启用手动指定站点');
+  if (m.sdkLoading === 'sync' && !manifest.capabilities.includes('rum-sdk-loading-v1')) throw Error('此安装包不支持同步加载，请读取支持该功能的新发布清单，或选择异步加载');
+  if (!m.manualTarget && (m.sdkSource === 'cdn' || m.sdkLoading === 'sync') && !manifest.capabilities.includes('rum-discovery-sdk-v1')) throw Error('此安装包不支持自动发现时配置 CDN 或加载方式，请读取支持该功能的新发布清单，或手动指定站点生成完整配置');
   const config = base64(makeConfig(m));
   const base = new URL(manifest.artifactBase || '.', manifestURL).href;
   if (m.server === 'iis') {

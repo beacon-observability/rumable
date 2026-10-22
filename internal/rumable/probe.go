@@ -105,7 +105,7 @@ func probeCDNSDK(s Site, info SDKInfo, raw string) error {
 	return nil
 }
 
-func checkPage(s Site, p Page) error {
+func checkPage(s Site, p Page, managed ...Snapshot) error {
 	t, params, err := mime.ParseMediaType(p.Header.Get("Content-Type"))
 	if err != nil || t != "text/html" {
 		return fmt.Errorf("%s: expected text/html", p.URL)
@@ -126,11 +126,30 @@ func checkPage(s Site, p Page) error {
 	if err := checkCSP(s, p); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
 	}
+	var managedSync *Snapshot
+	for i := range managed {
+		n := &managed[i]
+		if n.Enabled && n.Site.SDK.Loading == "sync" && n.Site.ID == s.ID {
+			managedSync = n
+			break
+		}
+	}
 	for _, tag := range doc.elements {
 		if tag.name != "script" {
 			continue
 		}
 		a := tag.attrs
+		if _, ok := a["data-rumable-sdk"]; ok {
+			if managedSync == nil || a["data-rumable-sdk"] != s.ID {
+				return errors.New("unrecognized synchronous SDK injection; verify managed state before changing integration")
+			}
+			// Only verify an existing tag: newly included paths may not have
+			// been instrumented by the currently deployed snapshot.
+			if _, err := inspectInjection(managedSync.Site, p, managedSync); err != nil {
+				return fmt.Errorf("existing synchronous injection: %w", err)
+			}
+			continue
+		}
 		if owner, ok := a["data-rumable"]; ok && owner != s.ID {
 			return errors.New("another Rumable deployment already instruments this page")
 		}
@@ -208,27 +227,36 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 	}
 	count := 0
 	total := 0
+	sdkCount, sdkIndex, initIndex := 0, -1, -1
 	doc, err := inspectHTML(p.Body)
 	if err != nil {
 		return r, err
 	}
-	for _, tag := range doc.elements {
+	for index, tag := range doc.elements {
 		if tag.name != "script" {
 			continue
 		}
 		a := tag.attrs
+		if owner, exists := a["data-rumable-sdk"]; exists {
+			if owner != s.ID {
+				return r, errors.New("another deployment's SDK tag is present")
+			}
+			sdkCount++
+			sdkIndex = index
+		}
 		if _, exists := a["data-rumable"]; exists {
 			total++
 		}
 		if a["data-rumable"] == s.ID {
 			count++
+			initIndex = index
 			r.Script = a["src"]
 		}
 	}
 	r.Injected = count > 0
 	if expected != nil && !expected.Enabled {
 		r.Message = "RUM injection absent; HTTP/component state only, SDK execution and OTLP ingestion unverified"
-		if count != 0 {
+		if count != 0 || sdkCount != 0 {
 			return r, errors.New("injection still present after disable; check HTML caches")
 		}
 		return r, nil
@@ -242,16 +270,45 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 	if !strings.HasPrefix(r.Script, s.assetPrefix()) || strings.ContainsAny(r.Script, "?#") {
 		return r, errors.New("unexpected bootstrap path")
 	}
-	scripts := []string{r.Script}
+	n := Snapshot{Site: s, Script: r.Script}
 	if expected != nil {
-		scripts = append(scripts, snapshotSDKURL(*expected))
+		n = *expected
 	} else {
-		_, info, e := sdk()
-		if e != nil {
-			return r, e
+		_, n.SDK, err = sdk()
+		if err != nil {
+			return r, err
 		}
-		scripts = append(scripts, sdkLocation(s, info))
+		if s.SDK.Source == "cdn" {
+			n.SDKURL = sdkLocation(s, n.SDK)
+		}
 	}
+	if n.Site.SDK.Loading == "sync" {
+		if sdkCount != 1 || sdkIndex+1 != initIndex {
+			return r, errors.New("expected synchronous SDK immediately before initialization script")
+		}
+		if doc.elements[sdkIndex].attrs["src"] != snapshotSDKURL(n) {
+			return r, errors.New("stale synchronous SDK URL; clear HTML caches")
+		}
+		for _, index := range []int{sdkIndex, initIndex} {
+			a := doc.elements[index].attrs
+			_, async := a["async"]
+			_, deferScript := a["defer"]
+			if async || deferScript || a["type"] != "" {
+				return r, errors.New("synchronous scripts must be classic scripts without async or defer")
+			}
+		}
+		a := doc.elements[sdkIndex].attrs
+		if n.Site.SDK.Source == "cdn" && n.Site.SDK.Integrity {
+			if a["integrity"] != sdkIntegrity(n.SDK) || a["crossorigin"] != "anonymous" {
+				return r, errors.New("synchronous SDK integrity attributes do not match deployment")
+			}
+		} else if a["integrity"] != "" || a["crossorigin"] != "" {
+			return r, errors.New("unexpected synchronous SDK integrity attributes")
+		}
+	} else if sdkCount != 0 {
+		return r, errors.New("synchronous SDK tag remains in an asynchronous deployment")
+	}
+	scripts := []string{r.Script, snapshotSDKURL(n)}
 	if err := checkCSP(s, p, scripts...); err != nil {
 		return r, err
 	}

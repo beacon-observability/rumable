@@ -25,8 +25,11 @@ $site.publicURL='https://example.com/app/'; $site.includePaths=@('/app/'); $site
 $nodes=Get-RumNodes
 Assert-That ([regex]::IsMatch('/app/__rumable__/test/x',([xml]$nodes.rules[0]).rule.conditions.add[1].pattern)) 'Application asset exclusion is wrong'
 $site.publicURL='https://example.com/'; $site.includePaths=@('/')
+foreach ($injection in @('', '<script data-rumable-sdk="test" src="https://cdn.example.com/sdk.js" integrity="sha256-test" crossorigin="anonymous"></script><script data-rumable="test" src="/__rumable__/test/init.hash.js"></script>')) {
+$request.injection=$injection
 foreach ($legacy in @($false,$true)) {
     $nodes=Get-RumNodes -LegacyNullExclude:$legacy
+    if ($injection) { Assert-That (([xml]$nodes.rules[0]).rule.action.value -ceq ('<head>'+$injection)) 'Synchronous tags changed order or attributes in IIS rule' }
     if ($legacy) { Assert-That (([xml]$nodes.rules[0]).rule.conditions.add[1].pattern -ceq '^(?:|/__rumable__/)') 'Legacy fault fixture changed' }
     $doc=New-Object Xml.XmlDocument; $v=$doc.CreateElement('virtualDirectory');$v.SetAttribute('path',$vpath);$v.SetAttribute('physicalPath',(Join-Path $request.root 'public'))
     $live=@{rules=$nodes.rules;preconditions=$nodes.preconditions;virtualDirectory=$v.OuterXml;compressionPresent=$true;compressionValue='false'}
@@ -43,6 +46,8 @@ foreach ($legacy in @($false,$true)) {
     $restored=$live.Clone();$restored.rules=@();$restored.preconditions=@();$restored.compressionPresent=$false;$restored.compressionValue=$null
     Assert-PendingRumSnapshot $restored
 }
+}
+$request.injection=''
 Assert-That ((ConvertTo-CanonicalOwnedXml '<add input="{URL}" pattern="/" negate="false" />') -ceq (ConvertTo-CanonicalOwnedXml '<add pattern="/" input="{URL}" />')) 'MWA default attributes do not compare'
 Assert-That ((ConvertTo-CanonicalOwnedXml '<rule name="a"><match pattern="x" /></rule>') -cne (ConvertTo-CanonicalOwnedXml '<rule name="a" enabled="false"><match pattern="x" /></rule>')) 'Unknown behavioral change ignored'
 

@@ -12,6 +12,12 @@ site = "Default Web Site"
 application = "/"
 allowCompressionChanges = true
 
+[sites.sdk]
+source = "bundled" # bundled（网站同域）或 cdn
+loading = "async" # sync 会阻塞 HTML 解析；需要支持同步加载的新版本
+# url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
+integrity = false # 仅 CDN 可开启，跨域时需要 CORS
+
 [sites.rum]
 applicationId = "REPLACE_APPLICATION_ID"
 datakitOrigin = "https://datakit.example.com"

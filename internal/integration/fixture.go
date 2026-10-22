@@ -158,6 +158,15 @@ func main() {
 			io.WriteString(w, "<html><head></HeAd><body>Byte-preserved HTML</body></html>")
 			return
 		}
+		if r.URL.Path == "/loading" {
+			io.WriteString(w, `<html><head><title>SDK loading order</title><script src="/loading-early.js"></script></head><body><h1>SDK state before the first business script</h1><pre id="loading-state">Waiting</pre></body></html>`)
+			return
+		}
+		if r.URL.Path == "/loading-early.js" {
+			w.Header().Set("Content-Type", "application/javascript")
+			io.WriteString(w, `var earlyRUMStatus=window.__RUMABLE__&&window.__RUMABLE__.status;document.addEventListener('DOMContentLoaded',function(){document.querySelector('#loading-state').textContent=earlyRUMStatus||'not initialized';});`)
+			return
+		}
 		if r.URL.Path == "/app.js" {
 			w.Header().Set("Content-Type", "application/javascript")
 			io.WriteString(w, `

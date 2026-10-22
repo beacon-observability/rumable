@@ -22,10 +22,11 @@ import (
 // DiscoveryConfig deliberately contains no guessed deployment target. The
 // ordinary Site validator and setup transaction still run after selection.
 type DiscoveryConfig struct {
-	SchemaVersion           int    `toml:"schemaVersion"`
-	Server                  string `toml:"server"`
-	AllowCompressionChanges bool   `toml:"allowCompressionChanges"`
-	RUM                     RUM    `toml:"rum"`
+	SchemaVersion           int       `toml:"schemaVersion"`
+	Server                  string    `toml:"server"`
+	AllowCompressionChanges bool      `toml:"allowCompressionChanges"`
+	RUM                     RUM       `toml:"rum"`
+	SDK                     SDKConfig `toml:"sdk"`
 }
 
 type discoveredSite struct {
@@ -56,6 +57,9 @@ func loadDiscoveryConfig(name string) (DiscoveryConfig, error) {
 	}
 	if !c.RUM.isEnabled() {
 		return c, errors.New("discovery requires RUM enabled")
+	}
+	if err := c.SDK.validate(); err != nil {
+		return c, fmt.Errorf("sdk: %w", err)
 	}
 	return c, nil
 }
@@ -146,6 +150,7 @@ func resolveDiscoveredSite(c DiscoveryConfig, candidates []discoveredSite, in io
 		s.ProbePaths = []string{path}
 	}
 	s.RUM = c.RUM
+	s.SDK = c.SDK
 	if s.IIS != nil {
 		s.IIS.AllowCompressionChanges = c.AllowCompressionChanges || s.IIS.AllowCompressionChanges
 		if selected.StaticCompression && !s.IIS.AllowCompressionChanges {

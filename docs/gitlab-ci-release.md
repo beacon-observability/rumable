@@ -31,6 +31,8 @@ Runner 的 Go 模块下载默认使用 `GOPROXY=https://goproxy.cn,direct`，保
 
 先更新并审核源码、`internal/rumable/config.go` 的 `Version` 和版本说明；如需升级内置 SDK，在准备阶段运行 `go run scripts/sync-sdk.go`，将 SDK 与元数据一并提交。CI 验证其摘要，使用 tag 中已提交的 SDK，不在重试时下载变化的 latest。
 
+同步加载与自动发现 SDK 参数需要页面和 CLI 同时发布。新清单分别声明 `rum-sdk-loading-v1`、`rum-discovery-sdk-v1`；仅替换旧版本目录下的页面无法增加 CLI 能力。应使用新版本号发布，不覆盖既有 0.1.5 包。页面会在读取旧清单时阻止生成不兼容的安装命令。
+
 将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.5`：
 
 ```sh

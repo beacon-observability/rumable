@@ -35,11 +35,15 @@ type Site struct {
 
 type SDKConfig struct {
 	Source    string `json:"source,omitempty" toml:"source"`
+	Loading   string `json:"loading,omitempty" toml:"loading"`
 	URL       string `json:"url,omitempty" toml:"url"`
 	Integrity bool   `json:"integrity,omitempty" toml:"integrity"`
 }
 
 func (c SDKConfig) validate() error {
+	if c.Loading != "" && c.Loading != "async" && c.Loading != "sync" {
+		return errors.New("sdk.loading must be async or sync")
+	}
 	if c.Source == "" || c.Source == "bundled" {
 		if c.URL != "" || c.Integrity {
 			return errors.New("sdk.url and sdk.integrity require sdk.source=cdn")
@@ -256,6 +260,7 @@ func siteDir(root string, s Site) string { return filepath.Join(root, "sites", s
 
 const sdkExample = `[sites.sdk]
 source = "bundled" # bundled (same origin) or cdn
+loading = "async" # async (default) or sync (blocks HTML parsing)
 # url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
 integrity = false # CDN SRI requires Access-Control-Allow-Origin.
 

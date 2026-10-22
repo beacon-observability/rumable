@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -101,7 +102,7 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 		if enabled {
 			// HEAD needs the GET metadata cleanup. A regex avoids longer hash keys
 			// exceeding the default 32-byte map bucket on legacy Nginx builds.
-			fmt.Fprintf(&h, "    \"~^1:1:(GET|HEAD):200::0$\" %s;\n", nginxQuote(scriptTag(s, n.Script)))
+			fmt.Fprintf(&h, "    \"~^1:1:(GET|HEAD):200::0$\" %s;\n", nginxQuote(injectionTags(n)))
 		}
 		h.WriteString("}\n")
 		// Empty dynamic matches bypass the filter; excluded HTML must keep its bytes.
@@ -131,6 +132,25 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 
 func scriptTag(s Site, src string) string {
 	return `<script async data-rumable="` + s.ID + `" src="` + src + `"></script>`
+}
+
+func injectionTags(n Snapshot) string {
+	s := n.Site
+	if s.SDK.Loading != "sync" {
+		return scriptTag(s, n.Script)
+	}
+	integrity := ""
+	if s.SDK.Source == "cdn" && s.SDK.Integrity {
+		integrity = ` integrity="` + sdkIntegrity(n.SDK) + `" crossorigin="anonymous"`
+	}
+	return `<script data-rumable-sdk="` + s.ID + `" src="` + escapeScriptURL(snapshotSDKURL(n)) + `"` + integrity + `></script>` +
+		`<script data-rumable="` + s.ID + `" src="` + escapeScriptURL(n.Script) + `"></script>`
+}
+
+func escapeScriptURL(raw string) string {
+	// Character references keep Nginx variables and IIS rewrite tokens literal
+	// until the browser parses the HTML attribute.
+	return strings.NewReplacer("$", "&#36;", "{", "&#123;", "}", "&#125;").Replace(html.EscapeString(raw))
 }
 func nginxQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(s) + `"`

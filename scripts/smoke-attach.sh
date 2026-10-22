@@ -147,6 +147,34 @@ if curl -fsS http://127.0.0.1:19182/ | grep -q 'data-rumable='; then fail 'other
 curl -fsS -H 'Authorization: Bearer attach-check' http://127.0.0.1:19180/headers > "$work/headers.json"
 grep 'tenant-preserved' "$work/headers.json" >/dev/null || fail 'business headers lost'
 expect_failure 'run disable' cli rollback --attachment --yes
+echo 'Stage: synchronous loading, repeated enable and rollback to asynchronous loading'
+cp "$work/site.toml" "$work/loading-base.toml"
+sources='bundled'
+if [ "${CDN:-0}" = 1 ]; then sources='bundled cdn'; fi
+for sdk_source in $sources; do
+ docker exec "$server" cp /work/attach/loading-base.toml /work/attach/site.toml
+ printf '\n[sites.sdk]\nsource = "%s"\nloading = "sync"\n' "$sdk_source" >> "$work/site.toml"
+ cli enable; cli probe; cli enable
+ curl -fsS --compressed http://127.0.0.1:19180/static.html > "$work/loading.html"
+ grep -q 'data-rumable-sdk="smoke"' "$work/loading.html" || fail 'synchronous SDK tag missing'
+ if grep -q '<script async data-rumable=' "$work/loading.html"; then fail 'synchronous bootstrap is asynchronous'; fi
+ cli rollback; cli probe
+ curl -fsS http://127.0.0.1:19180/static.html > "$work/loading.html"
+ grep -q '<script async data-rumable="smoke"' "$work/loading.html" || fail 'rollback did not restore async loading'
+ if grep -q 'data-rumable-sdk=' "$work/loading.html"; then fail 'sync tag survived rollback'; fi
+done
+docker exec "$server" cp /work/attach/loading-base.toml /work/attach/site.toml
+echo 'Stage: expanding synchronous injection to a previously excluded probe path'
+sed 's|includePaths = \["/"\]|includePaths = ["/"]\nexcludePaths = ["/loading"]|' "$work/loading-base.toml" > "$work/site.toml"
+printf '\n[sites.sdk]\nloading = "sync"\n' >> "$work/site.toml"
+cli enable
+if curl -fsS http://127.0.0.1:19180/loading | grep -q 'data-rumable='; then fail 'excluded loading page was injected'; fi
+sed 's|probePaths = .*|probePaths = ["/loading", "/static.html"]|' "$work/loading-base.toml" > "$work/site.toml"
+printf '\n[sites.sdk]\nloading = "sync"\n' >> "$work/site.toml"
+cli enable; cli probe
+curl -fsS http://127.0.0.1:19180/loading | grep 'data-rumable-sdk="smoke"' >/dev/null || fail 'newly included loading page was not injected'
+docker exec "$server" cp /work/attach/loading-base.toml /work/attach/site.toml
+cli enable
 cli disable
 cli rollback
 cli probe
@@ -189,7 +217,9 @@ restored_ok=0
 for i in $(seq 1 30); do restored=$(cache_counter); if [ "$(cache_counter)" = "$restored" ]; then restored_ok=1; break; fi; sleep 0.1; done
 test "$restored_ok" = 1 || fail 'original cache behavior not restored by attachment undo'
 if [ "${KEEP:-0}" = 1 ]; then
- if [ "${CDN:-0}" = 1 ]; then printf '\n[sites.sdk]\nsource = "cdn"\n' >> "$work/site.toml"; fi
+ if [ "${CDN:-0}" = 1 ] || [ "${SYNC:-0}" = 1 ]; then
+  printf '\n[sites.sdk]\nsource = "%s"\nloading = "%s"\n' "$([ "${CDN:-0}" = 1 ] && echo cdn || echo bundled)" "$([ "${SYNC:-0}" = 1 ] && echo sync || echo async)" >> "$work/site.toml"
+ fi
  cli attach --yes; cli enable
 fi
 echo "PASS: automatic nginx attachment, consent, idempotence, compression, isolation, failure recovery, enable/disable/rollback, external-edit conflict, exact undo and retained backups ($image)"

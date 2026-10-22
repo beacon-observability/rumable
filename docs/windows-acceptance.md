@@ -20,7 +20,7 @@
 
 本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 PowerShell 5.1+、64 位 Windows、IIS 与 URL Rewrite 2.x。0.1.5 安装器自动选择原生 x64 / ARM64 和 modern / legacy 包；旧系统也要先安装适用的 PowerShell 5.1。真正 32 位 Windows 在下载前拒绝 IIS 接入。下方手工 CLI 验收仍覆盖 PS 3 基线。
 
-无法访问 Git 的用户可以直接从 OSS 获取 CLI、文档和配置示例，按[用户指南](../USER-GUIDE.md#manual-windows)自建临时站点并手动验收。下面“完整自动验收”的仓库脚本是开发者测试工具，不是安装依赖。0.1.5 一键安装自动隔离私有文件并开放公共脚本读取权限；验收时按用户指南核对实际身份和 NTFS ACL。
+无法访问 Git 的用户可以直接从 OSS 获取 CLI、文档和配置示例，按[用户指南](../USER-GUIDE.md#7-手动配置-windows--iis)自建临时站点并手动验收。下面“完整自动验收”的仓库脚本是开发者测试工具，不是安装依赖。0.1.5 一键安装自动隔离私有文件并开放公共脚本读取权限；验收时按用户指南核对实际身份和 NTFS ACL。
 
 1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.5` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
 2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，按检测结果下载并校验同版本 ZIP，安装原生 CLI，再运行 `setup --discover`（手动模式为 `setup`）。记录命令退出结果；日志或截图中不要暴露令牌。

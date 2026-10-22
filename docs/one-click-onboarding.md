@@ -1,6 +1,6 @@
 # 页面配置与一键接入
 
-面向安装用户的完整步骤、可执行命令和失败处理见[用户指南：自动脚本安装](../USER-GUIDE.md#automatic)。本页主要说明页面行为、产品集成与 CI 约定；手动选包及配置见[手动安装](../USER-GUIDE.md#download)，无需访问 Git。
+面向安装用户的完整步骤、可执行命令和失败处理见[用户指南：自动脚本安装](../USER-GUIDE.md#4-使用页面和自动安装脚本)。本页主要说明页面行为、产品集成与 CI 约定；手动选包及配置见[手动安装](../USER-GUIDE.md#5-手动下载校验并安装-cli)，无需访问 Git。
 
 页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
 
@@ -8,7 +8,7 @@
 
 ## 当前可用流程
 
-1. 页面默认只填写 RUM 配置并选择 Linux/Nginx 或 Windows/IIS，生成不含网站目标的 TOML。网站、路径和程序位置等字段收起到高级选项，勾选“手动指定站点与路径”才启用。
+1. 页面填写 RUM 配置，选择 SDK 来源（同域/CDN）、加载方式（异步/同步）和 Linux/Nginx 或 Windows/IIS，生成不含网站目标的 TOML。网站、路径和程序位置等字段收起到高级选项，勾选“手动指定站点与路径”才启用。
 2. 线上页面自动读取同版本发布清单，也可切换 latest 或指定版本。
 3. 根据服务器类型生成一条带配置的命令：Linux 下载并运行 `install.sh`，IIS 下载并运行 `install.ps1`。
 4. 安装脚本自动识别架构、下载指定版本包，按脚本内固定摘要校验 SHA-256，安装版本化 CLI，解码临时 TOML，执行 `rumable setup --discover --yes`；手动模式不带 `--discover`。
@@ -16,7 +16,7 @@
 
 配置在浏览器本地生成，无配置服务依赖，不上传到 OSS。命令中的 Base64 只是防止 shell 转义改变 TOML，不是加密；包含的 clientToken 是浏览器公开令牌，不得填写管理 API Key。临时配置在结束时删除；受管状态保存配置，后续 disable/rollback 不依赖临时文件。需要修改时重新生成命令。自动发现格式的 TOML 使用 `setup --discover --config rumable.toml --state-dir ... --yes`；手动模式的完整 TOML 才能直接交给 `enable`。
 
-当前一键入口仅做 RUM，默认同域提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
+当前一键入口仅做 RUM，默认同域 + 异步提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
 
 ## 页面生成的短命令
 
@@ -51,10 +51,25 @@ Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.5\rumable.exe`，状态�
 - 自动模式默认验证网站或应用首页。需要登录、首页重定向、非完整 HTML、多种模板、HTTPS 上报或 Worker 同源限制导致验证失败时，按提示使用高级设置，补齐适合该网站的验收路径。自动发现不会跳过预检或放宽 TLS/CSP。
 - 老版本清单没有 `rum-discovery-v1` 时，页面拒绝生成自动发现命令；仍可用高级手动模式生成兼容配置。
 
+## SDK 来源、加载与安装包兼容
+
+页面提供“SDK 来源与加载方式”独立区域。CDN 地址默认使用官方 v3，可改为自建 HTTPS 地址；SRI 默认关闭，切回同域不输出 CDN 专属字段。右侧摘要显示所选来源和加载方式，更新说明按来源变化。两种加载方式的时序和更新机制见[用户指南](../USER-GUIDE.md#1-sdk-注入加载与更新)。
+
+| 配置 | 自动发现格式 | 完整站点格式 | 发布清单要求 |
+|---|---|---|---|
+| 同域 + 异步（默认） | 省略 sdk 表 | 省略 sites.sdk 表 | 原有能力即可 |
+| CDN + 异步 | `[sdk]` source/url/integrity | `[sites.sdk]` source/url/integrity | 自动模式增加 rum-discovery-sdk-v1 |
+| 同域/CDN + 同步 | `[sdk]` loading="sync" | `[sites.sdk]` loading="sync" | rum-sdk-loading-v1；自动模式同时需要 rum-discovery-sdk-v1 |
+
+同步选项不能通过仅更新静态页交付：CLI、Nginx/IIS 注入逻辑、检查和恢复都必须来自配套包。旧清单会禁止生成不兼容命令，仍允许下载配置以供新 CLI 使用。异步省略 loading，保证已支持 CDN 的旧包仍可处理手动 CDN 配置。加载方式、CDN 地址及 SRI 会进入安装命令中的 TOML，自动发现后传给所选站点。
+
+发布清单里的 sdk.version 是包内版本；可变 CDN 的实际版本可能随后变化。读取 latest 只选择本次安装包，不会更新已接入站点，也不是定时更新任务。
+
 ## SDK 字段对应
 
 | 页面配置 | SDK / Rumable 字段 |
 |---|---|
+| SDK 来源、加载方式、CDN 地址、SRI | sdk.source、sdk.loading、sdk.url、sdk.integrity（完整配置使用 sites.sdk） |
 | 应用 ID | applicationId |
 | OpenWay / DataKit | site + clientToken / datakitOrigin，互斥 |
 | 服务、环境、业务版本 | service、env、version |
@@ -70,7 +85,7 @@ Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.5\rumable.exe`，状态�
 
 ## CI → OSS 约定
 
-复用 `scripts/release.go` 打包。新增输出 `manifest.json`，包含 schemaVersion、version、revision、SDK 元数据、`rum-setup-v1` / `rum-install-v1` / `rum-discovery-v1` 能力、安装脚本及各平台包的文件名和 SHA-256；manifest 本身进入 SHA256SUMS。依赖许可证随包发布。
+复用 `scripts/release.go` 打包。新增输出 `manifest.json`，包含 schemaVersion、version、revision、SDK 元数据、`rum-setup-v1` / `rum-install-v1` / `rum-discovery-v1` / `rum-discovery-sdk-v1` / `rum-sdk-loading-v1` 能力、安装脚本及各平台包的文件名和 SHA-256；manifest 本身进入 SHA256SUMS。依赖许可证随包发布。
 
 CI 与 OSS 变量、受保护 tag、重试和验收见 [GitLab CI 发布说明](gitlab-ci-release.md)。实际目录：
 

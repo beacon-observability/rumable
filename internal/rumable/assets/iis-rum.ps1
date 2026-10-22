@@ -28,6 +28,9 @@ function Get-RumNodes([switch]$LegacyNullExclude) {
         if ($kind -eq 'inject') {
             $match.SetAttribute('filterByTags', 'None'); $match.SetAttribute('pattern', '<head>'); $match.SetAttribute('occurrences', '1')
             $value = '<head><script async data-rumable="' + $site.id + '" src="' + $request.script + '"></script>'
+            # Go builds both ordered synchronous tags from the saved SDK metadata.
+            # Legacy requests retain their exact asynchronous rule for recovery.
+            if ($request.injection) { $value = '<head>' + $request.injection }
         } else {
             $header = 'RESPONSE_ETag'; if ($kind -eq 'modified') { $header = 'RESPONSE_Last_Modified' }
             $match.SetAttribute('serverVariable', $header); $match.SetAttribute('pattern', '.+')

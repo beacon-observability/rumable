@@ -3,7 +3,7 @@ import {execFileSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
+import {makeConfig, makeCommand, validateManifest, officialSDKURL} from './generator.mjs';
 export const model = {
   manualTarget:true,
   id:'website', applicationId:'app-test', reporting:'openway', endpoint:'https://openway.example.com', clientToken:'browser-only-token',
@@ -20,6 +20,13 @@ export const manifest = {schemaVersion:1, version:'0.1.0-test.1', capabilities:[
 ]};
 const source = 'https://downloads.example.com/rumable/0.1.0-test.1/manifest.json';
 const fixtures = [model, {...model, reporting:'datakit', sessionReplayEnabled:true, compressIntakeRequests:true, workerUrl:'/worker.js'}, {...model, server:'iis', publicURL:'https://www.example.com/app/', iisApplication:'/app', includePaths:'/app/', probePaths:'/app/'}];
+fixtures.push(...['nginx','iis'].flatMap(server => [
+  {...model, server, sdkSource:'cdn', sdkURL:officialSDKURL},
+  {...model, server, sdkSource:'cdn', sdkURL:'https://cdn.example.com/rum/3.3.21.js', sdkIntegrity:true},
+  {...model, server, sdkSource:'bundled', sdkLoading:'sync'},
+  {...model, server, sdkSource:'cdn', sdkURL:officialSDKURL, sdkLoading:'sync'},
+  {...model, server, sdkSource:'cdn', sdkURL:'https://cdn.example.com/rum/3.3.21.js', sdkLoading:'sync', sdkIntegrity:true},
+]));
 if (process.argv.includes('--fixtures')) {
   process.stdout.write(JSON.stringify(fixtures.map(makeConfig)));
 } else {
@@ -35,6 +42,49 @@ if (process.argv.includes('--fixtures')) {
   });
   test('reject invalid SDK, server and URL combinations', () => {
     for (const patch of [{sessionSampleRate:'101'},{sessionSampleRate:'NaN'},{clientToken:'a&b'},{applicationId:''},{endpoint:'https://example.com/path'},{endpoint:'https://example.com?'},{endpoint:'http://example.com'},{defaultPrivacyLevel:'unknown'},{probePaths:'/api/'},{workerUrl:'//www.example.com/x'},{workerUrl:'https://other.example/x'},{publicURL:'https://example.com/?'},{server:'iis',iisApplication:'/app'}]) assert.throws(() => makeConfig({...model,...patch}), JSON.stringify(patch));
+  });
+  test('SDK source round trips through config and commands in both setup modes', () => {
+    const current = {...manifest, capabilities:[...manifest.capabilities,'rum-discovery-v1','rum-discovery-sdk-v1']};
+    for (const server of ['nginx','iis']) for (const manualTarget of [false,true]) {
+      const m = {...model, server, manualTarget, sdkSource:'cdn', sdkURL:'https://cdn.example.com/pinned.js', sdkIntegrity:true};
+      const config = makeConfig(m);
+      assert.ok(config.includes(manualTarget ? '[sites.sdk]' : '[sdk]'));
+      assert.match(config, /source = "cdn"\nurl = "https:\/\/cdn.example.com\/pinned.js"\nintegrity = true/);
+      assert.ok(makeCommand(m,current,source).includes(Buffer.from(config).toString('base64')));
+      const bundled = makeConfig({...m,sdkSource:'bundled'});
+      assert.doesNotMatch(bundled, /\[(?:sites\.)?sdk\]|pinned.js|integrity/);
+      assert.equal(bundled,makeConfig({...model,server,manualTarget}));
+      const official = makeConfig({...m,sdkURL:'',sdkIntegrity:false});
+      assert.ok(official.includes(officialSDKURL));
+      assert.match(official, /integrity = false/);
+    }
+  });
+  test('CDN discovery refuses incompatible packages and malformed URLs', () => {
+    const old = {...manifest,capabilities:[...manifest.capabilities,'rum-discovery-v1']};
+    const m = {...model,manualTarget:false,sdkSource:'cdn'};
+    for (const server of ['nginx','iis']) {
+      assert.throws(() => makeCommand({...m,server},old,source), /不支持自动发现时配置 CDN/);
+      assert.doesNotThrow(() => makeCommand({...m,server,manualTarget:true},old,source));
+      assert.doesNotThrow(() => makeCommand({...m,server,sdkSource:'bundled'},old,source));
+    }
+    for (const sdkURL of ['http://cdn.example.com/sdk.js','https://cdn.example.com/','https://cdn.example.com/sdk.js?','https://cdn.example.com/sdk.js?v=1','https://cdn.example.com/sdk.js#v','https://user:pass@cdn.example.com/sdk.js','//cdn.example.com/sdk.js']) {
+      assert.throws(() => makeConfig({...m,sdkURL}), sdkURL);
+    }
+    assert.throws(() => makeConfig({...m,sdkSource:'unknown'}));
+  });
+  test('synchronous loading is explicit and requires matching release capabilities', () => {
+    const current = {...manifest, capabilities:[...manifest.capabilities,'rum-discovery-v1','rum-discovery-sdk-v1','rum-sdk-loading-v1']};
+    for (const server of ['nginx','iis']) for (const manualTarget of [false,true]) for (const sdkSource of ['bundled','cdn']) {
+      const m = {...model,server,manualTarget,sdkSource,sdkLoading:'sync'};
+      const config = makeConfig(m);
+      assert.match(config, /loading = "sync"/);
+      assert.ok(config.includes(manualTarget ? '[sites.sdk]' : '[sdk]'));
+      assert.ok(makeCommand(m,current,source).includes(Buffer.from(config).toString('base64')));
+      assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-sdk-loading-v1')},source), /不支持同步加载/);
+      if (!manualTarget) assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-discovery-sdk-v1')},source), /不支持自动发现/);
+      assert.doesNotMatch(makeConfig({...m,sdkLoading:'async'}), /loading =/);
+    }
+    assert.throws(() => makeConfig({...model,sdkLoading:'defer'}), /异步或同步/);
   });
   test('manifest rejects changed capabilities, paths, hashes and duplicate platforms', () => {
     validateManifest(manifest, source);

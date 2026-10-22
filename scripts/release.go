@@ -224,7 +224,7 @@ func run() error {
 	public["manifest.json"], err = json.MarshalIndent(map[string]any{
 		"schemaVersion": 1, "version": *versionName, "revision": *revision,
 		"artifactBase": "../" + *versionName + "/",
-		"capabilities": []string{"rum-setup-v1", "rum-install-v1", "rum-discovery-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
+		"capabilities": []string{"rum-setup-v1", "rum-install-v1", "rum-discovery-v1", "rum-discovery-sdk-v1", "rum-sdk-loading-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -254,7 +254,7 @@ func releaseSupportFiles(root string) (map[string][]byte, error) {
 	for _, name := range []string{
 		"USER-GUIDE.md", "CHANGELOG.md",
 		"docs/compatibility.md", "docs/operations.md", "docs/configuration.md",
-		"docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md",
+		"docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md", "docs/development.md",
 		"docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md",
 		"docs/windows-0.1.4-recovery.md", "docs/review-2026-10-22.md",
 		"examples/nginx.toml", "examples/iis.toml", "examples/full.toml",

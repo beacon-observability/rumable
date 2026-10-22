@@ -52,6 +52,22 @@ func sdkLocation(s Site, info SDKInfo) string {
 
 func bootstrap(s Site, sdkURL string, info SDKInfo) []byte {
 	b, _ := json.Marshal(s.RUM.sdkConfig())
+	if s.SDK.Loading == "sync" {
+		return []byte(strings.NewReplacer("RUM_CONFIG", string(b), "START_REPLAY", fmt.Sprint(s.RUM.startsReplay())).Replace(`(function(w){
+"use strict";
+if(w.__RUMABLE__){return;}
+var state=w.__RUMABLE__={status:"loading"};
+try{
+if(!w.DATAFLUX_RUM||typeof w.DATAFLUX_RUM.init!=="function"){state.status="load-error";return;}
+w.DATAFLUX_RUM.init(RUM_CONFIG);state.status="initialized";
+if(START_REPLAY){
+try{w.DATAFLUX_RUM.startSessionReplayRecording();state.replayStatus="requested";}
+catch(e){state.replayStatus="start-error";}
+}
+}catch(e){state.status="init-error";}
+})(window);
+`))
+	}
 	u, _ := json.Marshal(sdkURL)
 	integrity := ""
 	if s.SDK.Source == "cdn" && s.SDK.Integrity {
@@ -80,4 +96,9 @@ catch(e){state.replayStatus="start-error";}
 }catch(e){state.status="load-error";}
 })(window,document);
 `))
+}
+
+func sdkIntegrity(info SDKInfo) string {
+	digest, _ := hex.DecodeString(info.SHA256)
+	return "sha256-" + base64.StdEncoding.EncodeToString(digest)
 }

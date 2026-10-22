@@ -38,6 +38,21 @@ func TestWebSDKConfigurationContract(t *testing.T) {
 		if actual["sessionSampleRate"] != 35.5 || actual["applicationId"] != "app-test" {
 			t.Fatal("Web SDK config mismatch", actual)
 		}
+		if strings.Contains(config, "[sites.sdk]") && s.SDK.Source == "cdn" {
+			_, info, err := sdk()
+			if err != nil {
+				t.Fatal(err)
+			}
+			boot := string(bootstrap(s, sdkLocation(s, info), info))
+			integrityMarker := "script.integrity="
+			if s.SDK.Loading == "sync" {
+				boot = injectionTags(Snapshot{Site: s, SDK: info, SDKURL: sdkLocation(s, info)})
+				integrityMarker = " integrity="
+			}
+			if !strings.Contains(boot, s.SDK.URL) || strings.Contains(boot, integrityMarker) != s.SDK.Integrity {
+				t.Fatal("page CDN selection did not reach bootstrap", s.SDK)
+			}
+		}
 	}
 }
 

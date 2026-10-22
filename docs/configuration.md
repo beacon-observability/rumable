@@ -1,5 +1,11 @@
 # TOML 配置参考
 
+本页用于查字段。首次接入和 SDK 选择见[使用指南](../USER-GUIDE.md#1-sdk-注入加载与更新)，升级与恢复见[日常维护](../USER-GUIDE.md#10-修改配置升级停用回滚和卸载)。
+
+## 配置格式
+
+完整配置使用 `[[sites]]`，其下的 `[sites.rum]` 保存采集参数、`[sites.sdk]` 保存来源和加载方式。自动发现格式使用顶层 `server`、`[rum]`、可选 `[sdk]`，通过 `setup --discover` 应用，不能直接交给 enable。同步加载需要支持该能力的新包；旧包不识别的新字段会被拒绝。
+
 浏览器 RUM 与服务端 OTel 分别使用 `[sites.rum]` / `[sites.otel]`。`rum.enabled` 省略时为 true，显式 false 时不要求浏览器凭据；省略 otel 表保持旧行为。modulePath/agentPath 可省略，配合 install-otel 自动准备；[sites.otel.install] 支持 archive/url、必填 sha256，见[安装配置](otel-installation.md)。服务端参数、采样实际能力、模块要求和两种服务器示例见 [OTel 配置手册](otel.md)。`enable/disable --component rum|otel` 保留另一组件的当前状态；OTel 单组件命令也保留已部署的 SDK、脚本和 CDN 引用，不顺带更新 Web SDK；`enable` 不带组件时按 TOML 应用两者，`disable` 不带组件时全部停用。
 
 IIS 的 RUM 单组件命令保留已部署的 OTel 凭据；修改 Dataway Token 后使用普通 enable 或 enable --component otel 应用。rollback 使用保存的凭据，仍会检查目标池/Agent 的兼容条件。ASP.NET Core 的 runtime=dotnet 要求 No Managed Code 池，netframework 要求 v4 Integrated；CLI 不自动修改 CLR 设置。
@@ -14,30 +20,44 @@ init 默认站点 ID 为 example；可通过 `init --site website` 命名。单�
 
 Nginx 和 IIS 共享以下全部 `[sites.rum]` 参数，包括 OpenWay / DataKit、回放、隐私与 Worker 设置。
 
-范围以发布包内的 **SDK 3.3.21** 为准：已开放其公开类型定义中未废弃、能用静态 TOML 表达的初始化参数。依据为官方 NPM 包 [browser-core 3.3.21](https://registry.npmjs.org/@cloudcare/browser-core/-/browser-core-3.3.21.tgz) 中的 `types/index.d.ts`，并核对内嵌 SDK 的校验和默认值。发布构建前同步最新稳定 v3，并重新测试；同域方式在站点执行 enable 时升级。
+范围以发布包内的 **SDK 3.3.21** 为准：已开放其公开类型定义中未废弃、能用静态 TOML 表达的初始化参数。依据为官方 NPM 包 [browser-core 3.3.21](https://registry.npmjs.org/@cloudcare/browser-core/-/browser-core-3.3.21.tgz) 中的 `types/index.d.ts`，并核对内嵌 SDK 的校验和默认值。发布准备阶段同步并测试 SDK，将文件与元数据提交后再构建。CI 使用提交中的 SDK，不自动追新；同域方式在站点使用新 CLI 执行 enable/setup 时升级。
 
 ## SDK 加载方式
 
-Nginx 和 IIS 共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；RUM、回放及采样参数在两种加载方式下相同。
+Nginx 和 IIS 共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；自动发现时使用 `[sdk]`。SDK 来源与加载方式独立，四种组合均保留相同的 RUM、回放及采样参数。
 
 | 参数 | 默认值 | 行为 |
 |---|---|---|
-| `source` | `"bundled"` | `bundled` 使用同域内置 SDK；`cdn` 由同域初始化脚本异步加载外部 SDK |
+| `source` | `"bundled"` | `bundled` 使用同域内置 SDK；`cdn` 从外部地址加载 SDK，初始化脚本始终同域 |
+| `loading` | `"async"` | `async` 异步加载；`sync` 按顺序同步执行 SDK 与初始化脚本，会阻塞 HTML 解析 |
 | `url` | 省略 | 仅用于 cdn，省略时采用发布包 sdk.json 的官方来源；显式 URL 必须是无认证、查询或片段的完整 HTTPS 脚本地址 |
 | `integrity` | false | 仅用于 cdn；true 设置对应发布包 SHA-256 的 SRI 与 crossorigin=anonymous，并预检 CORS |
 
 ```toml
 [sites.sdk]
 source = "cdn"
-# url = "https://cdn.example.com/rum/3.3.21/dataflux-rum.js"
-# integrity = true
+loading = "async" # 同步使用 "sync"
+url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
+integrity = false
 ```
 
 check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript MIME 和发布包摘要；自建 CDN 必须发布相同字节，不接受其他版本或精简版。CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及所需 Worker，工具不会修改策略。CDN 不可达、摘要不一致或 SRI 缺少允许站点 Origin（或 `*`）的 Access-Control-Allow-Origin 时阻止启用。
 
-官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；2026-10-20 实测无 SRI 所需 CORS 头，默认 integrity=false 可直接加载。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
+官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；2026-10-22 核对无 SRI 所需 CORS 头，默认 integrity=false 可直接加载。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
 
-部署快照保存实际 URL、SDK 版本和摘要，回滚使用历史引用；工具不能恢复外部 CDN 文件。外部旧内容被覆盖/删除时回滚探测会失败并恢复本次受管配置。停用不依赖 CDN 可达；保留的本地 SDK 副本不会自动作为失败降级，加载失败不阻塞业务。源为 bundled 时填写非空 url 或 integrity=true 会被拒绝，避免配置被静默忽略。
+部署快照保存实际 URL、SDK 版本和摘要，回滚使用历史引用；工具不能恢复外部 CDN 文件。外部旧内容被覆盖/删除时回滚探测会失败并恢复本次受管配置。停用不依赖 CDN 可达；保留的本地 SDK 副本不会自动作为失败降级，异步模式的下载不阻塞 HTML 解析；同步模式在浏览器完成脚本请求或判定失败之前会阻塞解析。源为 bundled 时填写非空 url 或 integrity=true 会被拒绝，避免配置被静默忽略。
+
+### 加载行为与注入边界
+
+- 异步：HTML 中插入带 async 的同域初始化脚本，它动态加载 SDK，onload 后调用 init。初始化之前的事件可能漏采。
+- 同步：HTML 中顺序插入 SDK、初始化脚本，均为不带 async/defer 的外部普通脚本；下载和执行阻塞后续 HTML 解析。初始化脚本只初始化已加载的 SDK，不再次下载。SDK 加载失败时记录 load-error，初始化抛错记录 init-error。
+- 两种模式都使用标准 `<head>` 后的位置，不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
+- 页面需避免已有 SDK 接入；预检拒绝常见业务 SDK 和其他部署，已有同步标签须与受管快照匹配。双层服务器不应重复注入。
+- nonce-only、strict-dynamic、Trusted Types 等策略需站点专门适配；同域托管不代表上报同域，访问者仍需能连接上报地址。
+
+脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#14-sdk-如何更新和回滚)。
+
+## 参数校验
 
 未填写的参数使用下表默认值；除 Rumable 明确设置的采集默认值外，其余交给该版本 SDK。未知字段、错误类型、非法枚举、NaN/Infinity、无效 URL 和越界数值会在部署前拒绝。布尔值 `false` 和数值 `0` 会保留，不会被默认值覆盖。
 
