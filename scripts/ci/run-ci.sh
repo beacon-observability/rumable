@@ -29,7 +29,7 @@ docker run --rm --init --name "${release_container}-powershell" \
   --mount "type=bind,source=${CI_PROJECT_DIR},target=${CI_PROJECT_DIR},readonly" \
   --workdir "$CI_PROJECT_DIR" \
   "${RELEASE_POWERSHELL_IMAGE:-mcr.microsoft.com/powershell:7.4-ubuntu-22.04}" \
-  pwsh -NoLogo -NoProfile -File scripts/test-windows-installer.ps1
+  pwsh -NoLogo -NoProfile -File scripts/test-powershell.ps1
 docker build -t "$release_image" \
   --build-arg "MODERN_GO_IMAGE=${MODERN_GO_IMAGE:-golang:1.26.1-bookworm}" \
   --build-arg "LEGACY_GO_IMAGE=${LEGACY_GO_IMAGE:-golang:1.20.14-bookworm}" \

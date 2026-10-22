@@ -1,5 +1,30 @@
 # 实现验证记录
 
+## 0.1.5 Windows 实测反馈修复（2026-10-22）
+
+用户的 42 项 Windows 报告确认：0.1.4 下载/安装/发现通过，IIS 注入为 0，桥接 JSON 前出现 ConfigurationElement 输出，IIS 已提交但日志 nativeCommitted=false；官方 rollback/disable 无法继续。排除表达式实测为 `^(?:|/__rumable__/)`。该报告来自用户的 Windows 测试机，本机没有执行其原生 IIS。
+
+当前源码已修复桥接输出、空排除条件、RUM-only 旧未确认提交恢复、Windows 输入重定向与显式非交互模式、私有文件 DACL/公共资源 ACL，以及 Linux 下载管道退出码。恢复仅接受日志能精确重建的配置，额外变更仍拒绝。步骤见[Windows 恢复与复测](windows-0.1.4-recovery.md)。
+
+- Go 全量 test/vet、发布归档契约通过；新增丢失提交响应、旧日志、恢复响应再次丢失及外部变更拒绝覆盖。全量测试约 15 秒。
+- Node 29 项通过，实际从 POSIX shell 执行生成命令，下载错误 22/60 和安装错误 17 均非零返回。
+- 官方 PowerShell 7.4/Linux 容器执行安装器、IIS snapshot、RUM 规则和 OTel 四组契约通过。实际执行桥接 apply/restore 分支，模拟 MWA Add 返回元素，验证输出仅一个 JSON；覆盖 null/空/自定义排除列表、子应用路径、0.1.4 错误规则恢复和拒绝漂移。该容器不能验证 IIS API 或 NTFS。
+- 两项 Nginx Linux smoke 通过：生成命令、校验失败、预检失败重试、首次接入、重复接入、更新/回滚/停用/精确撤销、多站点无交互拒绝、管道输入时正常终端选择、未选中站点不变。包下载使用本地修复源码归档替身，实际执行安装器、CLI 和 Nginx；这是发布前的本地回归，不代表正式包的 OSS 下载验收。
+- 原生 Windows 权限/控制台测试已加入并交叉编译；Windows PowerShell 5.1、NTFS 和 IIS 的最终结果须以 Windows 0.1.5 正式包复测为准。
+- Go 1.20.14 的 test/vet 及 Windows legacy x86/x64 构建通过；Go 1.26.1 的 Windows x86/x64/ARM64 构建通过。持续运行的 Linux 演示已用修复 CLI 执行重复 setup 和 probe，保持原接入 ID，注入正常。
+
+## 2026-10-22 用户流程 review 与可访问 Linux 演示
+
+审查基线为 0.1.4 / `c76054d70d6b48c9aaccfb5ac370f8fe7cdf442e`，本轮读取的公开 latest 清单与之相符。详见[review 报告](review-2026-10-22.md)和重写的[用户指南](../USER-GUIDE.md)。发现 Linux 下载管道退出码与 Windows NTFS ACL 两处待修问题；本轮提供操作说明，没有修改正式安装器或 CLI。
+
+- Go 全量 test/vet 通过；页面生成器、安装器、发布工具及 CI 的 28 项 Node 测试通过。
+- 用户指南的 12 个 shell 示例通过语法检查，两个完整 TOML 示例通过实际 CLI render，11 个 PowerShell 示例通过官方 Linux PowerShell 7.4 容器内的语法解析。文档本地链接检查通过。这些检查不代替原生 Windows/IIS 执行。
+- [本地演示](../examples/local-demo/README.md)运行于 OrbStack 的 Linux ARM64 容器：Node Web 服务后挂 Nginx 1.28。实际调用页面生成器，执行来自正式 OSS 的 0.1.4 install.sh，完成自动发现、真实包下载、SHA-256 校验、安装、挂接与启用。此次下载没有使用替身。
+- 原始业务 HTML 不含注入脚本，Nginx 返回的首页和结算页各有一个注入标记；两页 CLI probe 通过。status 显示 enabled，没有漂移或未完成事务。
+- Chrome 实际操作商品请求、慢请求、演示错误、页面跳转和提交演示订单，观察到 SDK 初始化与真实 POST `/v1/write/rum`。本地模拟端接收并识别 view、resource、action、error、long_task，返回 HTTP 204；使用示例 applicationId/clientToken，不向真实观测云应用上报，也不证明真实后端入库。
+
+复现入口为 `bash examples/local-demo/start.sh`；运行记录保存在未纳入 Git 的 `.local-demo/install.log`、`status.json`、`probe.log` 和 `intake-evidence.json`。停止服务的命令见演示说明。原生 Windows/IIS 与真实观测云入库仍需各自环境验收。本轮没有提交、推送或发布新版本。
+
 ## 0.1.4 简洁接入与 Windows 自动识别（2026-10-21）
 
 - 本地 Go 全量 test/vet、发布归档测试与 28 项 Node 测试通过。新增自动发现配置严格解析、实际页面输出到 Go 的契约、单/多站点、绑定歧义、无终端拒绝、稳定 ID、已有路径保留、HTTPS 上报限制及 IIS 压缩许可等覆盖。

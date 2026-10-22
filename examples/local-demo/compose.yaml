@@ -1,0 +1,26 @@
+services:
+  web:
+    image: node:22-alpine
+    working_dir: /demo
+    command: ["node", "server.mjs"]
+    volumes:
+      - .:/demo:ro
+    restart: unless-stopped
+  nginx:
+    image: nginx:1.28-alpine
+    depends_on:
+      - web
+    ports:
+      - "127.0.0.1:18874:18874"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf.template:ro
+      - nginx-config:/etc/nginx
+      - rumable-state:/var/lib/rumable
+      - rumable-bin:/opt/rumable
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["test -f /etc/nginx/demo-initialized || { cp /etc/nginx/nginx.conf.template /etc/nginx/nginx.conf && touch /etc/nginx/demo-initialized; }; exec nginx -g 'daemon off;'"]
+    restart: unless-stopped
+volumes:
+  nginx-config:
+  rumable-state:
+  rumable-bin:

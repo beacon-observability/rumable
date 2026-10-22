@@ -125,5 +125,6 @@ export function makeCommand(m, manifest, manifestURL) {
     return `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing ${psQuote(script)}).Content)) -BaseUrl ${psQuote(base)} -Config ${psQuote(config)}${m.manualTarget ? '' : ' -Discover'}`;
   }
   const script = new URL(manifest.installers.linux.file, base).href;
-  return `curl --proto '=https' --proto-redir '=https' -fsSL ${shellQuote(script)} | sudo sh -s -- --base-url ${shellQuote(base)} --config ${shellQuote(config)}${m.manualTarget ? '' : ' --discover'}`;
+  const pipeline = `curl --proto '=https' --proto-redir '=https' -fsSL ${shellQuote(script)} | sudo sh -s -- --base-url ${shellQuote(base)} --config ${shellQuote(config)}${m.manualTarget ? '' : ' --discover'}`;
+  return `bash -o pipefail -c ${shellQuote(pipeline)}`;
 }

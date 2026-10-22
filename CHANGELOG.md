@@ -1,5 +1,15 @@
 # 版本说明
 
+## 0.1.5 · 2026-10-22
+
+- 修复 IIS 集合 Add 返回值污染 JSON，桥接只解析标准输出，保持错误输出分离。
+- 排除路径过滤空值，修复自动发现中 null 排除列表导致所有 HTML 被排除。
+- rollback 可严格核对并恢复 RUM-only 的“已提交但未记录 native 快照”旧事务，支持恢复再次中断后重试，拒绝不匹配的规则、映射、压缩和 OTel 设置。
+- Windows 输入重定向及 PowerShell 非交互启动不再等待隐藏控制台选择；新增 setup --non-interactive / 安装器 -NonInteractive。
+- Windows 私有文件使用原生受保护 DACL，公共脚本仅向实际匿名读取账户和池身份开放读取；不递归放开状态目录。
+- Linux 页面命令使用 Bash pipefail，下载失败与安装失败均返回非零。
+- PowerShell CI 增加真实桥接分支及旧事务回归，另提供原生 Windows 权限/控制台测试；Windows 实机复测结果仍待验证。
+
 ## 0.1.4 · 2026-10-21
 
 - Windows 安装器契约测试改在官方 PowerShell 独立容器中运行，不再在 Go 构建镜像中下载系统依赖。0.1.3 tag 流水线在 apt 依赖下载阶段停滞，尚未上传 OSS，取消该次任务后使用本版发布；原 tag 保留。

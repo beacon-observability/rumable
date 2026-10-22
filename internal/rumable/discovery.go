@@ -65,17 +65,6 @@ func discoveredID(parts ...string) string {
 	return "auto-" + hash(b)[:20]
 }
 
-// No stdin reads: the Linux one-line command pipes its script into sh. Read
-// choices from the controlling terminal instead, and fail closed in CI/SSH
-// sessions without a terminal. Single-site discovery needs no terminal.
-func discoveryInput() (io.ReadCloser, error) {
-	name := "/dev/tty"
-	if runtime.GOOS == "windows" {
-		name = "CONIN$"
-	}
-	return os.Open(name)
-}
-
 type discoveryPrompt struct {
 	in  *bufio.Reader
 	out io.Writer
@@ -177,7 +166,7 @@ func resolveDiscoveredSite(c DiscoveryConfig, candidates []discoveredSite, in io
 	return s, selected.Target, nil
 }
 
-func setupDiscovered(root, name string, yes bool, out io.Writer) error {
+func setupDiscovered(root, name string, yes, nonInteractive bool, out io.Writer) error {
 	c, err := loadDiscoveryConfig(name)
 	if err != nil {
 		return err
@@ -197,10 +186,12 @@ func setupDiscovered(root, name string, yes bool, out io.Writer) error {
 		return err
 	}
 	var input io.Reader
-	terminal, err := discoveryInput()
-	if err == nil {
-		defer terminal.Close()
-		input = bufio.NewReader(terminal)
+	if !nonInteractive {
+		terminal, err := discoveryInput()
+		if err == nil {
+			defer terminal.Close()
+			input = bufio.NewReader(terminal)
+		}
 	}
 	s, target, err := resolveDiscoveredSite(c, candidates, input, out)
 	if err != nil {

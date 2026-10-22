@@ -51,6 +51,7 @@ fi
 chmod 755 "$work/bin/"*
 docker run -d --name "$server" -v "$work:/work" --entrypoint sh nginx:1.28-alpine -c 'cp /work/nginx.conf /etc/nginx/nginx.conf; exec nginx -g "daemon off;"' >/dev/null
 for i in $(seq 1 40); do if docker exec "$server" wget -qO- http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi; sleep 0.2; done
+docker exec "$server" apk add --no-cache bash >/dev/null
 if [ -n "${RUMABLE_PUBLIC_MANIFEST:-}" ]; then
   docker exec "$server" sh -c 'command -v curl >/dev/null || apk add --no-cache curl'
 fi
@@ -66,7 +67,7 @@ if (source) {
   const response = await fetch(source, {redirect:'error'});
   if (!response.ok) throw Error(`Public manifest returned ${response.status}`);
   manifest = await response.json();
-  if (manifest.version !== '0.1.4') throw Error('This smoke fixture expects version 0.1.4');
+  if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) throw Error('Expected a stable release version');
 } else {
   const digest = crypto.createHash('sha256').update(fs.readFileSync(work+'/package.tar.gz')).digest('hex');
   const script = fs.readFileSync('scripts/install.sh','utf8').replaceAll('@@VERSION@@','0.1.4').replaceAll(/@@LINUX_(?:386|AMD64|ARM64)_SHA256@@/g,digest);
@@ -76,10 +77,11 @@ if (source) {
 }
 const m = {applicationId:'fixture',reporting:'datakit',endpoint:'http://127.0.0.1:18080',service,server:'nginx',sessionSampleRate:100,sessionReplayEnabled:false,defaultPrivacyLevel:'mask',sessionPersistence:'cookie'};
 fs.writeFileSync(work+'/command.sh',makeCommand(m,manifest,source));
+fs.writeFileSync(work+'/version',manifest.version);
 JS
 }
 run_generated() { docker exec -e PATH=/work/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "$server" sh /work/command.sh; }
-cli() { docker exec "$server" /opt/rumable/0.1.4/rumable "$@" --state-dir /var/lib/rumable; }
+cli() { docker exec "$server" "/opt/rumable/$(cat "$work/version")/rumable" "$@" --state-dir /var/lib/rumable; }
 generate fixture
 run_generated
 cli probe

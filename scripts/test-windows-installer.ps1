@@ -37,10 +37,16 @@ try {
     [void][Management.Automation.Language.Parser]::ParseFile($discoveryScript,[ref]$tokens,[ref]$errors)
     Assert-That ($errors.Count -eq 0) ($errors | Out-String)
     function Test-RumableBinary { $script:cliArgs = @($args); $global:LASTEXITCODE = 0 }
+    function Test-RumableNonInteractive { return $false }
     Invoke-RumableSetup 'Test-RumableBinary' 'config with spaces.toml' 'state with spaces' -Discover
     Assert-That (($script:cliArgs -join '|') -eq 'setup|--config|config with spaces.toml|--state-dir|state with spaces|--yes|--discover') 'CLI discovery arguments changed or split paths'
     Invoke-RumableSetup 'Test-RumableBinary' 'config.toml' 'state'
     Assert-That (-not ($script:cliArgs -contains '--discover')) 'Manual setup unexpectedly enabled discovery'
+    Invoke-RumableSetup 'Test-RumableBinary' 'config.toml' 'state' -Discover -NonInteractive
+    Assert-That ($script:cliArgs -contains '--non-interactive') 'Explicit noninteractive mode was lost'
+    function Test-RumableNonInteractive { return $true }
+    Invoke-RumableSetup 'Test-RumableBinary' 'config.toml' 'state' -Discover
+    Assert-That ($script:cliArgs -contains '--non-interactive') 'Redirected input still prompts'
     Initialize-RumableNativeSystem # Compile the native API bridge without calling Windows DLLs.
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         Assert-Rejected { Get-RumableWindowsHost } 'requires Windows'
@@ -71,7 +77,7 @@ try {
         if ($script:corrupt) { [IO.File]::WriteAllText($OutFile,'corrupt'); return }
         Copy-Item -LiteralPath $script:packages[$file] -Destination $OutFile
     }
-    function Invoke-RumableSetup([string]$Binary, [string]$ConfigPath, [string]$StateDirectory, [switch]$Discover) {
+    function Invoke-RumableSetup([string]$Binary, [string]$ConfigPath, [string]$StateDirectory, [switch]$Discover, [switch]$NonInteractive) {
         $script:setups++
         Assert-That ($Discover -eq $script:expectDiscovery) 'Discovery flag was not forwarded to CLI'
         Assert-That ([IO.File]::ReadAllText($ConfigPath) -ceq $script:configText) 'Configuration was changed or executed'

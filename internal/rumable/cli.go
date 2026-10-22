@@ -47,8 +47,10 @@ func Run(args []string, out io.Writer) error {
 	}
 	var target *string
 	var discover *bool
+	var nonInteractive bool
 	if cmd == "setup" {
 		discover = f.Bool("discover", false, "discover server sites using a RUM-only configuration; ambiguous targets require a terminal")
+		f.BoolVar(&nonInteractive, "non-interactive", false, "never prompt; fail if discovery needs a site, URL or compression choice")
 	}
 	var yes, dry, attachmentUndo *bool
 	if cmd == "attach" || cmd == "rollback" || cmd == "install-otel" || cmd == "uninstall" || cmd == "setup" {
@@ -112,7 +114,7 @@ func Run(args []string, out io.Writer) error {
 		if *id != "" || *target != "" {
 			return errors.New("--discover cannot be combined with --site or --target; use a full site configuration for manual setup")
 		}
-		return setupDiscovered(root, *config, *yes, out)
+		return setupDiscovered(root, *config, *yes, nonInteractive, out)
 	}
 	if *id == "" {
 		*id, err = selectSite(root, *config, cmd == "status" || cmd == "disable" || cmd == "rollback" || cmd == "probe" || cmd == "attach" || cmd == "uninstall")
@@ -248,7 +250,11 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	if cmd == "setup" {
-		return setupSite(root, s, *target, *yes, os.Stdin, out)
+		var input io.Reader = os.Stdin
+		if nonInteractive {
+			input = nil
+		}
+		return setupSite(root, s, *target, *yes, input, out)
 	}
 	if cmd == "install-otel" {
 		return installOTel(root, s, *yes, *dry, os.Stdin, out)

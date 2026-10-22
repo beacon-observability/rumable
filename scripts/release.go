@@ -33,7 +33,7 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.4", "release version")
+	versionName := flag.String("version", "0.1.5", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
@@ -256,6 +256,7 @@ func releaseSupportFiles(root string) (map[string][]byte, error) {
 		"docs/compatibility.md", "docs/operations.md", "docs/configuration.md",
 		"docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md",
 		"docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md",
+		"docs/windows-0.1.4-recovery.md", "docs/review-2026-10-22.md",
 		"examples/nginx.toml", "examples/iis.toml", "examples/full.toml",
 		"examples/otel-nginx.toml", "examples/otel-iis.toml",
 		"third_party/BurntSushi-toml-LICENSE", "third_party/tdewolff-parse-LICENSE",

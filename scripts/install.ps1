@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$BaseUrl,
     [Parameter(Mandatory=$true)][string]$Config,
-    [switch]$Discover
+    [switch]$Discover,
+    [switch]$NonInteractive
 )
 $ErrorActionPreference = 'Stop'
 
@@ -97,14 +98,21 @@ function Get-RumableWindowsPackage([string]$Architecture, [Version]$OSVersion, [
     return @{ Architecture=$Architecture; Flavor=$flavor; Digest=$hashes[($Architecture + '/' + $flavor)]; File=('rumable_' + $ReleaseVersion + '_windows_' + $Architecture + $suffix + '.zip') }
 }
 
-function Invoke-RumableSetup([string]$Binary, [string]$ConfigPath, [string]$StateDirectory, [switch]$Discover) {
+function Test-RumableNonInteractive {
+    if ([Console]::IsInputRedirected -or -not [Environment]::UserInteractive) { return $true }
+    # PowerShell -NonInteractive does not itself redirect the child's handles.
+    return @([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-(NonI|NonInteractive)$' }).Count -gt 0
+}
+
+function Invoke-RumableSetup([string]$Binary, [string]$ConfigPath, [string]$StateDirectory, [switch]$Discover, [switch]$NonInteractive) {
     $setupArgs = @('setup','--config',$ConfigPath,'--state-dir',$StateDirectory,'--yes')
     if ($Discover) { $setupArgs += '--discover' }
+    if ($NonInteractive -or (Test-RumableNonInteractive)) { $setupArgs += '--non-interactive' }
     & $Binary @setupArgs
     if ($LASTEXITCODE -ne 0) { throw 'Setup failed; retain the state directory and inspect the reported cause' }
 }
 
-function Invoke-RumableWindowsInstall([string]$BaseUrl, [string]$Config, [switch]$Discover) {
+function Invoke-RumableWindowsInstall([string]$BaseUrl, [string]$Config, [switch]$Discover, [switch]$NonInteractive) {
     $releaseVersion = '@@VERSION@@'
     if ($releaseVersion.Contains('@@')) { throw 'Use the CI-published installer, not the source template' }
     $source = [Uri]$BaseUrl
@@ -139,8 +147,8 @@ function Invoke-RumableWindowsInstall([string]$BaseUrl, [string]$Config, [switch
         if (Test-Path -LiteralPath $bin) {
             if ((Get-FileHash $bin).Hash -ne (Get-FileHash (Join-Path $work 'rumable.exe')).Hash) { throw 'Installed version has different bytes' }
         } else { Copy-Item -LiteralPath (Join-Path $work 'rumable.exe') -Destination $bin }
-        Invoke-RumableSetup $bin (Join-Path $work 'rumable.toml') (Join-Path $hostInfo.ProgramData 'Rumable') -Discover:$Discover
+        Invoke-RumableSetup $bin (Join-Path $work 'rumable.toml') (Join-Path $hostInfo.ProgramData 'Rumable') -Discover:$Discover -NonInteractive:$NonInteractive
     } finally { Remove-Item -LiteralPath $work -Recurse -Force }
 }
 
-Invoke-RumableWindowsInstall -BaseUrl $BaseUrl -Config $Config -Discover:$Discover
+Invoke-RumableWindowsInstall -BaseUrl $BaseUrl -Config $Config -Discover:$Discover -NonInteractive:$NonInteractive

@@ -1,6 +1,10 @@
 # Rumable
 
-当前版本：**0.1.4**。推荐使用[一键接入页面](https://static.guance.com/rumable/latest/setup/index.html)：默认只填 RUM 参数并选择 Linux / Windows，安装时发现站点；手动网站、路径与服务器设置在高级选项中。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[验证记录](docs/verification.md)区分编译、本地运行与实际入库验收。
+当前版本：**0.1.5**。推荐使用[一键接入页面](https://static.guance.com/rumable/latest/setup/index.html)：默认只填 RUM 参数并选择 Linux / Windows，安装时发现站点；手动网站、路径与服务器设置在高级选项中。Windows / Linux 用户从[使用指南](USER-GUIDE.md)开始；平台选包、安装、TOML、启用、回放、CDN、升级和恢复步骤均在其中。[验证记录](docs/verification.md)区分编译、本地运行与实际入库验收。
+
+用户安装流程（不需要 Git）：[页面与自动脚本](USER-GUIDE.md#automatic)、[手动下载与校验](USER-GUIDE.md#download)、[Linux / Nginx 配置](USER-GUIDE.md#manual-linux)、[Windows / IIS 配置及 ACL](USER-GUIDE.md#manual-windows)、[验收与后续维护](USER-GUIDE.md#acceptance)。0.1.4 的安装入口问题和复现证据见[本轮 review](docs/review-2026-10-22.md)。
+
+想先查看页面注入和浏览器请求，可运行[本地 Linux / Nginx 演示](examples/local-demo/README.md)：使用正式 OSS 安装器接入，示例参数将请求发送到本地模拟接收端。
 
 通过 Nginx / IIS 的 HTML 响应改写，为网站启用观测云 RUM Web SDK。业务代码无需修改；初始化脚本由网站同域提供，SDK 默认同域托管，也可按站点使用 CDN，浏览器直接向 OpenWay 或 DataKit 上报。
 
@@ -19,12 +23,12 @@ source = "cdn"
 
 可用 `url` 指向提供相同 SDK 字节的 HTTPS CDN；`integrity=true` 开启 SRI，要求 CDN 支持 CORS。官方 v3 地址目前没有该 CORS 响应头，默认不设置 SRI。启用时校验版本摘要及 CSP；可变 CDN 后续更新会直接影响浏览器，旧远程内容无法由本工具恢复。需要固定版本和完整离线回滚时使用默认同域方式，或固定 URL 并开启 SRI。详见[SDK 加载配置](docs/configuration.md#sdk-加载方式)。
 
-## 三步接入
+## Linux Nginx 分步接入速览
 
 在服务器的固定工作目录中执行，例如 `/etc/rumable`。后续继续使用同一目录，配置和状态不要放在网站根目录或临时目录。使用有权检查、重载服务器及写入受管目录的账号。
 
 ```sh
-# 1. 生成精简 TOML；选择 nginx / iis 和 openway / datakit。
+# 1. 生成精简 Nginx TOML；选择 openway / datakit。
 rumable init --server nginx --reporting openway
 # 编辑 rumable.toml：网站地址、服务器目标、applicationId 和上报参数。
 
@@ -83,11 +87,11 @@ Nginx 最低要求 **1.9.4 + http_sub_module**。1.9.4 的 `check`、`enable` �
 - 自动模式使用 `setup --discover --config rumable.toml --state-dir /var/lib/rumable --yes`，配置仅包含 `schemaVersion`、`server` 和 `[rum]`；网站目标在服务器上发现。完整站点配置仍使用下方普通 setup。
 - `setup --config rumable.toml --state-dir /var/lib/rumable --yes`：依次准备状态、自动挂接 Nginx、启用并探测；重复执行更新相同目标。发生故障复用部署恢复机制，保留资源映射与备份。
 - [GitLab CI 发布](docs/gitlab-ci-release.md)沿用 browser-sdk 的 Runner、受保护 tag 与 OSS 变量约定；install.sh / install.ps1、版本包和配置页一起发布，全部摘要回读通过后才发布清单。
-- 提交待发布源码后执行 `bash scripts/release-oss.sh 0.1.4` 创建并推送发布 tag；加 `--dry-run` 只做预演。脚本不提交代码或推送分支，OSS 上传由 tag 对应 CI 完成。
+- 提交待发布源码后执行 `bash scripts/release-oss.sh 0.1.5` 创建并推送发布 tag；加 `--dry-run` 只做预演。脚本不提交代码或推送分支，OSS 上传由 tag 对应 CI 完成。
 
 - 配置示例：[Nginx / OpenWay](examples/nginx.toml)、[IIS / DataKit](examples/iis.toml)。两种上报方式均可用于两种服务器；单站点自动选择，多站点通过 `--site` 定位。
 - 默认配置文件为 `rumable.toml`，使用 UTF-8 编码；每个站点使用 `[[sites]]`，其下配置 `[sites.nginx]`、`[sites.iis]` 二选一，以及 `[sites.rum]`。支持注释，拒绝未知字段和重复定义。`init` 默认生成精简的 Nginx / OpenWay 配置；`--server` / `--reporting` 切换目标，`--full` 列出完整静态 SDK 参数。
-- Windows 路径建议使用 TOML 单引号字面量，例如 `binary = 'C:\nginx\nginx.exe'`，避免反斜杠转义。
+- TOML 中的 Windows 文件路径可使用单引号字面量避免反斜杠转义；这不表示支持 Windows Nginx 自动接入。IIS 使用网站名称和应用路径定位。
 - 内部部署状态、事务日志及 CLI 结构化输出保持 JSON；已有受管状态可直接继续停用和回滚，用户配置需按 TOML 示例转换。
 - `id` 为稳定标识，禁止修改已挂接站点的服务器目标或 `publicURL`；迁移时使用新 ID 并重新挂接。
 - `includePaths`、`excludePaths` 是**区分大小写的 URL 路径前缀**；排除优先。`/shop` 同时匹配 `/shopping`，目录范围请写 `/shop/`。
@@ -163,10 +167,10 @@ NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-nginx.sh
 # 同份源码，两个真实编译器；仅设置 go.mod 不会让新 Go 支持旧 Windows。
 # 默认先同步官方最新稳定 v3 SDK，再运行两套编译器的测试、vet 和打包。
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.4
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.5
 ```
 
-发布目录默认为 `dist/0.1.4/`，包括 10 个 Windows / Linux 包、两个安装器、配置页与版本元数据，共 19 个公开文件。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包、安装器、配置页及元数据。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
+发布目录默认为 `dist/0.1.5/`，包括 10 个 Windows / Linux 包、两个安装器、配置页与版本元数据，共 19 个公开文件。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包、安装器、配置页及元数据。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
 
 可单独执行 `go run scripts/sync-sdk.go` 同步并审查 SDK、版本、来源和 SHA-256；CDN 与官方 NPM 稳定版不一致、版本不是稳定 v3 或许可变更时中止。离线重建可显式使用 `release.go --skip-sdk-sync`，其含义是沿用已校验文件，不检查最新版本。站点不会自动更新；分发新二进制后执行 `enable` 升级，默认同域方式保留旧资源供缓存页面和回滚使用。
 

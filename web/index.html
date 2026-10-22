@@ -40,7 +40,7 @@
           <p class="hint">远程配置可能覆盖静态参数。setUser、自定义 startView、beforeSend 等需要业务调用，不通过服务器注入自动实现。</p></details>
         </section>
         <section class="card"><div class="section-heading"><span class="step">03</span><div><h2>选择安装环境</h2><p>网站信息由安装命令在服务器上自动发现。</p></div></div>
-          <div class="grid"><label>安装环境<select name="server"><option value="nginx">Linux · Nginx</option><option value="iis">Windows · IIS</option></select></label><div id="arch-field" class="hint">安装时自动识别 Linux x86（32 位）/ x64 / ARM64 架构。</div></div>
+          <div class="grid"><label>安装环境<select name="server"><option value="nginx">Linux · Nginx</option><option value="iis">Windows · IIS</option></select></label><div id="arch-field" class="hint">需要 Bash、curl 和 sudo；安装时自动识别 Linux x86（32 位）/ x64 / ARM64 架构。</div></div>
           <p id="discovery-help" class="hint">只有一个站点时自动选择；多个站点或访问地址时在终端选择。无法确定域名时，命令会提示输入网站地址。默认接入所选站点或应用的全部路径。</p>
           <details id="server-details"><summary>高级接入设置（可选）</summary>
           <label class="check"><input name="manualTarget" type="checkbox"> 手动指定站点与路径</label>

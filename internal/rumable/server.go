@@ -147,6 +147,9 @@ func runIISCommand(root string, s Site, action string, extra map[string]any) (js
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("IIS commands require Windows; render can run on any OS")
 	}
+	if err := protectSiteDirectory(root, s); err != nil {
+		return nil, err
+	}
 	ps, err := iisPowerShell(os.Getenv("SystemRoot"), runtime.GOARCH)
 	if err != nil {
 		return nil, err
@@ -159,9 +162,14 @@ func runIISCommand(root string, s Site, action string, extra map[string]any) (js
 	if err := atomicWrite(filepath.Join(dir, "iis.ps1"), script, 0600); err != nil {
 		return nil, err
 	}
-	otelScript, _ := assets.ReadFile("assets/otel-iis.ps1")
-	if err := atomicWrite(filepath.Join(dir, "otel-iis.ps1"), otelScript, 0600); err != nil {
-		return nil, err
+	for _, helper := range []string{"otel-iis.ps1", "iis-rum.ps1", "iis-acl.ps1"} {
+		data, err := assets.ReadFile("assets/" + helper)
+		if err != nil {
+			return nil, err
+		}
+		if err := atomicWrite(filepath.Join(dir, helper), data, 0600); err != nil {
+			return nil, err
+		}
 	}
 	payload := map[string]any{"site": s, "root": dir, "action": action}
 	for k, v := range extra {
@@ -174,6 +182,10 @@ func runIISCommand(root string, s Site, action string, extra map[string]any) (js
 	}
 	name := f.Name()
 	defer os.Remove(name)
+	if err = protectPrivateFile(name); err != nil {
+		f.Close()
+		return nil, err
+	}
 	if _, err = f.Write(b); err != nil {
 		f.Close()
 		return nil, err
@@ -181,13 +193,21 @@ func runIISCommand(root string, s Site, action string, extra map[string]any) (js
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	out, err := command(ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(dir, "iis.ps1"), "-RequestPath", name)
+	out, _, err := commandOutput(ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(dir, "iis.ps1"), "-RequestPath", name)
 	if err != nil {
 		return nil, err
 	}
-	var result any
+	return decodeIISResponse(out)
+}
+
+func decodeIISResponse(out []byte) (json.RawMessage, error) {
+	var result map[string]json.RawMessage
+	var err error
 	if err = json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(string(out)), "\ufeff")), &result); err != nil {
 		return nil, fmt.Errorf("invalid IIS bridge response: %w", err)
+	}
+	if result == nil || result["rules"] == nil || result["preconditions"] == nil || result["compressionPresent"] == nil {
+		return nil, fmt.Errorf("invalid IIS bridge response: missing snapshot fields")
 	}
 	return json.Marshal(result)
 }

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
 export const model = {
   manualTarget:true,
@@ -43,9 +46,9 @@ if (process.argv.includes('--fixtures')) {
     const command = makeCommand(m,manifest,source);
     execFileSync('sh',['-n'],{input:command});
     assert.doesNotMatch(command,/touch \/tmp/);
-    assert.match(command,/^curl .*install\.sh' \| sudo sh -s -- --base-url /);
+    assert.match(command,/^bash -o pipefail -c /);
     assert.doesNotMatch(command,/\n|sha256sum|tar -xzf| setup --config /);
-    assert.ok(command.includes("--base-url 'https://downloads.example.com/rumable/0.1.0-test.1/'"));
+    assert.ok(command.includes('https://downloads.example.com/rumable/0.1.0-test.1/'));
     assert.equal(command, makeCommand({...m,arch:'arm64'},manifest,source));
     const encoded = Buffer.from(makeConfig(m)).toString('base64'); assert.ok(command.includes(encoded));
     const ps = makeCommand({...m,server:'iis'},manifest,source);
@@ -72,12 +75,23 @@ if (process.argv.includes('--fixtures')) {
       assert.throws(() => makeCommand(m,manifest,source), /自动发现/);
       const current = {...manifest, capabilities:[...manifest.capabilities,'rum-discovery-v1']};
       const command = makeCommand(m,current,source);
-      assert.match(command, server === 'iis' ? / -Discover$/ : / --discover$/);
+      assert.match(command, server === 'iis' ? / -Discover$/ : / --discover'$/);
       assert.ok(command.includes(Buffer.from(config).toString('base64')));
       if (server === 'nginx') execFileSync('sh',['-n'],{input:command});
       // Host-dependent checks happen after site discovery in the CLI.
       assert.doesNotThrow(() => makeConfig({...m, workerUrl:'https://www.example.com/worker.js',useSecureSessionCookie:true}));
       assert.throws(() => makeConfig({...m,workerUrl:'//evil.example/worker.js'}));
+    }
+  });
+  test('generated Linux command propagates curl and installer failure even from a POSIX shell', t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rumable-command-'));
+    t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
+    fs.writeFileSync(path.join(dir,'sudo'), '#!/bin/sh\nexec "$@"\n', {mode:0o755});
+    const cmd = makeCommand(model,manifest,source);
+    for (const [body,status] of [['exit 22',22], ['exit 60',60], ['printf "exit 17\\n"',17], ['printf "exit 0\\n"',0]]) {
+      fs.writeFileSync(path.join(dir,'curl'), '#!/bin/sh\n'+body+'\n',{mode:0o755});
+      const result=spawnSync('sh',['-c',cmd],{env:{...process.env,PATH:dir+path.delimiter+process.env.PATH},encoding:'utf8'});
+      assert.equal(result.status,status,result.stderr);
     }
   });
 }

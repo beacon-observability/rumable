@@ -41,6 +41,12 @@ func atomicWrite(path string, b []byte, mode os.FileMode) error {
 	}
 	name := f.Name()
 	defer os.Remove(name)
+	if mode.Perm()&0077 == 0 {
+		if err = protectPrivateFile(name); err != nil {
+			f.Close()
+			return err
+		}
+	}
 	if err = f.Chmod(mode); err == nil {
 		_, err = f.Write(b)
 	}

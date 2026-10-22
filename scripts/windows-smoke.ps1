@@ -272,6 +272,15 @@ try {
             $page = Invoke-TestHttp ($baseUrl + $scenario.app + '/index.html') 'gzip'
             Assert-That (-not $page.headers['Content-Encoding']) 'Static compression was not disabled.'
             Assert-TestAssets $baseUrl $scenario.id $enabled
+            if ($initialBinary -eq $Binary) {
+                $privatePath = Join-Path $stateDir ('sites/' + $scenario.id + '/state.json')
+                $privateACL = Get-Acl -LiteralPath $privatePath
+                Assert-That $privateACL.AreAccessRulesProtected 'Private state inherited public permissions.'
+                foreach ($ace in $privateACL.Access) {
+                    $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+                    Assert-That (@('S-1-5-18','S-1-5-32-544') -contains $sid) ('Unexpected private state identity: ' + $sid)
+                }
+            }
             foreach ($leaf in @('/excluded/index.html','/nohead.html','/data.json')) {
                 $page = Invoke-TestHttp ($baseUrl + $scenario.app + $leaf)
                 $original = [IO.File]::ReadAllBytes((Join-Path $web ($scenario.id + $leaf)))

@@ -32,6 +32,9 @@ func verifyNative(root string, n Snapshot) error {
 
 func prepare(root string, s Site) (State, error) {
 	s = resolveOTelPaths(root, s)
+	if err := protectSiteDirectory(root, s); err != nil {
+		return State{}, err
+	}
 	if st, err := loadState(root, s.ID); err == nil {
 		return st, fmt.Errorf("already rendered; use enable to apply config changes")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -308,7 +311,28 @@ func restoreTransaction(root string, t transaction) error {
 			return err
 		}
 		if !sameJSON(live, t.Before.Current.Native) && (!t.NativeCommitted || !sameJSON(live, t.After.Native)) && !sameJSON(live, recovered) {
-			return errors.New("IIS state differs from journal; manual review required before recovery")
+			// 0.1.4 could commit IIS, then fail to decode the polluted stdout,
+			// leaving no after snapshot. Reconstruct that exact RUM-only apply;
+			// never accept arbitrary live state as the transaction's result.
+			if t.NativeCommitted || len(t.After.Native) != 0 || t.After.Site.OTel != nil || t.After.Uninstall {
+				return errors.New("IIS state differs from journal; manual review required before recovery")
+			}
+			checked, err := iisCommand(root, t.After.Site, "recover-pending-check", map[string]any{
+				"previous": t.Before.Current.Native, "original": t.Before.OriginalIIS,
+				"enabled": t.After.Enabled, "script": t.After.Script,
+			})
+			if err != nil {
+				return err
+			}
+			if !sameJSON(checked, live) {
+				return errors.New("IIS state changed during pending recovery check")
+			}
+			t.After.Native, t.NativeCommitted = checked, true
+			// Persist the checked result before any recovery write, so interruption
+			// during restore can use the usual exact before/after comparison.
+			if err = writeJSON(journalPath(root, t.After.Site), t); err != nil {
+				return err
+			}
 		}
 		nativeExpected = live
 	}

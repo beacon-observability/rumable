@@ -30,6 +30,8 @@ try {
     if ($rumWanted -and $null -ne $rewrite -and $rewrite.GetAttributeValue('rewriteBeforeCache')) { throw 'rewriteBeforeCache=true conflicts with streaming/chunked responses; review it manually.' }
     $compression = $config.GetSection('system.webServer/urlCompression', $target)
     . (Join-Path $request.root 'otel-iis.ps1')
+    . (Join-Path $request.root 'iis-rum.ps1')
+    . (Join-Path $request.root 'iis-acl.ps1')
 
     function Read-Snapshot {
         # Capture only owned XML nodes and the exact local compression attribute.
@@ -75,7 +77,7 @@ try {
                 $collection = $element.GetCollection()
                 $new = $collection.CreateElement('add')
                 Import-Element $new $child
-                $collection.Add($new)
+                [void]$collection.Add($new)
             } else {
                 Import-Element ($element.GetChildElement($child.Name)) $child
             }
@@ -102,7 +104,7 @@ try {
             if ($doc.DocumentElement.Name -ne 'rule' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned rule in snapshot.' }
             $element = $rules.CreateElement('rule')
             Import-Element $element $doc.DocumentElement
-            $rules.Add($element)
+            [void]$rules.Add($element)
         }
         foreach ($text in @($snapshot.preconditions)) {
             if ([string]::IsNullOrEmpty($text)) { continue }
@@ -110,14 +112,14 @@ try {
             if ($doc.DocumentElement.Name -ne 'preCondition' -or -not $doc.DocumentElement.GetAttribute('name').StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid owned precondition in snapshot.' }
             $element = $preconditions.CreateElement('preCondition')
             Import-Element $element $doc.DocumentElement
-            $preconditions.Add($element)
+            [void]$preconditions.Add($element)
         }
         $virtual = $application.VirtualDirectories[$vpath]
         # Keep managed assets reachable for already cached HTML, even when
         # rolling back to the original disabled snapshot without a mapping.
         if ($null -ne $virtual -and $snapshot.virtualDirectory -cne $current.virtualDirectory -and ($null -ne $snapshot.virtualDirectory -or $request.removeMapping)) {
             if ($request.removeMapping -and $virtual.PhysicalPath -ne (Join-Path $request.root 'public')) { throw 'Uninstall refuses a virtual directory owned by another deployment.' }
-            $application.VirtualDirectories.Remove($virtual)
+            [void]$application.VirtualDirectories.Remove($virtual)
         }
         if ($null -ne $snapshot.virtualDirectory -and $snapshot.virtualDirectory -cne $current.virtualDirectory) {
             [xml]$doc = $snapshot.virtualDirectory
@@ -205,6 +207,7 @@ try {
         Assert-OTelExternalEnvironment
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'check') {
+        if ($request.checkingEnabled -and $rumWanted) { Get-RumAssetReaders | Out-Null }
         if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
         if ($rumWanted -and $compression.GetAttributeValue('doStaticCompression') -and -not $site.iis.allowCompressionChanges) { throw 'Static compression is enabled; set allowCompressionChanges after reviewing its impact.' }
         if ($request.checkingEnabled -and $null -ne $site.otel -and $site.otel.enabled) { Assert-OTelPool -SavedCredentials:([bool]$request.restoringOTel) }
@@ -213,6 +216,9 @@ try {
         if ($rumWanted -and $null -ne $virtual -and $virtual.PhysicalPath -ne $expectedPath) { throw 'Reserved /__rumable__ virtual directory is already owned by another deployment.' }
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'inspect') {
+        $before | ConvertTo-Json -Depth 30 -Compress
+    } elseif ($request.action -eq 'recover-pending-check') {
+        Assert-PendingRumSnapshot $before
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'activate') {
         # Go persists the committed snapshot before this separate process can
@@ -224,46 +230,19 @@ try {
         $manager.CommitChanges()
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'apply') {
+        if ($request.enabled) { Set-RumPublicACL }
         Remove-Owned $rules
         Remove-Owned $preconditions
         if ($request.enabled) {
             $compression.SetAttributeValue('doStaticCompression', $false)
-            $pre = $preconditions.CreateElement('preCondition')
-            $pre.SetAttributeValue('name', ($prefix + 'html'))
-            $checks = @(
-                @('{RESPONSE_CONTENT_TYPE}', '^text/html(?:;|$)', $false),
-                @('{RESPONSE_CONTENT_ENCODING}', '^$', $false),
-                @('{RESPONSE_CONTENT_DISPOSITION}', 'attachment', $true),
-                @('{REQUEST_METHOD}', '^GET$', $false)
-            )
-            foreach ($check in $checks) {
-                $element = $pre.GetCollection().CreateElement('add')
-                $element.SetAttributeValue('input', $check[0]); $element.SetAttributeValue('pattern', $check[1]); $element.SetAttributeValue('negate', [bool]$check[2])
-                $pre.GetCollection().Add($element)
-            }
-            $preconditions.Add($pre)
-            $include = '^(?:' + ((@($site.includePaths) | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')'
-            $exclude = @($site.excludePaths) + @(([uri]$site.publicURL).AbsolutePath.TrimEnd('/') + '/__rumable__/')
-            $excludePattern = '^(?:' + (($exclude | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')'
-            foreach ($kind in @('inject', 'etag', 'modified')) {
-                $rule = $rules.CreateElement('rule')
-                $rule.SetAttributeValue('name', ($prefix + $kind))
-                $rule.SetAttributeValue('preCondition', ($prefix + 'html'))
-                $match = $rule.GetChildElement('match')
-                if ($kind -eq 'inject') {
-                    $match.SetAttributeValue('filterByTags', 'None'); $match.SetAttributeValue('pattern', '<head>'); $match.SetAttributeValue('occurrences', 1)
-                    $value = '<head><script async data-rumable="' + $site.id + '" src="' + $request.script + '"></script>'
-                } else {
-                    $header = 'RESPONSE_ETag'; if ($kind -eq 'modified') { $header = 'RESPONSE_Last_Modified' }
-                    $match.SetAttributeValue('serverVariable', $header); $match.SetAttributeValue('pattern', '.+')
-                    $value = ''
+            $nodes = Get-RumNodes
+            foreach ($entry in @(@('preCondition', $preconditions, $nodes.preconditions), @('rule', $rules, $nodes.rules))) {
+                foreach ($text in $entry[2]) {
+                    [xml]$doc = $text
+                    $element = $entry[1].CreateElement($entry[0])
+                    Import-Element $element $doc.DocumentElement
+                    [void]$entry[1].Add($element)
                 }
-                $conditions = $rule.GetCollection('conditions')
-                foreach ($condition in @(@($include, $false), @($excludePattern, $true))) {
-                    $element = $conditions.CreateElement('add'); $element.SetAttributeValue('input', '{URL}'); $element.SetAttributeValue('pattern', $condition[0]); $element.SetAttributeValue('negate', [bool]$condition[1]); $element.SetAttributeValue('ignoreCase', $false); $conditions.Add($element)
-                }
-                $action = $rule.GetChildElement('action'); $action.SetAttributeValue('type', 'Rewrite'); $action.SetAttributeValue('value', $value)
-                $rules.Add($rule)
             }
         } else {
             Restore-Compression $request.original $before

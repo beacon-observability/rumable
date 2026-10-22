@@ -26,7 +26,7 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 ## Nginx
 
 - 使用 `sub_filter` 变量替换，技术能力最低为 **1.9.4**；`check` 同时验证 `--with-http_sub_module`，不会只看版本字符串。
-- 默认 Nginx Linux；Windows 版 Nginx 未列入首版运行验收。
+- 当前 Nginx 一键安装、站点自动发现、自动挂接与挂接回滚仅支持 Linux；Windows/macOS Nginx 不属于当前支持的自动接入流程。
 - 不依赖 njs、Lua、OpenResty、`add_header_inherit` 或新版本专用指令，能够使用较旧的 Nginx。
 - 技术最低版本不等于生产推荐版本。优先使用仍受维护的发行包；旧版本兼容性测试不解决其自身安全缺陷。
 - 压缩、已有过滤器、请求头继承和缓存配置比版本号更容易影响接入，必须完成首次挂接审查。

@@ -51,6 +51,7 @@ SH
 chmod 755 "$work/bin/"*
 docker run -d --name "$server" -v "$work:/work" --entrypoint nginx nginx:1.28-alpine -c /work/nginx.conf -g 'daemon off;' >/dev/null
 for i in $(seq 1 40); do if docker exec "$server" wget -qO- http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi; sleep 0.2; done
+docker exec "$server" apk add --no-cache bash >/dev/null
 generate() {
   node --input-type=module - "$work" "$arch" "$1" "$2" <<'JS'
 import fs from 'node:fs';
