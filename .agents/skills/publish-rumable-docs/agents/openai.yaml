@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publish Rumable Docs"
+  short_description: "发布 Rumable 中文接入文档，并创建面向 release 的 MR"
+  default_prompt: "使用 $publish-rumable-docs，根据当前 Rumable 源码和实际发布清单更新文档中心 Web 目录，并提交面向 release 的文档 MR。"
