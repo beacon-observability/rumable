@@ -14,7 +14,7 @@
 
 同步加载可以更早初始化，但脚本下载会影响首屏；异步初始化前的事件可能漏采。加载方式与 SDK 来源可自由组合。页面的“应用版本”和“SDK 远程配置”不会升级 SDK 文件。
 
-当前源码基线为 **0.1.6**，内置 SDK **3.3.21**，见 [sdk.json](internal/rumable/assets/sdk.json)。同步加载和自动发现时的 SDK 配置随 0.1.6 页面与安装包配套提供。旧清单缺少相应能力时，新页面会阻止生成不兼容命令；Windows 旧失败现场先按[恢复流程](docs/windows-0.1.4-recovery.md)处理；原生 IIS 与 gzip 缓存行为须独立复测。
+Linux / Nginx 和 Windows / IIS 均支持一键接入、自动发现站点及同域/CDN 与同步/异步的组合。配置页和[发布清单](https://static.guance.com/rumable/latest/manifest.json)使用 latest 固定入口，展示可安装的 CLI 与内置 SDK 信息。
 
 ## 从哪里开始
 
@@ -24,9 +24,9 @@
 | 已接入站点升级、停用或回滚 | [日常维护](USER-GUIDE.md#10-修改配置升级停用回滚和卸载) |
 | 查询 TOML 参数、默认值和限制 | [配置参考](docs/configuration.md) |
 | 排查压缩、缓存、CSP、配置漂移 | [运维手册](docs/operations.md) |
-| 核对系统支持和已完成的验证 | [兼容性](docs/compatibility.md)、[验证记录](docs/verification.md) |
+| 核对操作系统与服务器组件要求 | [兼容性](docs/compatibility.md) |
 | 使用服务端 Trace | [OTel 手册](docs/otel.md)、[依赖安装与卸载](docs/otel-installation.md) |
-| 维护配置页、安装器与发布流水线 | [页面集成约定](docs/one-click-onboarding.md)、[开发验证](docs/development.md)、[CI 发布](docs/gitlab-ci-release.md) |
+| 维护配置页、安装器与发布流水线 | [页面集成约定](docs/one-click-onboarding.md)、[开发验证](docs/development.md)、[验证记录](docs/verification.md)、[CI 发布](docs/gitlab-ci-release.md) |
 | 处理旧 Windows 0.1.4 失败现场 | [恢复与复测](docs/windows-0.1.4-recovery.md) |
 
 ## 接入与后续更新

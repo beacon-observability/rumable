@@ -184,4 +184,4 @@ Linux 回归脚本针对本机 ARM64 OrbStack，Nginx 镜像和 Collector 均使
 # 已安装 URL Rewrite 2 时加 -WithRUM，覆盖两种能力的独立启停。
 ```
 
-该脚本创建两个独立站点/池，以实际环境值和 PID 验证目标进程变更、重复启停不回收、旁站不变、提交后 HTTP 失败恢复、共享池/外部修改拒绝，以及凭据缺失时的回滚；WithRUM 另测双开关和 RUM 操作不改变 OTel 凭据/PID。结果目录必须为新目录，保存 cli.log、report.json 和待查询的 Trace ID；默认清理临时站点，日志保留，Keep 会保留两组资源。报告 passed 只代表脚本断言通过，仍需查询 Trace 才能证明入库。完整命令与结果读取见[Windows 验收](windows-acceptance.md#7-iis-10-otel-专项验收)。当前主机无 Windows/IIS，Windows 实机、ASP.NET Core 托管方式和真实后端入库仍需验收。
+该脚本创建两个独立站点/池，以实际环境值和 PID 验证目标进程变更、重复启停不回收、旁站不变、提交后 HTTP 失败恢复、共享池/外部修改拒绝，以及凭据缺失时的回滚；WithRUM 另测双开关和 RUM 操作不改变 OTel 凭据/PID。结果目录必须为新目录，保存 cli.log、report.json 和待查询的 Trace ID；默认清理临时站点，日志保留，Keep 会保留两组资源。报告 passed 只代表脚本断言通过，仍需查询 Trace 才能证明入库。完整命令与结果读取见[Windows 验收](windows-acceptance.md#7-iis-10-otel-专项验收)。

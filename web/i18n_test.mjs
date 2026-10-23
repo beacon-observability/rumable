@@ -6,36 +6,41 @@ import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
 
 test('browser preference order selects Chinese or English with an English fallback', () => {
   for (const language of ['zh', 'zh-CN', 'zh-TW', 'zh-Hant-HK', 'ZH-sg']) {
-    assert.equal(resolveLocale('auto', [language, 'en-US']), 'zh-CN');
+    assert.equal(resolveLocale(null, [language, 'en-US']), 'zh-CN');
   }
-  assert.equal(resolveLocale('auto', ['en-GB', 'zh-CN']), 'en');
-  assert.equal(resolveLocale('auto', ['fr-FR', 'zh-CN', 'en']), 'zh-CN');
-  assert.equal(resolveLocale('auto', ['ja-JP', 'de-DE']), 'en');
-  assert.equal(resolveLocale('auto', []), 'en');
-  assert.equal(resolveLocale('auto', ['zhfake']), 'en');
+  assert.equal(resolveLocale(null, ['en-GB', 'zh-CN']), 'en');
+  assert.equal(resolveLocale(null, ['fr-FR', 'zh-CN', 'en']), 'zh-CN');
+  assert.equal(resolveLocale(null, ['ja-JP', 'de-DE']), 'en');
+  assert.equal(resolveLocale(null, []), 'en');
+  assert.equal(resolveLocale(null, ['zhfake']), 'en');
+  assert.equal(resolveLocale(), 'en');
   assert.equal(resolveLocale('en', ['zh-CN']), 'en');
   assert.equal(resolveLocale('zh-CN', ['en-US']), 'zh-CN');
   assert.equal(resolveLocale('invalid', ['zh-CN']), 'zh-CN');
 });
 
-test('manual language persists; automatic mode clears it; blocked storage is optional', () => {
+test('manual language persists; missing, legacy or blocked storage uses browser detection', () => {
   const entries = new Map();
   const storage = {getItem:key => entries.get(key), setItem:(key,value) => entries.set(key,value), removeItem:key => entries.delete(key)};
-  assert.equal(readLanguagePreference(storage), 'auto');
+  assert.equal(readLanguagePreference(storage), null);
   saveLanguagePreference(storage, 'en');
   assert.equal(readLanguagePreference(storage), 'en');
   saveLanguagePreference(storage, 'zh-CN');
   assert.equal(resolveLocale(readLanguagePreference(storage), ['en-US']), 'zh-CN');
-  saveLanguagePreference(storage, 'auto');
-  assert.equal(readLanguagePreference(storage), 'auto');
+  saveLanguagePreference(storage, null);
+  assert.equal(readLanguagePreference(storage), null);
   assert.equal(entries.has(languageStorageKey), false);
-  entries.set(languageStorageKey, 'unsupported');
-  assert.equal(readLanguagePreference(storage), 'auto');
+  for (const saved of ['auto', 'unsupported']) {
+    entries.set(languageStorageKey, saved);
+    assert.equal(readLanguagePreference(storage), null);
+    assert.equal(resolveLocale(readLanguagePreference(storage), ['zh-CN']), 'zh-CN');
+    assert.equal(resolveLocale(readLanguagePreference(storage), ['fr-FR']), 'en');
+  }
   const blocked = {getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); }, removeItem() { throw Error('blocked'); }};
-  assert.equal(readLanguagePreference(blocked), 'auto');
+  assert.equal(readLanguagePreference(blocked), null);
   assert.doesNotThrow(() => saveLanguagePreference(blocked, 'en'));
-  assert.doesNotThrow(() => saveLanguagePreference(blocked, 'auto'));
-  assert.equal(readLanguagePreference(undefined), 'auto');
+  assert.doesNotThrow(() => saveLanguagePreference(blocked, null));
+  assert.equal(readLanguagePreference(undefined), null);
   assert.doesNotThrow(() => saveLanguagePreference(undefined, 'en'));
 });
 

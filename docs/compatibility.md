@@ -1,21 +1,21 @@
 # 平台与版本兼容性
 
-服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。安装原生模块不等于旧系统已经通过 OTel 运行验收。
+服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。
 
-IIS OTel 要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。preview.3 包含对应修复；实际验收范围见[验证记录](verification.md)。
+IIS OTel 要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。
 
 ## 编译器与操作系统是两个独立约束
 
 源码使用 `go 1.20`，标准库 API 与 TOML 解析依赖均兼容 Go 1.20（固定 `github.com/BurntSushi/toml v1.6.0`，上游最低 Go 1.18）。现代包使用 Go 1.26.x，legacy 包必须真正使用 **Go 1.20.14** 编译；不使用非官方 Go runtime 补丁。
 
-| 发布包 | 编译器 | 目标范围 | 实际验证要求 |
-|---|---|---|---|
-| Windows 386 / amd64 / arm64 现代版 | Go 1.26.x | Windows 10+ / Server 2016+，选择对应 CPU / 系统位数 | 各目标 Windows 上实际运行 |
-| Windows 386 / amd64 legacy | Go 1.20.14 | Windows 7 SP1+ / Server 2008 R2 SP1、Server 2012 / 2012 R2 等适用的旧 x86/x64 系统 | 每种目标系统独立验收 |
-| Linux 386 / amd64 / arm64 现代版 | Go 1.26.x | 内核 3.2+；架构还有自身限制 | OrbStack 运行与原生目标验收 |
-| Linux 386 / amd64 legacy | Go 1.20.14 | 旧 Linux x86/x64，内核至少 2.6.32；不支持 CentOS 5 的 2.6.18 | 旧内核必须真机/虚拟机验收 |
+| 发布包 | 编译器 | 操作系统要求 |
+|---|---|---|
+| Windows 386 / amd64 / arm64 现代版 | Go 1.26.x | Windows 10+ / Server 2016+，选择对应 CPU / 系统位数 |
+| Windows 386 / amd64 legacy | Go 1.20.14 | Windows 7 SP1+ / Server 2008 R2 SP1、Server 2012 / 2012 R2 等适用的旧 x86/x64 系统 |
+| Linux 386 / amd64 / arm64 现代版 | Go 1.26.x | 内核 3.2+；架构还有自身限制 |
+| Linux 386 / amd64 legacy | Go 1.20.14 | 旧 Linux x86/x64，内核至少 2.6.32；不支持 CentOS 5 的 2.6.18 |
 
-本次 preview 仅提供 Windows / Linux，共 10 个包，不提供 macOS 包。所有发布包设置 `CGO_ENABLED=0`，不依赖宿主机 glibc；amd64 使用 `GOAMD64=v1`，386 使用 `GO386=sse2`，ARM64 使用 `GOARM64=v8.0`。这不移除内核、Windows API 或平台最低要求。容器共享宿主机内核，**不能**用旧 Linux 用户空间容器证明旧内核兼容。
+提供 Windows / Linux 安装包，不提供 macOS 安装包。所有发布包设置 `CGO_ENABLED=0`，不依赖宿主机 glibc；amd64 使用 `GOAMD64=v1`，386 使用 `GO386=sse2`，ARM64 使用 `GOARM64=v8.0`。这不移除内核、Windows API 或平台最低要求。
 
 Go 1.20 已停止官方维护，legacy 包有标准库安全修复缺失这一明确限制；优先使用现代包，旧包只用于无法升级的环境。旧系统证书链和 TLS 设置也需要单独检查，不关闭证书验证来实现兼容。
 
@@ -45,28 +45,22 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 
 ## IIS 与 PowerShell
 
-- 技术基线 **IIS 7.5+**，需要 **URL Rewrite 2.x**。IIS 10 是现代验收目标，7.5/8/8.5 是旧系统兼容目标，均需实际 Windows 验证。
+- 技术基线 **IIS 7.5+**，需要 **URL Rewrite 2.x**、Static Content 和匿名静态文件访问。
 - 使用系统 Microsoft.Web.Administration API 和 Windows PowerShell，不依赖 .NET 6/8、PowerShell 7、ASP.NET Core 或 ARR 来注入页面。
 - 需要 **64 位 PowerShell 3.0+**（建议 5.1）。Windows 7 / Server 2008 R2 的默认 PowerShell 2.0 不满足 CLI 与 IIS 桥接脚本的内部 JSON 接口要求，需要运维预先部署适用的 WMF；工具不会自动安装系统组件。
 - TOML 配置文件使用 UTF-8；旧 PowerShell 的 `Out-File` 默认可能生成 UTF-16，请使用 `rumable init` 或显式 UTF-8 写入配置。
 - 动态应用或反代生成的 HTML 必须在进入 URL Rewrite 时未压缩。工具在允许后关闭目标应用的 IIS 静态和动态压缩，并在停用时恢复原局部设置/继承关系；不擅自修改后端应用中间件。
 - 配置被锁定、已有保留路径映射、`rewriteBeforeCache=true`、ACL 或 MIME 条件不满足时，需先由运维解决。
-- 提供 Windows x86 32 位 CLI。它在 64 位 Windows 上经 Sysnative 调用 64 位 PowerShell；真正 32 位 Windows 只能执行版本、配置生成、状态读取与 HTTP 探测，不能管理 IIS。Windows ARM64 CLI 已交叉编译，ARM64 IIS 仍需原生配置 API / PowerShell 能力和实机验收。
+- 提供 Windows x86 32 位 CLI。它在 64 位 Windows 上经 Sysnative 调用 64 位 PowerShell；真正 32 位 Windows 只能执行版本、配置生成、状态读取与 HTTP 探测，不能管理 IIS。Windows ARM64 管理 IIS 同样需要系统原生的配置 API 和 PowerShell。
 - HTTP 探测接受标准中的历史 JavaScript MIME（如 `application/x-javascript`），避免把旧站点的合法脚本误判成不可执行内容；依据 [MIME Sniffing 标准](https://mimesniff.spec.whatwg.org/#javascript-mime-type)。
 
 依据：[URL Rewrite 2 模块及限制](https://learn.microsoft.com/en-us/iis/extensions/url-rewrite-module/using-url-rewrite-module-20)。
 
 ## 浏览器
 
-旧 Windows CLI 可运行，不意味着 IE 或旧版浏览器能运行当前 SDK。浏览器兼容性以官方 SDK 版本的要求为准；首版在本机 Chrome 验证，不承诺未经验证的 IE 支持。
+CLI 的操作系统要求与访问者的浏览器要求分别判断。浏览器兼容性以所用 Web SDK 的要求为准，见 [Web 应用接入](https://docs.guance.com/real-user-monitoring/web/app-access/)。
 
-可选 CDN 加载不改变 Nginx/IIS 的最低版本或 CLI 的 Go 基线。浏览器另须能访问 HTTPS CDN，CSP 允许实际脚本地址；开启 integrity 还要求浏览器支持 SRI、跨域 CDN 支持 CORS。CDN 模式已在本机 Chrome 验证，不能据此扩展旧浏览器或 Windows/IIS 实机的验收结论。
-
-## 验证状态
-
-实现验证记录见 [verification.md](verification.md)。Windows/IIS 与旧内核未执行真实运行验收时，不应据此文档宣称生产兼容已经通过。
-
-Windows 的可执行步骤和逐系统验收矩阵见 [windows-acceptance.md](windows-acceptance.md)。脚本记录实际 OS/SP、PS/CLR、IIS/URL Rewrite、二进制版本和摘要；旧主机优先读取包内 build.json 阻止误用现代包。完整验收与 StaticOnly 部分验收分别标记。
+可选 CDN 加载不改变 Nginx/IIS 的最低版本或 CLI 的 Go 基线。浏览器另须能访问 HTTPS CDN，CSP 允许实际脚本地址；开启 integrity 还要求浏览器支持 SRI、跨域 CDN 支持 CORS。
 
 ## 自动首次挂接
 
@@ -76,4 +70,4 @@ Windows 的可执行步骤和逐系统验收矩阵见 [windows-acceptance.md](wi
 
 install-otel 在 Linux 支持 Nginx x64/ARM64 的准确版本 APT 包或校验过的离线包。Windows 安装固定 .NET Agent v1.17.0，仅 IIS 10 的 x64 Windows / x64、x86 池；不放宽旧 Windows/IIS 的 OTel 限制。CLI 的其他架构仍可用于 RUM/配置生成。平台矩阵和离线格式见[安装与卸载](otel-installation.md)。
 
-IIS 0.1.7 对接受 HTML 的受管 GET 清除旧缓存条件请求头，并关闭所选应用的静态和动态压缩；需要 URL Rewrite 的入站规则及两个应用级 allowedServerVariables 权限。启停/回滚范围、继承恢复、API 条件缓存影响及原生验证边界见[操作手册](operations.md#压缩与缓存)。
+IIS 对接受 HTML 的受管 GET 清除旧缓存条件请求头，并关闭所选应用的静态和动态压缩；需要 URL Rewrite 的入站规则及两个应用级 allowedServerVariables 权限。启停/回滚范围、继承恢复、API 条件缓存影响见[操作手册](operations.md#压缩与缓存)。

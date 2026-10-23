@@ -57,7 +57,7 @@ Nginx 的过滤器处理源 HTML，然后可以由 Nginx 做输出 gzip。反代
 
 Nginx 注入同时检查实际 HTML MIME 与源响应的 Content-Encoding；父层 `sub_filter_types *` 不会让 Rumable 改写 JSON 或 JavaScript。需要保留的业务 sub_filter 必须与 location include 显式放在同一层；停用时保留一个动态空匹配规则，避免启停改变规则继承；普通停用、`disable --component rum` 和修改 TOML 关闭 RUM 都遵守这一约束，缓存页面仍可获取字节未变的旧脚本。纯 OTel 首次挂接仍不添加 RUM 过滤器，也不额外要求 http_sub_module。业务规则自己的改写范围仍由原配置决定。
 
-`check` 在 identity 页面上预检源压缩和 CSP。提交后的探测及独立 `probe` 还请求 gzip 变体并解压核对注入与版本；`gzip_static on` 导致只有压缩页面未注入时，启用失败并恢复受管状态。`gzip_static always` 连 identity 页面也返回压缩内容，会在预检时直接拒绝。探测解压后的正文仍受 8 MiB 限制。Brotli 预压缩仍须人工关闭；这轮未增加 Brotli 解码器。
+`check` 在 identity 页面上预检源压缩和 CSP。提交后的探测及独立 `probe` 还请求 gzip 变体并解压核对注入与版本；`gzip_static on` 导致只有压缩页面未注入时，启用失败并恢复受管状态。`gzip_static always` 连 identity 页面也返回压缩内容，会在预检时直接拒绝。探测解压后的正文仍受 8 MiB 限制。Brotli 预压缩须在注入路径上关闭。
 
 多页面 `probe` 和提交/恢复探测逐页检查 HTML 的 identity、gzip、注入版本及 CSP；同一轮内相同初始化脚本、SDK 和 Worker 的每种编码只检查一次。初始化脚本和 SDK 的两种响应在解压后都必须匹配受管 SHA-256；外置 Worker 检查 MIME，并要求 identity / gzip 解压后的内容一致，不因此证明 Worker 代码属于指定 SDK 版本。共用资源的检查结果不跨轮复用，重试仍会重新验证。这样增加 probePaths 不会重复下载同一编码的 SDK，也不会漏检后续页面的压缩或 CSP 差异。过期的脚本 .gz 文件、错误压缩缓存或仅 gzip 生效的业务过滤器也会使启用/升级失败；工具保留这些非受管文件，由运维审查并修复。
 
@@ -65,19 +65,19 @@ Nginx 1.9.4 的 `http` 层 sub_filter 继承可能在 SDK 请求或提前返回�
 
 检查只使用同一次 nginx -T 的转储，不把附属文件当作独立顶层配置；相对 include 按主配置目录解析，同一文件在 server 与 http 引用时会分别核对。未知/缺失的 include 上下文、异常转储或不支持的掩码会拒绝，支持范围和处理方法见[兼容性说明](compatibility.md)。check 会保存失败诊断；启用前拒绝不会创建事务、改写受管部署或 reload。中断恢复若在写回候选后仍遇到风险，会保留事务日志；先解决外部业务配置，再重试 rollback，不要删除日志绕过。
 
-IIS 出站 HTML 重写要求输入正文未压缩。Windows 0.1.6 实机对照已确认：即使 `doStaticCompression=false`，开启动态压缩仍可能产生未注入的 gzip 静态页面；关闭动态压缩可消除该对照中的失败。具体模块执行顺序尚无 FREB 证据。
+IIS 出站 HTML 重写要求输入正文未压缩。所选应用的 IIS 静态和动态压缩都需要关闭，避免压缩响应绕过注入。
 
 工具在允许后关闭所选应用的 `doStaticCompression` 和 `doDynamicCompression`，分别保存原局部值及属性是否存在；停用/卸载时恢复值或删除新增属性，恢复原来的继承关系。影响范围是所选 IIS 应用的压缩，其他站点及后端中间件的压缩设置不变。文件级覆盖和上游压缩仍可能导致探测失败。
 
-0.1.6 及更早快照未管理动态压缩。新 CLI 在首次变更前读取它的实际局部值，并先写入事务日志；失败恢复还原这份实际基线。恢复旧事务不会把缺失字段当作 false，也不会擅自删除动态压缩属性。主动回滚到历史启用版本时恢复旧 SDK/配置，同时保持动态压缩关闭；最终停用恢复首次接管时的原值。
+旧快照如果未管理动态压缩，CLI 在首次变更前读取它的实际局部值，并先写入事务日志；失败恢复还原这份实际基线。恢复旧事务不会把缺失字段当作 false，也不会擅自删除动态压缩属性。主动回滚到历史启用版本时恢复旧 SDK/配置，同时保持动态压缩关闭；最终停用恢复首次接管时的原值。
 
 IIS 预检查使用浏览器压缩请求。提交后先检查携带 If-None-Match、If-Modified-Since 及两者组合的普通刷新，再检查无条件浏览器请求、gzip 和 identity；304 或正文漏注入立即触发恢复，后续成功不能覆盖首次失败。ETag 检查使用 `*` 匹配任意旧表示，日期检查使用未来时间。一次 identity 请求可能预热 IIS 缓存并掩盖后续 gzip 失败，因此手动测试也应先检查浏览器首次刷新。
 
-从 0.1.7 起，所选应用增加一条入站规则：对 includePaths 内、未排除且 Accept 包含 text/html 的 GET，清空请求中的 `If-None-Match`、`If-Modified-Since`，防止源站 304 让浏览器继续使用安装前或错误压缩的旧正文。规则在本应用的业务入站规则前执行，不改 URL、不停止后续规则；SDK 资源、排除路径、其他方法及不接受 HTML 的 API 请求不受影响。入站时尚不知道响应 MIME，所以同路径下以 HTML 导航方式访问的 JSON/下载也会失去条件 GET 优化，正文仍由出站 MIME/下载条件旁路。需要保留其条件缓存时，请加入 excludePaths。
+启用时，所选应用增加一条入站规则：对 includePaths 内、未排除且 Accept 包含 text/html 的 GET，清空请求中的 `If-None-Match`、`If-Modified-Since`，防止源站 304 让浏览器继续使用安装前或错误压缩的旧正文。规则在本应用的业务入站规则前执行，不改 URL、不停止后续规则；SDK 资源、排除路径、其他方法及不接受 HTML 的 API 请求不受影响。入站时尚不知道响应 MIME，所以同路径下以 HTML 导航方式访问的 JSON/下载也会失去条件 GET 优化，正文仍由出站 MIME/下载条件旁路。需要保留其条件缓存时，请加入 excludePaths。
 
 工具只在目标应用的 allowedServerVariables 中补充这两个请求头的权限，并记录原有局部项和继承；停用/卸载删除本次新增权限，保留原有权限。旧快照首次变更时记录实际基线；历史启用版本回滚保留新防护，失败事务恢复精确回到变更前。配置锁定、局部 remove 冲突、受管规则或权限漂移都会报错。父级或业务规则可能覆盖请求头；实际 HTTP 条件探测失败时不会判为接入成功。
 
-HTTP 验收仅覆盖 `probePaths`，默认自动发现通常只有首页；安装结果列出实际检查的 URL。此防护针对到达 IIS 的条件 GET，不能清除完全不发网络请求的浏览器新鲜缓存、Service Worker 或外层 CDN 缓存。仍须保留安装前浏览器会话，检查首页及未探测的 second.html 首次普通刷新，确认 200、恰好一条当前注入且业务内容完整；不可将新会话或强制刷新成功视为全面通过。0.1.7 的原生 IIS 结果需由 Windows 实机补充。
+HTTP 验收仅覆盖 `probePaths`，默认自动发现通常只有首页；安装结果列出实际检查的 URL。此防护针对到达 IIS 的条件 GET，不能清除完全不发网络请求的浏览器新鲜缓存、Service Worker 或外层 CDN 缓存。接入后，在安装前已打开的浏览器页面执行普通刷新，并检查首页和其他主要业务页面：应返回 200、包含恰好一条当前初始化脚本，且业务内容完整。若仍命中旧 HTML，按浏览器、Service Worker 或外层 CDN 的缓存策略清理。
 
 Nginx 活跃 HTML handler 关闭本地 ETag/条件日期处理；符合注入条件的 GET 与 HEAD 都激活过滤器的头部清理，移除原文 Content-Length、ETag、Last-Modified，HEAD 不输出正文。方法匹配使用正则 map 项，兼容旧版默认 map_hash_bucket_size，无需修改全局桶大小。不新增 proxy_hide_header，因此保留原有隐藏响应头列表。停用后恢复原验证头行为，但业务自己的过滤规则仍可能移除这些头。IIS 对选定 HTML 清除这两个验证头。HTTP 探测拒绝仍携带原文强 ETag 的改写页面。范围和继承的影响须在首次挂接时审查。Nginx 历史快照按原字节回滚，需要新版本头部修复时重新 enable；IIS 启用快照按上述压缩及条件请求防护迁移。
 

@@ -60,11 +60,11 @@ SDK 来源和加载方式是两个独立选项：
 | `url` | 完整 HTTPS 脚本地址 | 只在使用 CDN 时填写 |
 | `integrity` | `false` / `true` | 是否启用浏览器 SRI 完整性校验；默认 `false`，CDN 开启前需满足下方 CORS 和摘要要求 |
 
-不写 `loading` 就使用异步。下面两个异步示例省略这一行，以兼容尚不识别该字段的安装包；支持新字段的安装包也可以显式填写 `loading = "async"`。`[sites.sdk]` 是 TOML 中放置这些选项的配置段名称，不是另外一个需要填写的参数。
+不写 `loading` 就使用异步，也可以显式填写 `loading = "async"`。下面的示例均写出加载方式，便于直接对照。`[sites.sdk]` 是 TOML 中放置这些选项的配置段名称，不是另外一个需要填写的参数。
 
 #### 在配置页里怎么选
 
-配套的新配置页在“选择 SDK 来源与加载方式”中提供两个下拉框：
+配置页在“选择 SDK 来源与加载方式”中提供两个下拉框：
 
 | 想要的效果 | “SDK 来源”选什么 | “加载方式”选什么 | CDN 地址 |
 | --- | --- | --- | --- |
@@ -75,20 +75,11 @@ SDK 来源和加载方式是两个独立选项：
 
 例如要用官方 CDN 同步加载，就选择“CDN”和“同步”，CDN 地址填写 `https://static.guance.com/browser-sdk/v3/dataflux-rum.js`。确认右侧摘要后，读取发布版本、下载 TOML，再按页面生成的命令执行。
 
-如果页面没有这些选项，先打开 latest 配置页并重新读取发布清单。同步与自动发现中的 SDK 选项需要安装包提供相应能力；页面提示不支持时，不要直接把新字段交给旧 CLI。
+一键接入支持上述四种组合，也支持自动发现网站时选择 CDN 和同步加载。
 
-#### 如何确认安装包支持所选方式
+#### 已安装 CLI 的站点如何应用配置
 
-以配置页读取的发布清单为准，不按本文推测某个固定版本支持哪些功能。配置页会检查所选安装包是否支持你的选项。
-
-| 选择 | 使用前确认 |
-| --- | --- |
-| 网站同域 + 异步 | 默认方式；不写 `loading` 即可 |
-| CDN + 异步 | 安装包支持 CDN 配置；SDK 文件与包内摘要一致 |
-| 网站同域 / CDN + 同步 | 安装包支持同步加载；旧包可能不识别 `loading` |
-| 自动发现网站，同时指定 CDN 或同步 | 安装包支持在自动发现时读取 SDK 配置 |
-
-页面提示不支持时，选择具备对应能力的安装包或改用受支持的方式。`latest` 只表示当前推荐发布，不保证包含尚未发布的源码功能；下载 TOML 也不会升级已安装的 CLI。
+首次接入直接使用 latest 配置页生成的命令。已有站点如需修改 SDK 来源或加载方式，保留原配置、站点 ID 和状态目录，按[配置更新与升级](#10-修改配置升级停用回滚和卸载)重新应用。下载 TOML 或刷新配置页不会自动更新服务器上的 CLI 和 SDK。
 
 以下四个代码块都是 **Linux / Nginx 的完整配置文件**，每次只选择一个，保存为 `/etc/rumable/website.toml`；不要把四个示例拼到同一文件里。已有站点先备份原 TOML，只修改原 `[sites.sdk]` 段，保留原站点 ID、路径、采样等设置。
 
@@ -136,12 +127,12 @@ defaultPrivacyLevel = "mask"
 
 [sites.sdk]
 source = "bundled" # 网站同域
-# 不写 loading 就是异步
+loading = "async" # 异步加载，不等待 SDK 下载完成
 ```
 
 #### 示例 2：网站同域 + 同步
 
-使用前确认安装包支持同步加载。SDK 由你的网站同域提供，先初始化再继续解析页面。
+SDK 由你的网站同域提供，先初始化再继续解析页面。
 
 ```toml
 schemaVersion = 1
@@ -206,12 +197,12 @@ defaultPrivacyLevel = "mask"
 source = "cdn" # 从 CDN 下载
 url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
 integrity = false
-# 不写 loading 就是异步
+loading = "async" # 异步加载，不等待 SDK 下载完成
 ```
 
 #### 示例 4：CDN + 同步
 
-使用前确认安装包支持同步加载。先加载 CDN SDK、完成初始化，再继续解析页面。
+先加载 CDN SDK、完成初始化，再继续解析页面。
 
 ```toml
 schemaVersion = 1
@@ -256,7 +247,7 @@ application = "/"
 allowCompressionChanges = true
 ```
 
-`site` 改成实际 IIS 站点名；`allowCompressionChanges=true` 表示允许调整该应用的静态压缩。子应用 `/shop` 对应 `publicURL=https://www.example.com/shop/`，注入和验收路径也应使用 `/shop/` 前缀。
+`site` 改成实际 IIS 站点名；`allowCompressionChanges=true` 表示允许关闭该应用的 IIS 静态和动态压缩；停用时恢复原设置。子应用 `/shop` 对应 `publicURL=https://www.example.com/shop/`，注入和验收路径也应使用 `/shop/` 前缀。
 
 使用 DataKit 上报时，在 `[sites.rum]` 中删除 `site` 和 `clientToken`，改为 `datakitOrigin = "https://datakit.example.com"`，并替换成真实地址。两种上报方式互斥，不追加 `/v1/write/rum`。
 
@@ -268,7 +259,7 @@ allowCompressionChanges = true
 sudo rumable setup --config /etc/rumable/website.toml --state-dir /var/lib/rumable --site website
 ```
 
-这里的 `rumable` 代表已安装的 CLI；如果未加入 PATH，替换为它的绝对路径。同步示例必须使用支持同步的安装包，并指向实际安装的 CLI。确认拟修改的 Nginx 挂接后再应用，并检查浏览器执行和真实数据入库。已接入站点保留原状态目录，修改配置后重新执行 `enable`。
+这里的 `rumable` 代表已安装的 CLI；如果未加入 PATH，替换为它的绝对路径。确认拟修改的 Nginx 挂接后再应用，并检查浏览器执行和真实数据入库。已接入站点保留原状态目录，修改配置后重新执行 `enable`。
 
 分步审查 Nginx 修改见[第 6.2 节](#62-生成预览挂接和启用)，Windows 的命令和验收见[第 7 节](#7-手动配置-windows--iis)。
 
@@ -291,7 +282,7 @@ clientToken = "YOUR_CLIENT_TOKEN"
 sessionReplayEnabled = false
 ```
 
-CDN 同步，需确认安装包支持自动发现中的 SDK 配置和同步加载：
+CDN 同步，指定 SDK 地址和加载方式：
 
 ```toml
 schemaVersion = 1
@@ -332,7 +323,7 @@ CDN 地址必须是完整 HTTPS 脚本地址，不含账号密码、查询参数
 | 官方可变 CDN | URL 不变，CDN 更新后浏览器可能在缓存过期后取得新版，不等待本机升级 | 只能恢复历史 URL，不能恢复被覆盖的远程文件 |
 | 自建固定 CDN | 运维发布与安装包一致的固定 URL，再更新配置并应用；可配合 SRI 锁定内容 | 需要历史 URL 和文件仍然可用 |
 
-同域版本更新由发布维护者先同步官方 SDK、核对稳定 v3 版本与许可、测试并提交，再发布新 Rumable 包。CI 使用已提交的 SDK 和摘要，不会在每次重试时追随最新 CDN。安装用户按[升级步骤](#102-升级-cli--sdk)应用新包；只替换 CLI、读取 latest 清单或刷新配置页都不会自动升级已部署站点。
+同域 SDK 随 Rumable 安装包提供并固定内容。需要更新时，选择包含目标 SDK 的安装包，按[升级步骤](#102-升级-cli--sdk)应用新包；只替换 CLI、读取 latest 清单或刷新配置页都不会自动升级已部署站点。
 
 可变 CDN 更新后，旧安装包的 `check/enable/probe` 可能因摘要不一致失败，此时需要升级到匹配的新包或使用匹配的固定 CDN 地址。正在打开的页面不会热替换 SDK。升级后处理旧 HTML 缓存，并用新页面和新会话验证实际采集与回放。
 
@@ -353,13 +344,13 @@ CDN 地址必须是完整 HTTPS 脚本地址，不含账号密码、查询参数
 | 环境 | 当前接入范围 |
 |---|---|
 | Linux + Nginx | 支持手动流程、自动站点发现和一键安装 |
-| Windows + IIS | 已实现手动流程、一键安装和系统识别；仍需在目标 Windows 实机验收 |
+| Windows + IIS | 支持手动流程、自动站点发现、一键安装和系统识别 |
 | Windows + Nginx / macOS + Nginx | 不属于当前一键安装与自动挂接支持范围 |
 | 真正 32 位 Windows | 有 x86 CLI 包，但不能执行 IIS 管理和一键接入 |
 
 Windows 一键脚本要求 **管理员、PowerShell 5.1+、64 位 Windows**。手动 CLI 的 IIS 桥接基线为 **64 位 Windows PowerShell 3+**，推荐 5.1；旧系统必须选择 legacy 包。Nginx 要求 **1.9.4+ 且带 http_sub_module**；IIS 要求 **7.5+ 和 URL Rewrite 2.x**。安装脚本不安装这些服务器或组件。
 
-本项目的 Linux ARM64 / Nginx 已完成实际 OSS 下载、注入和启停回滚验证；不能由此推断 Windows、其他架构或真实 RUM 入库已经通过。平台细节见[兼容性说明](docs/compatibility.md)，验证范围见[验证记录](docs/verification.md)。
+操作系统、CPU 架构和服务器组件要求见[兼容性说明](docs/compatibility.md)。
 
 ## 3. 准备 RUM 参数与网站条件
 
@@ -409,7 +400,7 @@ HTTPS 网站需要 HTTPS 上报地址。地址必须从访问者的浏览器可�
 
 打开 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，点击“读取发布版本”后使用页面生成的完整命令。使用 `static.guance.com`；不要把页面链接替换成 OSS 原始域名，后者可能强制下载 HTML。本地 `file://` 页面可能无法正常加载模块或清单，优先使用线上页。
 
-配置页默认跟随浏览器的语言偏好：中文显示简体中文，英文显示 English，均不匹配时使用 English。右上角可切换“跟随浏览器 / 简体中文 / English”；手动选择会在当前浏览器记住，切换不会清空已填参数或改变生成的配置与命令。
+配置页右上角只提供“简体中文”和“English”两个选项。首次打开时按浏览器语言偏好选中对应语言，没有匹配项时默认选中 English。手动选择会在当前浏览器记住，下次打开优先使用；切换不会清空已填参数或改变生成的配置与命令。
 
 1. 选择 OpenWay 或 DataKit，填写 applicationId 和对应上报参数。
 2. 填写 service、env、业务 version。初次验证建议会话采样 100%，回放先关闭；需要回放时按第 8 节单独开启并验收。
@@ -469,9 +460,9 @@ $PSVersionTable.PSVersion
 & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'INSTALLER_URL_FROM_PAGE').Content)) -BaseUrl 'ARTIFACT_BASE_FROM_PAGE' -Config 'CONFIG_FROM_PAGE' -Discover
 ```
 
-安装器自动识别 Windows 实际版本与原生 CPU 架构，选择 x64/ARM64 和 modern/legacy 包。64 位系统上的 32 位 PowerShell 仍安装原生包，使用 ProgramW6432 定位原生 Program Files；真正的 32 位 Windows 在下载前拒绝 IIS 接入。ARM64 与旧 Windows 的实机兼容需要独立验证。
+安装器自动识别 Windows 实际版本与原生 CPU 架构，选择 x64/ARM64 和 modern/legacy 包。64 位系统上的 32 位 PowerShell 仍安装原生包，使用 ProgramW6432 定位原生 Program Files；真正的 32 位 Windows 在下载前拒绝 IIS 接入。
 
-站点发现只列出运行中的 HTTP(S) 网站及应用。选择你的测试目标；多个绑定时选择对应 URL；无明确主机名的通配绑定可能需要输入 URL。如果静态压缩已开启，按提示确认是否允许关闭所选应用的静态压缩，或在页面高级选项中预先同意。
+站点发现只列出运行中的 HTTP(S) 网站及应用。选择要接入的网站；多个绑定时选择对应 URL；无明确主机名的通配绑定可能需要输入 URL。如果静态或动态压缩已开启，按提示确认是否允许关闭所选应用的 IIS 压缩，或在页面高级选项中预先同意。
 
 工具会隔离私有状态文件，并查询所选 IIS 应用的匿名读取身份和应用池身份：只开放公共脚本读取和父目录遍历。已有状态目录不会整体重置 ACL。安装器仍不调整匿名认证、StaticFile handler 或业务入站重写例外；401/403 等错误按第 7 节诊断。
 
@@ -755,7 +746,7 @@ sessionReplayEnabled = false
 defaultPrivacyLevel = "mask"
 ```
 
-OpenWay 模式将 `datakitOrigin` 替换为 `site` 和 `clientToken`。如果所选应用开启静态压缩，确认影响后把 `allowCompressionChanges` 改为 true；不允许时启用会被拒绝，不会自动替你同意。启用期间该应用全部静态资源可能失去静态压缩；停用恢复原局部值/继承关系。
+OpenWay 模式将 `datakitOrigin` 替换为 `site` 和 `clientToken`。如果所选应用开启静态或动态压缩，确认影响后把 `allowCompressionChanges` 改为 true；不允许时启用会被拒绝。启用期间该应用的 IIS 静态和动态压缩都会关闭；停用恢复原局部值/继承关系。
 
 ### 7.3 准备状态与公共脚本权限
 
@@ -839,7 +830,7 @@ defaultPrivacyLevel = "mask"
 4. Network 按 `/v1/write/rum` 筛选，等待 SDK 批量发送；检查实际请求与响应，不只看是否生成了 URL。模拟接收端返回 204 只证明测试端收到了请求，不代表观测云已接收。
 5. 进入真实应用，根据 env/service、页面 URL 和时间窗口查询；跨域失败、appId/token 错误、采样未命中分别排查。
 
-CLI 不主动证明浏览器 POST 成功，也不查询观测云。没有真实接入参数时，将数据入库标记为“未验证”。验收不要覆盖或清理无关网站的数据。
+CLI 检查 HTTP 注入和资源可达；浏览器上报和数据入库按上述步骤在实际应用中确认。
 
 ## 10. 修改配置、升级、停用、回滚和卸载
 
@@ -928,18 +919,11 @@ Linux 若只想恢复首次自动挂接但保留站点状态，可在 disable �
 
 ### 配置页提示不支持所选 SDK 方式
 
-这两个英文名称是安装包发布清单中的功能标识，供配置页自动判断兼容性，**不是 TOML 参数，用户无需填写**：
-
-| 标识 | 中文含义 |
-| --- | --- |
-| `rum-sdk-loading-v1` | 安装包支持通过 `loading` 选择同步或异步 |
-| `rum-discovery-sdk-v1` | 自动发现网站时，安装包支持读取 `[sdk]` 中的来源和加载设置 |
-
-使用自动发现并选择同步，需要安装包同时提供这两项能力。发布清单缺少所需能力时，配置页会阻止生成相应命令；能下载 TOML 不代表旧 CLI 能识别。请更换为实际支持的版本，不要将这些标识写进 TOML 或自行加到发布清单中。
+打开[latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，重新读取发布版本并生成安装命令。已安装的 CLI 如果提示不认识 `loading` 或 `[sdk]`，按[升级步骤](#102-升级-cli--sdk)更新 CLI，再应用原站点配置。升级时保留原站点 ID、目标和状态目录。
 
 ### 其他问题与恢复
 
-保留失败现场时，先备份原状态目录，按[事务与恢复流程](docs/operations.md)处理未完成事务，再重新接入。具体问题的修复记录由发布说明维护；目标 Windows / IIS 环境仍需实机验收，下载和安装成功不等于注入成功。
+接入中断时，先备份原状态目录，按[事务与恢复流程](docs/operations.md)处理未完成事务，再重新接入。完成后按[检查接入结果](#9-检查是否接入成功)确认页面采集。
 
 | 现象 | 先检查 / 处理 |
 |---|---|
@@ -953,7 +937,7 @@ Linux 若只想恢复首次自动挂接但保留站点状态，可在 disable �
 | expected HTTP 200，实际 301/302/401/403 | 使用直接返回完整 HTML 的验收路径；检查匿名访问、绑定、DNS、TLS 与命中实例 |
 | `no safe literal <head>` | 检查页面模板及标签前同名文本；不能通过改用 `</head>` 随意绕过 |
 | IIS 资源返回 401/403/404 | 检查实际匿名身份的 ACL、公共目录、StaticFile、JavaScript MIME、路由例外 |
-| Static compression is enabled | 审查所选应用影响后明确允许压缩变更 |
+| Static or dynamic compression is enabled | 审查所选应用影响后明确允许压缩变更 |
 | encoded response | 上游/应用仍输出压缩 HTML，或直出了 .gz/.br 文件；先处理来源 |
 | CSP ... blocks | 根据实际策略放行脚本、上报和 Worker，工具不会改 CSP |
 | existing RUM integration found | 检查业务已有 SDK，确定保留还是迁移，不能重复接入 |

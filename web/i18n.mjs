@@ -130,7 +130,6 @@ export const messages = {
   "placeholder.manifest": ["https://OSS域名/rumable/版本/manifest.json", "https://static.guance.com/rumable/latest/manifest.json"],
   "output.accessibleName": ["生成内容", "Generated output"],
   "language.label": ["语言", "Language"],
-  "language.auto": ["跟随浏览器", "Browser language"],
   "sdk.syncHelp": ["先加载并执行 SDK，再初始化，之后继续解析页面，便于采集后续业务脚本的早期事件。两次脚本请求会阻塞 HTML 解析；网络慢或 CDN 故障可能延迟首屏。", "The SDK loads and initializes before HTML parsing resumes, helping capture early events from subsequent application scripts. Both script requests block HTML parsing; slow networks or CDN failures may delay the first render."],
   "sdk.cdnHelp": ["初始化脚本仍由网站同域提供，SDK 从 CDN 下载。网站的 CSP 需允许该脚本地址。", "The initialization script is still served from your website's origin. The SDK is downloaded from the CDN, which must be allowed by your site's CSP."],
   "sdk.cdnUpdate": ["官方 v3 是可变地址，CDN 更新后浏览器可能在缓存过期后加载新版，无需重新部署。启用和探测时仍要求文件与安装包一致；CDN 先更新时需升级 Rumable 或改用匹配的固定地址。回滚只能恢复 URL，无法恢复远程文件；加载失败不会自动改用同域副本。", "The official v3 URL is mutable. After CDN updates and cache expiry, browsers may load a newer SDK without redeployment. Enable and probe still require it to match the package. If the CDN updates first, upgrade Rumable or use a matching pinned URL. Rollback restores the URL, not the remote file. Loading failures do not fall back to a same-origin copy."],
@@ -190,7 +189,7 @@ export const messages = {
 
 export const languageStorageKey = 'rumable.setup.language';
 
-export function resolveLocale(preference = 'auto', languages = []) {
+export function resolveLocale(preference, languages = []) {
   if (preference === 'zh-CN' || preference === 'en') return preference;
   for (const language of languages) {
     if (/^zh(?:-|$)/i.test(language)) return 'zh-CN';
@@ -204,7 +203,7 @@ export function readLanguagePreference(storage) {
     const saved = storage?.getItem(languageStorageKey);
     if (saved === 'zh-CN' || saved === 'en') return saved;
   } catch { /* Private browsing or site policies may block storage. */ }
-  return 'auto';
+  return null;
 }
 
 export function saveLanguagePreference(storage, preference) {

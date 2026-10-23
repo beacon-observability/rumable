@@ -5,22 +5,20 @@ const $ = id => document.getElementById(id);
 let manifest = null, source = '', tab = 'config', config = '', command = '', generation = 0;
 let storage;
 try { storage = window.localStorage; } catch { /* Storage is optional. */ }
-let preference = readLanguagePreference(storage), t;
+let locale = resolveLocale(readLanguagePreference(storage), [...(navigator.languages || []), navigator.language]), t;
 let releaseKey = 'release.initial', releaseValues = {}, releaseError = null, actionKey = '';
 function updateLanguage() {
-  const locale = resolveLocale(preference, [...(navigator.languages || []), navigator.language]);
   t = createTranslator(locale);
   document.documentElement.lang = locale;
   translatePage(document, t);
-  $('language-select').value = preference;
+  $('language-select').value = locale;
   render();
 }
 $('language-select').addEventListener('change', event => {
-  preference = event.target.value;
-  saveLanguagePreference(storage, preference);
+  locale = event.target.value;
+  saveLanguagePreference(storage, locale);
   updateLanguage();
 });
-window.addEventListener('languagechange', () => { if (preference === 'auto') updateLanguage(); });
 function model() {
   const m = Object.fromEntries(new FormData(form));
   for (const input of form.querySelectorAll('input[type=checkbox]')) m[input.name] = input.checked;

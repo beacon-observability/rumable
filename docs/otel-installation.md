@@ -83,4 +83,4 @@ Windows 对应 `.\rumable.exe uninstall --state-dir $state --site gateway`，其
 
 依赖删除先改名隔离，再删除文件；Windows 文件仍被进程占用时可能需要稍后重试，或按输出清理隔离残留。只在确认站点已经停止依赖它后手动清理。不要直接删除仍被 `load_module`/池 profiler 引用的目录。
 
-当前验证范围见[验证记录](verification.md)。Linux 原生测试不等于 Windows/IIS 实机或观测云真实入库验收。
+安装并启用后，按 [OTel 手册](otel.md#启停回滚和验收)发起业务请求，在对应应用中确认 Trace 数据。
