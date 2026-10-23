@@ -18,6 +18,8 @@ init 默认站点 ID 为 example；可通过 `init --site website` 命名。单�
 
 每个站点必须且只能配置一个 `[sites.nginx]` 或 `[sites.iis]`。`id`、`publicURL`、服务器类型及目标命令/参数绑定部署身份，不能原地迁移；迁移使用新 ID。SDK 参数和路径采集范围可修改后重新 enable。
 
+IIS RUM 的目标应用必须使用独占应用池，子应用也不能与父应用共用池。启用、更新、停用及回滚会回收这个池并等待旧进程退出，可能影响进程内会话；CLI 不自动分配或回收共享池。已有部署首次使用新激活流程时会记录池归属；后续池名或成员发生外部变化会拒绝覆盖。详见[运行与恢复流程](operations.md)。
+
 Nginx 和 IIS 共享以下全部 `[sites.rum]` 参数，包括 OpenWay / DataKit、回放、隐私与 Worker 设置。
 
 范围以发布包内的 **SDK 3.3.21** 为准：已开放其公开类型定义中未废弃、能用静态 TOML 表达的初始化参数。依据为官方 NPM 包 [browser-core 3.3.21](https://registry.npmjs.org/@cloudcare/browser-core/-/browser-core-3.3.21.tgz) 中的 `types/index.d.ts`，并核对内嵌 SDK 的校验和默认值。发布准备阶段同步并测试 SDK，将文件与元数据提交后再构建。CI 使用提交中的 SDK，不自动追新；同域方式在站点使用新 CLI 执行 enable/setup 时升级。

@@ -16,6 +16,9 @@ func sameIISSnapshot(live, expected json.RawMessage) bool {
 		delete(a, "dynamicCompressionPresent")
 		delete(a, "dynamicCompressionValue")
 	}
+	if _, ok := b["rumRuntime"]; !ok {
+		delete(a, "rumRuntime")
+	}
 	if _, ok := b["cacheGuard"]; !ok {
 		var guard struct {
 			Rules []string `json:"rules"`
@@ -48,6 +51,9 @@ func copyDynamicCompression(raw, source json.RawMessage) (json.RawMessage, error
 	if baseline["cacheGuard"] != nil && fields["cacheGuard"] == nil {
 		fields["cacheGuard"] = baseline["cacheGuard"]
 	}
+	if baseline["rumRuntime"] != nil && fields["rumRuntime"] == nil {
+		fields["rumRuntime"] = baseline["rumRuntime"]
+	}
 	return json.Marshal(fields)
 }
 
@@ -55,7 +61,7 @@ func copyDynamicCompression(raw, source json.RawMessage) (json.RawMessage, error
 // under the new CLI. The transaction journal persists this baseline BEFORE IIS
 // is changed, so failure recovery and disable can restore inheritance exactly.
 func adoptIISDynamicCompression(root string, st *State) error {
-	if st.Current.Site.IIS == nil || (dynamicCompressionSnapshot(st.OriginalIIS)["dynamicCompressionPresent"] != nil && dynamicCompressionSnapshot(st.OriginalIIS)["cacheGuard"] != nil) {
+	if st.Current.Site.IIS == nil || (dynamicCompressionSnapshot(st.OriginalIIS)["dynamicCompressionPresent"] != nil && dynamicCompressionSnapshot(st.OriginalIIS)["cacheGuard"] != nil && dynamicCompressionSnapshot(st.OriginalIIS)["rumRuntime"] != nil) {
 		return nil
 	}
 	live, err := nativeCapture(root, st.Current.Site)
@@ -79,6 +85,19 @@ func adoptIISDynamicCompression(root string, st *State) error {
 		st.Previous = &previous
 	}
 	return nil
+}
+
+// Compare only owned RUM configuration, not OTel environment or metadata added
+// while migrating an old snapshot. Recovery compares the failed deployment to
+// the restored snapshot, even if a prior attempt already wrote that snapshot.
+func iisRUMChanged(before, after json.RawMessage) bool {
+	a, b := dynamicCompressionSnapshot(before), dynamicCompressionSnapshot(after)
+	for _, key := range []string{"rules", "preconditions", "virtualDirectory", "compressionPresent", "compressionValue", "dynamicCompressionPresent", "dynamicCompressionValue", "cacheGuard"} {
+		if !sameJSON(a[key], b[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func iisDynamicCompressionDisabled(raw json.RawMessage) bool {

@@ -1,4 +1,28 @@
 # Pure rule construction, shared by apply and recovery validation. No IIS writes.
+function Read-RumRuntime {
+    $pool = $manager.ApplicationPools[$application.ApplicationPoolName]
+    if ($null -eq $pool) { throw 'IIS application pool not found.' }
+    $users = @($manager.Sites | ForEach-Object { $owner=$_.Name; $_.Applications | Where-Object { $_.ApplicationPoolName -ieq $pool.Name } | ForEach-Object { $owner + $_.Path } } | Sort-Object)
+    return @{pool=[string]$pool.Name;applications=$users}
+}
+
+function Test-RumRuntime($expected, $actual) {
+    # Legacy journals did not record pool membership. Validate the live pool
+    # again before activation, without claiming that a legacy snapshot owned it.
+    if ($null -eq $expected) { return $true }
+    return $null -ne $actual -and $expected.pool -ceq $actual.pool -and (ConvertTo-Json -InputObject @($expected.applications) -Compress) -ceq (ConvertTo-Json -InputObject @($actual.applications) -Compress)
+}
+
+function Assert-RumPool([switch]$RequireStarted) {
+    $runtime = Read-RumRuntime
+    if (@($runtime.applications).Count -ne 1 -or $runtime.applications[0] -ine ($site.iis.site + $site.iis.application)) {
+        throw 'IIS RUM requires a dedicated application pool for activation and recovery; assign this application its own pool before setup. Shared pools are never recycled.'
+    }
+    if ($RequireStarted -and [string]$manager.ApplicationPools[$application.ApplicationPoolName].State -ne 'Started') {
+        throw 'Application pool is not Started; start the dedicated pool before changing RUM configuration.'
+    }
+}
+
 function Get-RumNodes([switch]$LegacyNullExclude) {
     $includePaths = @($site.includePaths | Where-Object { -not [string]::IsNullOrEmpty($_) })
     if ($includePaths.Count -eq 0) { throw 'RUM requires at least one nonempty include path.' }
@@ -72,6 +96,7 @@ function ConvertTo-CanonicalOwnedXml([string]$text) {
 }
 
 function Test-OwnedSnapshot($wanted, $live) {
+    if (-not (Test-RumRuntime $wanted.rumRuntime $live.rumRuntime)) { return $false }
     foreach ($key in @('compressionPresent','compressionValue')) { if ($wanted.$key -cne $live.$key) { return $false } }
     if ($null -ne $wanted.dynamicCompressionPresent) {
         foreach ($key in @('dynamicCompressionPresent','dynamicCompressionValue')) { if ($wanted.$key -cne $live.$key) { return $false } }
@@ -93,6 +118,7 @@ function Assert-PendingRumSnapshot($live) {
     # Reconstruct only the RUM-only apply represented by the durable journal.
     foreach ($legacy in @($false,$true)) {
         $wanted = @{ rules=@(); preconditions=@(); virtualDirectory=$request.previous.virtualDirectory; compressionPresent=$request.original.compressionPresent; compressionValue=$request.original.compressionValue }
+        if ($null -ne $request.previous.rumRuntime) { $wanted.rumRuntime=$request.previous.rumRuntime }
         if ($null -ne $request.previous.dynamicCompressionPresent) {
             $wanted.dynamicCompressionPresent=$request.original.dynamicCompressionPresent
             $wanted.dynamicCompressionValue=$request.original.dynamicCompressionValue

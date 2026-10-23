@@ -50,7 +50,7 @@ func getPage(raw string, headers http.Header) (Page, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		err := fmt.Errorf("%s: expected HTTP 200, got %d", raw, resp.StatusCode)
+		err := fmt.Errorf("%s: expected HTTP 200, got %d (%s)", raw, resp.StatusCode, responseEvidence(resp.Header))
 		if resp.StatusCode == http.StatusNotModified {
 			return Page{}, &probeContentError{fmt.Errorf("%w; conditional request can reuse stale browser HTML", err)}
 		}
@@ -221,16 +221,24 @@ func preflightPage(s Site, path string) (Page, error) {
 func probePage(s Site, path string, expected *Snapshot) (ProbeResult, error) {
 	var result ProbeResult
 	check := func(label string, headers http.Header) error {
+		started := time.Now().UTC().Format(time.RFC3339Nano)
 		page, err := getPage(pageURL(s, path), headers)
 		if err != nil {
-			return fmt.Errorf("%s: %w", label, err)
+			return fmt.Errorf("%s at %s: %w", label, started, err)
 		}
 		got, err := inspectInjection(s, page, expected)
 		if err == nil && result.URL != "" && got.Script != result.Script {
 			err = errors.New("uses a different bootstrap URL")
 		}
 		if err != nil {
-			return &probeContentError{fmt.Errorf("%s (%s): %w; inspect effective per-URL compression and HTML caches", label, responseEvidence(page.Header), err)}
+			want := "current deployment"
+			if expected != nil {
+				want = bootstrapEvidence(s, expected.Script)
+				if !expected.Enabled {
+					want = "no injection"
+				}
+			}
+			return &probeContentError{fmt.Errorf("%s at %s: HTTP 200 (%s); decodedBodySHA256=%s; expected=%q actual=%q: %w; retain evidence and inspect effective per-URL configuration and HTML caches", label, started, responseEvidence(page.Header), hash(page.Body), want, bootstrapEvidence(s, got.Script), err)}
 		}
 		result = got
 		return nil
@@ -287,14 +295,31 @@ func probePage(s Site, path string, expected *Snapshot) (ProbeResult, error) {
 // response bodies, cookies and other potentially secret response headers.
 func responseEvidence(h http.Header) string {
 	var fields []string
-	for _, name := range []string{"Content-Type", "Content-Encoding", "Vary", "Age", "ETag", "Last-Modified", "Server"} {
-		value := h.Get(name)
+	for _, name := range []string{"Content-Type", "Content-Encoding", "Content-Length", "Cache-Control", "Vary", "Age", "ETag", "Last-Modified", "Date", "Server"} {
+		values, present := h[http.CanonicalHeaderKey(name)]
+		if !present {
+			fields = append(fields, name+"=<absent>")
+			continue
+		}
+		value := strings.Join(values, ", ")
 		if len(value) > 256 {
 			value = value[:256]
 		}
 		fields = append(fields, fmt.Sprintf("%s=%q", name, value))
 	}
 	return strings.Join(fields, ", ")
+}
+
+// Log managed asset paths only. Arbitrary HTML attributes may contain tokens,
+// query strings or credentials; retain a digest rather than echoing those.
+func bootstrapEvidence(s Site, raw string) string {
+	if raw == "" {
+		return "none"
+	}
+	if strings.HasPrefix(raw, s.assetPrefix()) && initPattern.MatchString(strings.TrimPrefix(raw, s.assetPrefix())) {
+		return raw
+	}
+	return "unmanaged-src-sha256:" + hash([]byte(raw))
 }
 
 func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
@@ -342,7 +367,7 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 	if expected != nil && !expected.Enabled {
 		r.Message = "RUM injection absent; HTTP/component state only, SDK execution and OTLP ingestion unverified"
 		if count != 0 || sdkCount != 0 {
-			return r, errors.New("injection still present after disable; check HTML caches")
+			return r, errors.New("injection still present after disable")
 		}
 		return r, nil
 	}
@@ -350,7 +375,7 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 		return r, fmt.Errorf("expected one injection tag for this deployment and no competing tags, found %d own / %d total", count, total)
 	}
 	if expected != nil && r.Script != expected.Script {
-		return r, errors.New("stale bootstrap URL; clear HTML caches")
+		return r, errors.New("stale bootstrap URL")
 	}
 	if !strings.HasPrefix(r.Script, s.assetPrefix()) || strings.ContainsAny(r.Script, "?#") {
 		return r, errors.New("unexpected bootstrap path")
@@ -372,7 +397,7 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 			return r, errors.New("expected synchronous SDK immediately before initialization script")
 		}
 		if doc.elements[sdkIndex].attrs["src"] != snapshotSDKURL(n) {
-			return r, errors.New("stale synchronous SDK URL; clear HTML caches")
+			return r, errors.New("stale synchronous SDK URL")
 		}
 		for _, index := range []int{sdkIndex, initIndex} {
 			a := doc.elements[index].attrs

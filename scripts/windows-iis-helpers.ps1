@@ -217,22 +217,25 @@ function Remove-TestDeployment([string]$SiteName, [string]$Work) {
     $manager = New-Object Microsoft.Web.Administration.ServerManager
     try {
         $site = $manager.Sites[$SiteName]
+        $ownedPools=@($SiteName,($SiteName+'-inherited'),($SiteName+'-local-on'),($SiteName+'-local-off'))
         if ($null -ne $site) {
             Assert-That ($site.Applications['/'].VirtualDirectories['/'].PhysicalPath -ieq (Join-Path $Work 'www')) 'Cleanup site ownership mismatch.'
         }
         foreach ($otherSite in $manager.Sites) {
             foreach ($app in $otherSite.Applications) {
-                Assert-That ($app.ApplicationPoolName -ine $SiteName -or $otherSite.Name -ieq $SiteName) 'Another site uses this pool; refusing to stop it.'
+                Assert-That ($ownedPools -inotcontains $app.ApplicationPoolName -or $otherSite.Name -ieq $SiteName) 'Another site uses this pool; refusing to stop it.'
             }
         }
         if ($null -ne $site) {
             if ($site.State -ne 'Stopped') { [void]$site.Stop() }
             $manager.Sites.Remove($site)
         }
-        $pool = $manager.ApplicationPools[$SiteName]
-        if ($null -ne $pool) {
-            if ($pool.State -ne 'Stopped') { [void]$pool.Stop() }
-            $manager.ApplicationPools.Remove($pool)
+        foreach ($poolName in $ownedPools) {
+            $pool = $manager.ApplicationPools[$poolName]
+            if ($null -ne $pool) {
+                if ($pool.State -ne 'Stopped') { [void]$pool.Stop() }
+                $manager.ApplicationPools.Remove($pool)
+            }
         }
         $config = $manager.GetApplicationHostConfiguration()
         foreach ($path in $config.GetLocationPaths()) {

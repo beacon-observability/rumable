@@ -24,6 +24,7 @@ Write-Utf8 $log ''
 $report = [ordered]@{
     schemaVersion = 1; startedAt = [DateTime]::UtcNow.ToString('o'); result = 'running'
     environment = @{}; steps = @(); cleanup = @{}; site = $name; work = $work
+    drainedWorkers = @()
     boundaries = @('HTTP injection/configuration only; browser and Guance ingestion unverified', 'No existing site, global module, section delegation or service restart is modified')
 }
 $created = $false
@@ -103,6 +104,7 @@ try {
             $rewritePath = [Environment]::ExpandEnvironmentVariables([string]$rewriteModule.GetAttributeValue('image'))
             $rewriteVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($rewritePath).FileVersion
             Assert-That ($null -eq $manager.Sites[$name] -and $null -eq $manager.ApplicationPools[$name]) 'Test resource name collision.'
+            foreach ($id in @('inherited','local-on','local-off')) { Assert-That ($null -eq $manager.ApplicationPools[($name+'-'+$id)]) 'Test child pool name collision.' }
             foreach ($site in $manager.Sites) {
                 foreach ($binding in $site.Bindings) {
                     if ($binding.Protocol -eq 'http' -and ($binding.BindingInformation -split ':')[-2] -eq [string]$Port) { throw 'Port is already used by an IIS binding.' }
@@ -162,7 +164,10 @@ try {
             Add-TestHeaderRule $config $name 'acceptance-parent' 'RESPONSE_X_Rumable_Parent' $parentValue
             foreach ($p in $scenarios) {
                 $app = $site.Applications.Add($p.app, (Join-Path $web $p.id))
-                $app.ApplicationPoolName = $name
+                $childPool=$manager.ApplicationPools.Add(($name+'-'+$p.id))
+                $childPool.ManagedRuntimeVersion=$pool.ManagedRuntimeVersion
+                $childPool.ManagedPipelineMode='Integrated'
+                $app.ApplicationPoolName = $childPool.Name
                 Add-TestHeaderRule $config ($name + $p.app) 'acceptance-child' 'RESPONSE_X_Rumable_Child' 'child'
                 if ($p.present) {
                     $config.GetSection('system.webServer/urlCompression', ($name + $p.app)).SetAttributeValue('doStaticCompression', [bool]::Parse($p.value))
@@ -196,6 +201,27 @@ try {
         if (-not $StaticOnly) { $paths += ($scenario.app + '/dynamic.aspx'); $paths += ($scenario.app + '/chunked.aspx') }
         $normalConfig = New-TestConfig $name $scenario.id $scenario.app $Port $paths
         $business = Get-TestBusinessRules $name
+        Invoke-Step ($scenario.id + '/shared-pool-refusal') {
+            Write-Utf8 $configPath $normalConfig
+            $manager=New-Object Microsoft.Web.Administration.ServerManager
+            try {
+                $shared=$manager.Sites[$name].Applications.Add('/SharedPoolCheck',(Join-Path $web $scenario.id))
+                $shared.ApplicationPoolName=$name+'-'+$scenario.id
+                $manager.CommitChanges()
+            } finally { $manager.Dispose() }
+            try {
+                $result=Invoke-Cli 'check' -Reject
+                Assert-That ($result.output -like '*dedicated application pool*') 'Shared-pool check failed for an unrelated reason.'
+                Assert-That (-not (Test-Path -LiteralPath (Join-Path $stateDir ('sites/'+$scenario.id+'/transaction.json')))) 'Shared-pool refusal started a transaction.'
+            } finally {
+                $manager=New-Object Microsoft.Web.Administration.ServerManager
+                try {
+                    $apps=$manager.Sites[$name].Applications
+                    [void]$apps.Remove($apps['/SharedPoolCheck'])
+                    $manager.CommitChanges()
+                } finally { $manager.Dispose() }
+            }
+        }
         Invoke-Step ($scenario.id + '/baseline-and-render') {
             $effective = Get-TestEffective $name $scenario.app
             Assert-That ($effective.static -eq $scenario.effective -and $effective.dynamic -eq $scenario.effective) 'Compression baseline mismatch.'
@@ -266,7 +292,22 @@ try {
         Invoke-Step ($scenario.id + '/enable-idempotence-html-and-assets') {
             [void](Invoke-Cli 'check')
             $initialBinary = $Binary; if ($PreviousBinary) { $initialBinary = $PreviousBinary }
-            [void](Invoke-Cli 'enable' -Exe $initialBinary)
+            $oldWorkers=@()
+            try {
+                $manager=New-Object Microsoft.Web.Administration.ServerManager
+                try {
+                    $poolName=$manager.Sites[$name].Applications[$scenario.app].ApplicationPoolName
+                    foreach ($worker in $manager.ApplicationPools[$poolName].WorkerProcesses) {
+                        try { $oldWorkers += [Diagnostics.Process]::GetProcessById($worker.ProcessId) } catch [ArgumentException] { }
+                    }
+                } finally { $manager.Dispose() }
+                if ($initialBinary -eq $Binary) { Assert-That ($oldWorkers.Count -gt 0) 'No pre-install worker to verify activation against.' }
+                [void](Invoke-Cli 'enable' -Exe $initialBinary)
+                if ($initialBinary -eq $Binary) {
+                    foreach ($worker in $oldWorkers) { Assert-That $worker.HasExited 'CLI returned success while a pre-install worker was still running.' }
+                    $report.drainedWorkers+=@{site=$scenario.id;pool=$poolName;pids=@($oldWorkers | ForEach-Object {$_.Id});checkedAt=[DateTime]::UtcNow.ToString('o')}
+                }
+            } finally { foreach ($worker in $oldWorkers) { $worker.Dispose() } }
             $enabled = Read-TestState $stateDir $scenario.id
             if ($initialBinary -eq $Binary) { Assert-TestConditionalPage ($baseUrl + $scenario.app + '/second.html') $scenario.id $enabled $oldSecond }
             # Deliberately absent from probePaths: inspect its compressed variant

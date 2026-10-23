@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../internal/rumable/assets/iis-rum.ps1')
+function Read-RumRuntime { return @{pool='Dedicated';applications=@('default web site/app')} }
 # Exercise XML ownership without requiring the Windows-only IIS configuration API.
 $bridge = Join-Path $PSScriptRoot '../internal/rumable/assets/iis.ps1'
 $tokens = $null; $parseErrors = $null

@@ -74,7 +74,7 @@ func TestIISDisableUnacknowledgedCommitRecovery(t *testing.T) {
 	t.Cleanup(func() { iisCommand = bridge })
 	iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
 		switch action {
-		case "inspect":
+		case "inspect", "activate":
 			return live, nil
 		case "recover-pending-check":
 			checks++
@@ -152,7 +152,7 @@ func TestIISFirstEnableRecoveryRetainsMapping(t *testing.T) {
 	t.Cleanup(func() { iisCommand = bridge })
 	iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
 		switch action {
-		case "inspect":
+		case "inspect", "activate":
 			return live, nil
 		case "apply", "restore":
 			if !sameJSON(extra["expected"].(json.RawMessage), live) {
@@ -251,7 +251,7 @@ func TestIISUnacknowledgedCommitRecovery(t *testing.T) {
 			t.Cleanup(func() { iisCommand = bridge })
 			iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
 				switch action {
-				case "inspect":
+				case "inspect", "activate":
 					return live, nil
 				case "apply":
 					live = after

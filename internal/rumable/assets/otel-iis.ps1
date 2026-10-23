@@ -144,14 +144,31 @@ function Apply-OTel {
     Set-OTelEnvironment $values
 }
 
-function Recycle-OTelPool($before) {
-    if ($null -eq $site.otel) { return }
-    $after = Read-OTelSnapshot
-    if (-not (Same-OTelEnvironment $before.environment $after.environment)) {
-        Assert-OTelExternalEnvironment
-        $pool = Get-OTelPool
-        if (@($after.applications).Count -ne 1) { throw 'Application pool became shared; refusing to recycle other applications.' }
-        if ([string]$pool.State -ne 'Started') { throw 'Application pool is not Started; refusing to report OTel activation before the pool can be recycled.' }
+function Wait-IISWorkers($workers, [int]$TimeoutMilliseconds=15000) {
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    foreach ($worker in $workers) {
+        while (-not $worker.WaitForExit(100)) {
+            if ($timer.ElapsedMilliseconds -ge $TimeoutMilliseconds) { throw 'Old application pool worker did not exit after recycle; activation/recovery is incomplete.' }
+        }
+    }
+}
+
+function Recycle-OTelPool($before, [switch]$RumChanged) {
+    $otelChanged=$false
+    if ($null -ne $site.otel) {
+        $after = Read-OTelSnapshot
+        $otelChanged = -not (Same-OTelEnvironment $before.environment $after.environment)
+    }
+    if ($RumChanged -or $otelChanged) {
+        if ($RumChanged) {
+            Assert-RumPool
+            $pool = $manager.ApplicationPools[$application.ApplicationPoolName]
+        } else { $pool = Get-OTelPool }
+        if ($otelChanged) {
+            Assert-OTelExternalEnvironment
+            if (@($after.applications).Count -ne 1) { throw 'Application pool became shared; refusing to recycle other applications.' }
+        }
+        if ([string]$pool.State -ne 'Started') { throw 'Application pool is not Started; activation/recovery cannot be confirmed.' }
         $workers = @()
         try {
             foreach ($worker in $pool.WorkerProcesses) {
@@ -161,12 +178,10 @@ function Recycle-OTelPool($before) {
             [void]$pool.Recycle()
             # Overlapped recycle can serve the old profiler/exporter generation.
             # Bound the wait; never kill an application to finish activation.
-            $deadline = [DateTime]::UtcNow.AddSeconds(15)
-            foreach ($worker in $workers) {
-                while (-not $worker.WaitForExit(100)) {
-                    if ([DateTime]::UtcNow -ge $deadline) { throw 'Old application pool worker did not exit after recycle; activation/recovery is incomplete.' }
-                }
-            }
+            Wait-IISWorkers $workers
+            # A successful Recycle call alone is insufficient: also reject a
+            # pool that stopped while its old workers were draining.
+            if ([string]$pool.State -ne 'Started') { throw 'Application pool stopped during activation/recovery.' }
         } finally { foreach ($worker in $workers) { $worker.Dispose() } }
     }
 }

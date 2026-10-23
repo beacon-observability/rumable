@@ -1,5 +1,7 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '../internal/rumable/assets/iis-rum.ps1')
+function Read-RumRuntime { return @{pool='Dedicated';applications=@('Site/')} }
+function Assert-RumPool { }
 function Assert-That($value,[string]$message) { if (-not $value) { throw $message } }
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../internal/rumable/assets/iis.ps1'),[ref]$tokens,[ref]$errors)

@@ -1,12 +1,16 @@
 # Windows / IIS 验收
 
+0.1.8 加入 RUM 应用池激活步骤，尚未完成 Windows 实机验收。0.1.7 用户实测为 29 项通过、5 项失败、5 项未验证：S3 条件 GET 收到 304；CT 更新/停用收到旧正文；FAULT 已恢复 IIS 配置，但恢复后的 HTTP 校验失败。不能把稍后 rollback 成功解释成已确认的缓存过期机制。
+
+复测需保留旧站点、状态及浏览器缓存，在新副本上运行一键安装。目标应用必须使用独占池；子应用单独分配池。重点检查：提交后旧 worker 已退出；安装前有 gzip 缓存的 second.html 首次普通刷新；0.1.7 同配置升级；两轮 env 更新、回滚和停用；文件级 gzip 故障后的自动恢复。首次普通刷新前不额外发送 identity/probe，也不清缓存。验证共享池在变更前被拒绝，未选应用不受影响；长请求或回收失败应留下可恢复事务，不强杀进程。错误证据另见私有状态目录的 last-operation-probe-failure.json 和 last-recovery-probe-failure.json。后续成功不得覆盖首次失败，真实入库需独立证明。
+
 2026-10-22 已收到用户提供的 0.1.4 原生 Windows 报告：下载、CLI 安装和发现通过，IIS 注入及事务恢复失败。0.1.5 包含对应修复，旧现场按[恢复与复测](windows-0.1.4-recovery.md)操作。以下“本轮没有实机”指本机执行范围；用户报告与本地 mock 证据分开保留。
 
 以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.5/scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
 
 发布包提供 Windows x86/x64/ARM64 CLI；本手册的 IIS 流程仍要求 64 位 Windows 与 64 位 Windows PowerShell。x86 CLI 在 x64 系统经 Sysnative 运行管理桥接；真正 32 位 Windows 不运行本 IIS 验收。脚本核对实际架构与 build.json，ARM64 必须在对应原生系统独立验收。
 
-本流程在目标 Windows 上运行，只创建一个随机命名的 Rumable-Acceptance 测试站点、专用应用池和三个应用，绑定 127.0.0.1:19182。默认完成后清理，证据单独保存。它不重启 IIS、不安装组件、不改变已有站点、全局压缩或配置委派。
+本流程在目标 Windows 上运行，只创建一个随机命名的 Rumable-Acceptance 测试站点、根应用池和三个各自独占池的子应用，绑定 127.0.0.1:19182。默认完成后清理，证据单独保存。它不重启 IIS、不安装组件、不改变已有站点、全局压缩或配置委派。
 
 本机 macOS / OrbStack 的脚本边界测试不能证明 Windows / IIS 已通过。下表每行都必须在对应实机或 Windows VM 单独执行，并保留报告。
 

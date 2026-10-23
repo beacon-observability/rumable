@@ -2,6 +2,8 @@
 
 通过 Nginx / IIS 改写 HTML 响应，为网站接入观测云 Web RUM，无需修改业务代码。浏览器直接向 OpenWay 或 DataKit 上报；CLI 执行完即退出。
 
+IIS 接入要求目标应用使用独占应用池。启停、更新和回滚会回收该池并等待旧进程退出，进程内会话可能丢失；共享池会被拒绝，需先由运维分配独占池。
+
 [打开配置页](https://static.guance.com/rumable/latest/setup/index.html) · [安装与使用指南](USER-GUIDE.md) · [完整配置参考](docs/configuration.md)
 
 ## 先选择 SDK 来源与加载方式

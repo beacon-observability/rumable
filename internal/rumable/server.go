@@ -134,10 +134,16 @@ func nativeRestore(root string, n *Snapshot, expected json.RawMessage) error {
 }
 
 func nativeActivate(root string, n Snapshot, previous json.RawMessage) error {
-	if n.Site.IIS == nil || n.Site.OTel == nil {
+	if n.Site.IIS == nil {
 		return nil
 	}
-	_, err := iisCommand(root, n.Site, "activate", map[string]any{"expected": n.Native, "previous": previous})
+	// An enabled transaction also includes first adoption of the activation
+	// protocol on an older installation. Idempotent operations never enter it.
+	rumChanged := n.Enabled || iisRUMChanged(previous, n.Native)
+	if !rumChanged && n.Site.OTel == nil {
+		return nil
+	}
+	_, err := iisCommand(root, n.Site, "activate", map[string]any{"expected": n.Native, "previous": previous, "rumChanged": rumChanged})
 	return err
 }
 

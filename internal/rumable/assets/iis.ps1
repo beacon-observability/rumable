@@ -66,6 +66,7 @@ try {
         if ($null -ne $virtual) { $virtualXml = $virtual.get_OuterXml() }
         $snapshot = @{ rules=$ownedRules; preconditions=$ownedPreconditions; virtualDirectory=$virtualXml; compressionPresent=[bool]$present; compressionValue=$value; dynamicCompressionPresent=[bool]$dynamicPresent; dynamicCompressionValue=$dynamicValue }
         $snapshot.cacheGuard=Read-CacheGuard $location
+        $snapshot.rumRuntime=Read-RumRuntime
         if ($null -ne $site.otel) { $snapshot.otel = Read-OTelSnapshot }
         return $snapshot
     }
@@ -150,6 +151,7 @@ try {
     }
 
     function Assert-Snapshot($expected, $actual) {
+        if (-not (Test-RumRuntime $expected.rumRuntime $actual.rumRuntime)) { throw 'IIS application pool assignment or membership changed; refusing activation or overwrite.' }
         if (-not (Test-CacheGuard $expected.cacheGuard $actual.cacheGuard)) { throw 'IIS request revalidation changed before commit; refusing overwrite.' }
         foreach ($key in @('compressionPresent','compressionValue','virtualDirectory')) {
             if ($expected.$key -cne $actual.$key) { throw 'IIS configuration changed before commit; refusing overwrite.' }
@@ -180,6 +182,7 @@ try {
     if (@('apply','restore','activate') -contains $request.action) {
         if ($null -eq $request.expected) { throw 'Expected IIS snapshot is required before changing configuration.' }
         Assert-Snapshot $request.expected $before
+        if ($rumWanted -or @($before.rules).Count -gt 0 -or @($request.snapshot.rules).Count -gt 0) { Assert-RumPool }
     }
     function Assert-LocalOwned($collection, $texts) {
         $localNames = @($texts | ForEach-Object { ([xml]$_).DocumentElement.GetAttribute('name') })
@@ -230,6 +233,7 @@ try {
         Assert-OTelExternalEnvironment
         $before | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'check') {
+        if ($rumWanted -or @($before.rules).Count -gt 0) { Assert-RumPool -RequireStarted }
         if ($request.checkingEnabled -and $rumWanted) { Get-RumAssetReaders | Out-Null; Assert-CacheGuardWritable }
         if ($rumWanted -and ($compression.IsLocked -or $rewrite.IsLocked)) { throw 'IIS rewrite/compression configuration is locked.' }
         if ($request.checkingEnabled -and $rumWanted -and ($compression.GetAttributeValue('doStaticCompression') -or $compression.GetAttributeValue('doDynamicCompression')) -and -not $site.iis.allowCompressionChanges) { throw 'Static or dynamic compression is enabled; set allowCompressionChanges after reviewing its impact.' }
@@ -249,7 +253,7 @@ try {
     } elseif ($request.action -eq 'activate') {
         # Go persists the committed snapshot before this separate process can
         # recycle a pool, so recycle failure/timeout remains recoverable.
-        Recycle-OTelPool $request.previous.otel
+        Recycle-OTelPool $request.previous.otel -RumChanged:([bool]$request.rumChanged)
         Read-Snapshot | ConvertTo-Json -Depth 30 -Compress
     } elseif ($request.action -eq 'restore') {
         Restore-Nodes $request.snapshot

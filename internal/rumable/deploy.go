@@ -208,6 +208,7 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		st.Current.Native = native
 		st.OriginalIIS = native
 	}
+	runtimeAdoption := s.IIS != nil && dynamicCompressionSnapshot(st.Current.Native)["rumRuntime"] == nil
 	if err := adoptIISDynamicCompression(root, &st); err != nil {
 		return err
 	}
@@ -225,11 +226,14 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 			return err
 		}
 	}
-	if snapshotsEqual(st.Current, n) && (s.IIS == nil || !n.Enabled || (iisDynamicCompressionDisabled(st.Current.Native) && iisCacheGuardEnabled(st.Current.Native))) {
+	if snapshotsEqual(st.Current, n) && (s.IIS == nil || !n.Enabled || (!runtimeAdoption && iisDynamicCompressionDisabled(st.Current.Native) && iisCacheGuardEnabled(st.Current.Native))) {
 		fmt.Fprintln(w, "Already in requested state; verifying HTTP probes.")
 		return waitProbes(st.Current)
 	}
 	fmt.Fprintf(w, "%s site %s (%s): SDK %s; managed files %s\n", map[bool]string{true: "Enable", false: "Disable"}[enabled], s.ID, s.platform(), n.SDK.Version, strings.Join(fileNames(n.Files), ", "))
+	if s.IIS != nil && (n.Enabled || st.Current.Enabled) {
+		fmt.Fprintln(w, "IIS: configuration changes recycle this application's dedicated pool and wait for old workers before HTTP checks. In-memory sessions may be lost; shared pools are refused.")
+	}
 	if s.IIS != nil && n.Enabled {
 		fmt.Fprintln(w, "IIS: static and dynamic compression will be disabled for this application; original local settings are saved and restored on disable/uninstall.")
 		fmt.Fprintln(w, "IIS: managed HTML navigation GETs clear old cache validators before local rewrites; original request-header permissions are saved and restored on disable/uninstall.")
@@ -253,6 +257,9 @@ func transact(root string, st State, n Snapshot, public map[string][]byte, resto
 		return err
 	}
 	fail := func(cause error) error {
+		if err := recordProbeFailure(root, n.Site, "operation", cause); err != nil {
+			cause = fmt.Errorf("%w; could not save probe evidence: %v", cause, err)
+		}
 		if err := restoreTransaction(root, t); err != nil {
 			return fmt.Errorf("operation failed: %v; recovery incomplete: %w; keep transaction.json", cause, err)
 		}
@@ -367,9 +374,24 @@ func restoreTransaction(root string, t transaction) error {
 	recoveryProbe := t.Before.Current
 	recoveryProbe.legacyIISRecovery = recoveryProbe.Site.IIS != nil && !iisCacheGuardEnabled(recoveryProbe.Native)
 	if err := waitProbes(recoveryProbe); err != nil {
+		if evidenceErr := recordProbeFailure(root, recoveryProbe.Site, "recovery", err); evidenceErr != nil {
+			return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w; could not save probe evidence: %v", err, evidenceErr)
+		}
 		return fmt.Errorf("restored configuration but HTTP recovery verification failed: %w", err)
 	}
 	return saveState(root, t.Before)
+}
+
+func recordProbeFailure(root string, s Site, stage string, err error) error {
+	var content *probeContentError
+	if s.IIS == nil || !errors.As(err, &content) {
+		return nil
+	}
+	return writeJSON(filepath.Join(siteDir(root, s), "last-"+stage+"-probe-failure.json"), struct {
+		At    time.Time `json:"at"`
+		Stage string    `json:"stage"`
+		Error string    `json:"error"`
+	}{time.Now().UTC(), stage, err.Error()})
 }
 
 // Restore-Nodes deliberately retains the first asset mapping for cached pages.

@@ -146,7 +146,7 @@ IIS 自动完成应用池配置挂接，不需要 Linux 的 attach 命令。按�
 
 启用 OTel 不要求 URL Rewrite，不改压缩、HTML 或 CSP；同时启用 RUM 时才检查 RUM 的模块和压缩要求。ASP.NET Core 必须使用 No Managed Code 池；工具不会自动改变池的 CLR/管线设置。[官方 IIS 说明](https://github.com/open-telemetry/opentelemetry-dotnet-instrumentation/blob/main/docs/iis-instrumentation.md)同时说明了这些池和全局环境配置条件。
 
-IIS 的配置提交和池回收分为两次调用：先记录已提交快照，再校验快照/归属并回收目标池。环境值未变时不回收；变更时最多等待旧 worker 退出 15 秒，超时或池未 Started 即失败，不强杀业务进程。失败恢复会重新回收原配置，即使上次恢复已写回配置；恢复仍失败则保留 transaction.json，解决进程/外部配置问题后执行 rollback 重试。配置提交完成但尚未记录快照时进程被强制终止，若现场不能与日志匹配，仍停止自动覆盖并要求人工审查。不能保证 .NET 应用无需预热或无短暂回收影响。
+IIS 的配置提交和池回收分为两次调用：先记录已提交快照，再校验快照/归属并回收目标池。仅操作 OTel 且环境值未变、也没有 RUM 激活需求时不回收；RUM 配置切换同样需要回收，同次变更只回收一次。最多等待旧 worker 退出 15 秒，超时或池未 Started 即失败，不强杀业务进程。失败恢复会重新回收原配置，即使上次恢复已写回配置；恢复仍失败则保留 transaction.json，解决进程/外部配置问题后执行 rollback 重试。配置提交完成但尚未记录快照时进程被强制终止，若现场不能与日志匹配，仍停止自动覆盖并要求人工审查。不能保证 .NET 应用无需预热或无短暂回收影响。
 
 ## 启停、回滚和验收
 

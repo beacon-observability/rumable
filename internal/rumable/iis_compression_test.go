@@ -120,13 +120,14 @@ func TestIISLegacyCompressionUpgradeLifecycle(t *testing.T) {
 			}
 			live["dynamicCompressionPresent"] = true
 			live["dynamicCompressionValue"] = "true"
+			live["rumRuntime"] = map[string]any{"pool": "Dedicated", "applications": []string{"Website/"}}
 			live["cacheGuard"] = map[string]any{"rules": []string{}, "permissions": []string{}, "effectivePermissions": []string{}, "ruleIndex": -1}
 			applies := 0
 			bridge := iisCommand
 			t.Cleanup(func() { iisCommand = bridge })
 			iisCommand = func(_ string, _ Site, action string, extra map[string]any) (json.RawMessage, error) {
 				switch action {
-				case "inspect", "check":
+				case "inspect", "check", "activate":
 				case "apply":
 					applies++
 					// The upgrade baseline must be durable before the bridge changes IIS.
