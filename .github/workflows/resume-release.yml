@@ -1,0 +1,89 @@
+name: Resume release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag, such as v0.1.9
+        required: true
+      run_id:
+        description: Release run whose build and Windows checks passed
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: rumable-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Verify tagged source and successful platform checks
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_RUN: ${{ inputs.run_id }}
+        run: |
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';
+          import fs from 'node:fs';
+          const {TAG:tag,RELEASE_RUN:runID,GITHUB_REPOSITORY:repo} = process.env;
+          if (!/^v\d+\.\d+\.\d+$/.test(tag) || !/^\d+$/.test(runID)) throw Error('Invalid tag/run');
+          const git = args => execFileSync('git',args,{encoding:'utf8'}).trim();
+          const api = resource => JSON.parse(execFileSync('gh',['api',`repos/${repo}/${resource}`],{encoding:'utf8'}));
+          const revision=git(['rev-parse',`${tag}^{commit}`]);
+          if (api(`git/ref/tags/${tag}`).object.sha !== git(['rev-parse',tag])) throw Error('Remote tag changed');
+          const run=api(`actions/runs/${runID}`);
+          if (run.head_sha !== revision || run.path !== '.github/workflows/release.yml' || run.repository.full_name !== repo) throw Error('Artifact run does not match tagged release');
+          const jobs=api(`actions/runs/${runID}/jobs?per_page=100`).jobs;
+          for (const name of ['build','windows']) if (!jobs.some(j => j.name === name && j.conclusion === 'success')) throw Error(`Required check did not pass: ${name}`);
+          const version=/^var Version = "([^"]+)"$/m.exec(git(['show',`${tag}:internal/rumable/config.go`]))?.[1];
+          if (tag !== `v${version}`) throw Error('Tag/source version mismatch');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`version=${version}\nrevision=${revision}\n`);
+          let notes=git(['show',`${tag}:docs/releases/${version}.md`]);
+          notes=notes.replaceAll('(../compatibility.md)',`(https://github.com/${repo}/blob/${tag}/docs/compatibility.md)`).replaceAll('(../../USER-GUIDE.md)',`(https://github.com/${repo}/blob/${tag}/USER-GUIDE.md)`).replaceAll('(../github-release.md)',`(https://github.com/${repo}/blob/${tag}/docs/github-release.md)`);
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-notes.md`,notes+'\n');
+          JS
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release
+          path: dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Resume verified publication without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.source.outputs.version }}
+          REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          node scripts/github-release.mjs validate dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --title "Rumable $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+          node scripts/github-release.mjs publish dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/release-notes.md"
+          node scripts/github-release.mjs verify-public dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
+          node scripts/github-release.mjs site dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" site
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+  pages:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
