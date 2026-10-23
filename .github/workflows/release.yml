@@ -55,7 +55,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/rumable-package"
           tar -xzf "dist/$VERSION/rumable_${VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/rumable-package"
-          RUMABLE_BINARY="$RUNNER_TEMP/rumable-package/rumable" bash scripts/smoke-nginx.sh
+          sudo env "PATH=$PATH" "RUMABLE_BINARY=$RUNNER_TEMP/rumable-package/rumable" bash scripts/smoke-nginx.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release

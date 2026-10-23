@@ -50,7 +50,7 @@ Publication starts after build and Windows checks pass. It creates a draft, uplo
 
 Latest aliases select the highest published stable version, so retrying an older release cannot move them backward. Identical retry uploads are accepted. Different bytes, unexpected assets, incomplete already-published releases, or another source revision fail without overwriting assets. If a draft upload or Pages deployment fails, fix credentials or infrastructure and rerun the failed jobs. If source code needs correction, publish a new patch version rather than replacing an already-published release or moving its tag. A Pages deployment failure leaves the GitHub Release downloads available.
 
-Repository administrators must enable GitHub Actions and set Pages to **GitHub Actions**. Build jobs use read permissions; only the publication job can write releases, and only the Pages job receives Pages/OIDC deployment permissions. No OSS secrets are needed.
+Repository administrators must enable GitHub Actions and set Pages to **GitHub Actions**. Allow `v*` tags in the `github-pages` environment deployment rules so tagged releases can deploy. Build jobs use read permissions; only the publication job can write releases, and only the Pages job receives Pages/OIDC deployment permissions. No OSS secrets are needed.
 
 ## Existing GitLab publication
 
