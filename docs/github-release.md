@@ -5,7 +5,7 @@ Rumable is part of Beacon Observability and keeps the `rumable` executable and e
 - [Latest release and downloads](https://github.com/beacon-observability/rumable/releases/latest)
 - [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html)
 - [Latest configuration manifest](https://beacon-observability.github.io/rumable/latest/manifest.json)
-- [0.1.9 release notes](releases/0.1.9.md)
+- [v0.1.9 release notes](releases/0.1.9.md)
 
 ## Download and verification
 
@@ -28,6 +28,8 @@ Use the package for your OS and architecture from the release assets. Modern bui
 `SHA256SUMS` covers archives, installers, metadata, and configuration-page files. Page files retain their `setup/` paths on Pages and in the Actions artifact; they are not flattened into release assets. `build.json` inside each archive records the source revision, compiler, platform, flavor, and executable digest. Package documentation and licenses remain inside archives.
 
 ## Prepare a version
+
+Release titles and the first heading in release notes use `v<version>` (for example, `v0.1.9`).
 
 1. Set `Version` in `internal/rumable/config.go`, update the release builder default, add `docs/releases/<version>.md`, and update `CHANGELOG.md` and current download examples. Include new release documents in the builder's explicit support-file list.
 2. If changing the SDK, run `go run scripts/sync-sdk.go`, review SDK bytes and metadata, and commit them. Tagged builds use the committed SDK with `--skip-sdk-sync`.

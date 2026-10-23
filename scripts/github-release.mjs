@@ -100,7 +100,7 @@ async function run() {
       if (release.draft) {
         const stable = publishedReleases(repository).filter(r => !r.isDraft && !r.isPrerelease && /^v\d+\.\d+\.\d+$/.test(r.tagName)).map(r => r.tagName.slice(1));
         const latest = newestVersion([...stable,version]) === version;
-        gh(['release','edit',tag,'--repo',repository,'--draft=false',`--latest=${latest}`,'--title',`Rumable ${version}`,'--notes-file',extra]);
+        gh(['release','edit',tag,'--repo',repository,'--draft=false',`--latest=${latest}`,'--title',tag,'--notes-file',extra]);
       }
       console.log(`Published and verified ${assets.length} assets: https://github.com/${repository}/releases/tag/${tag}`);
     } finally { fs.rmSync(temporary,{recursive:true,force:true}); }

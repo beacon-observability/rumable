@@ -110,7 +110,7 @@ jobs:
           REVISION: ${{ needs.build.outputs.revision }}
         run: |
           node scripts/github-release.mjs validate dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
-          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --title "Rumable $VERSION" --notes-file "docs/releases/$VERSION.md"
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --title "v$VERSION" --notes-file "docs/releases/$VERSION.md"
           node scripts/github-release.mjs publish dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" "docs/releases/$VERSION.md"
           node scripts/github-release.mjs verify-public dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
           node scripts/github-release.mjs site dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" site
