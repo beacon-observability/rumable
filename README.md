@@ -1,8 +1,10 @@
 # Rumable
 
+Part of Beacon Observability. [Download the latest release](https://github.com/beacon-observability/rumable/releases/latest) or open the [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
+
 Add browser real user monitoring (RUM) to websites through Nginx or IIS without changing application source code. Rumable rewrites HTML responses to load and initialize the bundled Web SDK. Browsers send events directly to the configured receiver; the CLI exits after deployment.
 
-The compatible executable remains `rumable` / `rumable.exe`. Existing configuration fields, site IDs, state directories, resource URLs, and deployment markers retain their names so that updates and recovery continue to work. This documentation update does not establish a new public download channel or change the runtime data protocol.
+The compatible executable remains `rumable` / `rumable.exe`. Existing configuration fields, site IDs, state directories, resource URLs, and deployment markers retain their names so that updates and recovery continue to work. New downloads are published through GitHub Releases; the runtime data protocol is unchanged.
 
 IIS requires a started, dedicated application pool. Enable, update, disable, and rollback can recycle that pool and wait for old workers to exit. In-process sessions may be lost. Shared pools are rejected.
 
@@ -17,7 +19,7 @@ IIS requires a started, dedicated application pool. Enable, update, disable, and
 | Diagnose compression, caching, CSP, or drift | [Operations](docs/operations.md) |
 | Check operating-system and server requirements | [Compatibility](docs/compatibility.md) |
 | Configure optional server-side traces | [OTel guide](docs/otel.md) and [dependency installation](docs/otel-installation.md) |
-| Maintain the configuration page and releases | [Page integration](docs/one-click-onboarding.md), [development](docs/development.md), and [release workflow](docs/gitlab-ci-release.md) |
+| Maintain the configuration page and releases | [Page integration](docs/one-click-onboarding.md), [development](docs/development.md), and [GitHub release workflow](docs/github-release.md) |
 | Review validation evidence | [Verification records](docs/verification.md) and [Windows acceptance](docs/windows-acceptance.md) |
 | Recover a failed historical Windows deployment | [Recovery guide](docs/windows-0.1.4-recovery.md) |
 
@@ -33,7 +35,7 @@ Both servers support all four source/loading combinations. Asynchronous loading 
 
 ## Install and verify
 
-1. Open the configuration page supplied with your release at `setup/index.html` over HTTP(S).
+1. Open the [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
 2. Enter application details, choose the server and SDK delivery, and load the matching release manifest.
 3. Save the generated TOML and run the generated command on the actual Web server.
 4. Check deployment status, open the website, inspect browser requests, and confirm stored events in the receiving application.

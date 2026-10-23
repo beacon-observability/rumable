@@ -118,7 +118,8 @@ function Invoke-RumableWindowsInstall([string]$BaseUrl, [string]$Config, [switch
     $source = [Uri]$BaseUrl
     if (-not $source.IsAbsoluteUri -or $source.Scheme -ne 'https' -or $source.UserInfo -or $source.Query -or $source.Fragment) { throw 'BaseUrl must be a public HTTPS directory' }
     $BaseUrl = $BaseUrl.TrimEnd('/')
-    if ($BaseUrl.EndsWith('/latest', [StringComparison]::Ordinal)) { $BaseUrl = $BaseUrl.Substring(0, $BaseUrl.Length - 7) + '/' + $releaseVersion }
+    if ($BaseUrl -match '^https://github\.com/[^/]+/[^/]+/releases/latest/download$') { $BaseUrl = $BaseUrl.Substring(0, $BaseUrl.Length - '/releases/latest/download'.Length) + '/releases/download/v' + $releaseVersion }
+    elseif ($BaseUrl.EndsWith('/latest', [StringComparison]::Ordinal)) { $BaseUrl = $BaseUrl.Substring(0, $BaseUrl.Length - 7) + '/' + $releaseVersion }
     $hostInfo = Get-RumableWindowsHost
     $package = Get-RumableWindowsPackage $hostInfo.Architecture $hostInfo.Version $hostInfo.ServicePack $releaseVersion
     if ($package.Architecture -eq '386') { throw 'Detected 32-bit Windows: IIS setup requires a 64-bit OS. The x86 CLI package remains available for manual configuration and probing.' }

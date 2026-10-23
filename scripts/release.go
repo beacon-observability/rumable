@@ -33,11 +33,19 @@ func main() {
 func run() error {
 	modern := flag.String("go", "go", "maintained Go compiler")
 	legacy := flag.String("legacy-go", "", "Go 1.20.14 compiler (required)")
-	versionName := flag.String("version", "0.1.6", "release version")
+	versionName := flag.String("version", "0.1.9", "release version")
 	revision := flag.String("revision", "", "source commit; omit to discover local HEAD")
 	out := flag.String("out", "", "output directory (default dist/<version>)")
 	skipSync := flag.Bool("skip-sdk-sync", false, "offline rebuild using the already verified SDK; release builds sync by default")
+	githubRepository := flag.String("github-repository", "", "GitHub owner/repository for release downloads (optional)")
 	flag.Parse()
+	artifactBase := "../" + *versionName + "/"
+	if *githubRepository != "" {
+		if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`).MatchString(*githubRepository) {
+			return fmt.Errorf("invalid GitHub repository")
+		}
+		artifactBase = "https://github.com/" + *githubRepository + "/releases/download/v" + *versionName + "/"
+	}
 	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)?$`).MatchString(*versionName) {
 		return fmt.Errorf("invalid release version")
 	}
@@ -223,7 +231,7 @@ func run() error {
 	}
 	public["manifest.json"], err = json.MarshalIndent(map[string]any{
 		"schemaVersion": 1, "version": *versionName, "revision": *revision,
-		"artifactBase": "../" + *versionName + "/",
+		"artifactBase": artifactBase,
 		"capabilities": []string{"rum-setup-v1", "rum-install-v1", "rum-discovery-v1", "rum-discovery-sdk-v1", "rum-sdk-loading-v1"}, "sdk": json.RawMessage(public["sdk.json"]), "packages": packages, "installers": installers,
 	}, "", "  ")
 	if err != nil {
@@ -254,6 +262,7 @@ func releaseSupportFiles(root string) (map[string][]byte, error) {
 	for _, name := range []string{
 		"USER-GUIDE.md", "CHANGELOG.md",
 		"docs/compatibility.md", "docs/operations.md", "docs/configuration.md",
+		"docs/github-release.md", "docs/releases/0.1.9.md",
 		"docs/one-click-onboarding.md", "docs/gitlab-ci-release.md", "docs/verification.md", "docs/development.md",
 		"docs/otel.md", "docs/otel-installation.md", "docs/windows-acceptance.md",
 		"docs/windows-0.1.4-recovery.md", "docs/review-2026-10-22.md",

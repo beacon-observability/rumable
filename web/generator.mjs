@@ -118,7 +118,8 @@ export function validateManifest(m, manifestURL) {
   const source = url(manifestURL, {key:'field.manifest'}, {https: true});
   if (source.search) throw new SetupError('error.manifestQuery');
   if (!m || m.schemaVersion !== 1 || !/^\d+\.\d+\.\d+(?:-[a-z0-9]+(?:\.[a-z0-9]+)*)?$/.test(m.version) || !m.capabilities?.includes('rum-setup-v1') || !m.capabilities?.includes('rum-install-v1') || !Array.isArray(m.packages) || !m.sdk?.version) throw new SetupError('error.manifestUnsupported');
-  if ((m.artifactBase !== undefined && m.artifactBase !== `../${m.version}/`) || (/\/latest\/manifest\.json$/.test(source.pathname) && !m.artifactBase)) throw new SetupError('error.manifestBase');
+  const githubBase = /^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*\/releases\/download\/v([^/]+)\/$/.exec(m.artifactBase || '');
+  if ((m.artifactBase !== undefined && m.artifactBase !== `../${m.version}/` && githubBase?.[1] !== m.version) || (/\/latest\/manifest\.json$/.test(source.pathname) && !m.artifactBase)) throw new SetupError('error.manifestBase');
   for (const [platform, file] of [['linux', 'install.sh'], ['windows', 'install.ps1']]) {
     const installer = m.installers?.[platform];
     if (installer?.file !== file || !/^[a-f0-9]{64}$/.test(installer.sha256)) throw new SetupError('error.installers');

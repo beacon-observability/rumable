@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9 · 2026-10-23
+
+- Join Beacon Observability while keeping Rumable naming, command, configuration, SDK, and collection behavior.
+- Standardize public documentation and setup pages in English.
+- Add GitHub Release downloads, version-pinned manifest support, and GitHub Pages configuration hosting.
+- Add CI, dual-compiler builds, Windows package checks, Nginx integration checks, and verified draft-to-public publication.
+- See the [release notes](docs/releases/0.1.9.md) and [release guide](docs/github-release.md).
+
 ## Unreleased
 
 - Keep Rumable as the public product name and retain the rumable executable, configuration schema, state/resource paths, and deployment markers.

@@ -105,6 +105,12 @@ try {
         Assert-Rejected { Invoke-RumableWindowsInstall 'https://downloads.example.com/rumable/0.1.3' $config } 'setup fixture failed'
         Assert-That (-not (Test-Path $script:lastWork)) 'Failed setup leaked temporary configuration'
     }
+    $script:failSetup=$false; $script:expectDiscovery=$false
+    foreach ($base in @('https://github.com/beacon-observability/rumable/releases/latest/download', 'https://github.com/beacon-observability/rumable/releases/latest/download/')) {
+        $script:downloads=@()
+        Invoke-RumableWindowsInstall $base $config
+        Assert-That ($script:downloads[0] -eq ('https://github.com/beacon-observability/rumable/releases/download/v0.1.3/' + $p.File)) 'GitHub latest must pin the embedded installer version'
+    }
     $script:downloads=@()
     Assert-Rejected { Invoke-RumableWindowsInstall 'http://example.com' $config } 'HTTPS'
     Assert-Rejected { Invoke-RumableWindowsInstall 'https://downloads.example.com' '!!' } 'Base-64'

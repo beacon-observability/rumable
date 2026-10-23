@@ -1,0 +1,132 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rumable-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+      revision: ${{ steps.source.outputs.revision }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: bash
+        run: |
+          version=$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/rumable/config.go)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" == "v$version" ]]
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.20.14
+          cache: false
+      - run: echo "LEGACY_GO=$(go env GOROOT)/bin/go" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/check-docs.mjs
+      - run: node --test web/*_test.mjs scripts/*_test.mjs scripts/ci/*_test.mjs
+      - name: Build and verify ten platform packages
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          go run scripts/release.go --legacy-go "$LEGACY_GO" --version "$VERSION" --revision "$REVISION" --skip-sdk-sync --github-repository "$GITHUB_REPOSITORY"
+          node scripts/github-release.mjs validate "dist/$VERSION" "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
+      - name: Exercise packaged CLI with Nginx
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rumable-package"
+          tar -xzf "dist/$VERSION/rumable_${VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/rumable-package"
+          RUMABLE_BINARY="$RUNNER_TEMP/rumable-package/rumable" bash scripts/smoke-nginx.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release
+          path: dist/${{ steps.source.outputs.version }}/
+          if-no-files-found: error
+  windows:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release
+          path: dist
+      - name: Verify packaged Windows executables
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          foreach ($flavor in @('', '_legacy')) {
+            $out = Join-Path $env:RUNNER_TEMP ('rumable' + $flavor)
+            Expand-Archive "dist/rumable_$($env:VERSION)_windows_amd64$flavor.zip" $out
+            $reported = & (Join-Path $out 'rumable.exe') version | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $reported.version -ne $env:VERSION) { throw 'Package version mismatch' }
+          }
+      - name: PowerShell installer and IIS contracts
+        shell: pwsh
+        run: ./scripts/test-powershell.ps1
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release
+          path: dist
+      - name: Publish verified assets and prepare configuration pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REVISION: ${{ needs.build.outputs.revision }}
+        run: |
+          node scripts/github-release.mjs validate dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --title "Rumable $VERSION" --notes-file "docs/releases/$VERSION.md"
+          node scripts/github-release.mjs publish dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" "docs/releases/$VERSION.md"
+          node scripts/github-release.mjs verify-public dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
+          node scripts/github-release.mjs site dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" site
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+  pages:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

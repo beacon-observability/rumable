@@ -1,5 +1,7 @@
 # GitLab CI and OSS releases
 
+This is the retained GitLab/OSS publication path. New Beacon distribution uses [GitHub releases](github-release.md). Select the GitLab remote explicitly with `--remote gitlab`.
+
 The existing deployment channel uses protected tags, a Shell Runner with Docker, ali-oss, OSS_* credentials, serial publication, and a credential-free report. Public documentation calls the product Rumable. Existing release tags, binary names, object paths, and the configured Runner label remain compatible.
 
 This workflow publishes platform archives, installers, and static setup files, not npm packages. It does not establish a new public download domain.
@@ -35,14 +37,14 @@ Review source changes, the Version in internal/rumable/config.go, and release no
 
 CLI, page, and capability changes must be released together. The manifest advertises rum-sdk-loading-v1 and rum-discovery-sdk-v1 where implemented. Replacing a page in an old immutable directory cannot add CLI capabilities.
 
-Merge and push reviewed source to main, verify a clean checkout aligned with origin/main, then use the release script. Version 0.1.8 illustrates the existing source version, not a new release created by this documentation change:
+Merge and push reviewed source to main, verify a clean checkout aligned with origin/main, then use the release script. The helper reads the current committed source version:
 
 ~~~sh
 git switch main
 git pull --ff-only origin main
-bash scripts/release-oss.sh 0.1.8 --dry-run
+bash scripts/release-oss.sh --remote gitlab --dry-run
 # Run only when publication of the reviewed version is authorized:
-bash scripts/release-oss.sh 0.1.8
+bash scripts/release-oss.sh --remote gitlab
 ~~~
 
 Omitting the version reads source Version. The default remote is origin; --remote selects an existing remote. The script validates the actual push destination and creates/pushes only one annotated matching release tag. It neither commits nor pushes branches and refuses conflicting tags.

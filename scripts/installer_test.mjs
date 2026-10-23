@@ -41,6 +41,11 @@ test('installer detects x86/x64/ARM64 and rejects invalid input before download'
     assert(request.includes('https://downloads.example.com/rumable/0.1.0/rumable_0.1.0_linux_amd64.tar.gz'));
     assert(!request.includes('/latest/'));
   }
+  for (const base of ['https://github.com/beacon-observability/rumable/releases/latest/download', 'https://github.com/beacon-observability/rumable/releases/latest/download/']) {
+    const result = execute('x86_64', {}, ['--base-url',base,'--config',config]);
+    assert.equal(result.status,77,result.stderr);
+    assert(fs.readFileSync(download,'utf8').includes('https://github.com/beacon-observability/rumable/releases/download/v0.1.0/rumable_0.1.0_linux_amd64.tar.gz'));
+  }
   for (const [machine, overrides, values] of [
     ['riscv64', {}, args], ['x86_64', {FIXTURE_UID:'1000'}, args],
     ['x86_64', {}, ['--base-url','http://downloads.example.com','--config',config]],

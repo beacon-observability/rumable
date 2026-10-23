@@ -11,12 +11,12 @@ node scripts/check-docs.mjs
 go test ./...
 go vet ./...
 go build -o rumable ./cmd/rumable
-node --test web/generator_test.mjs web/i18n_test.mjs scripts/installer_test.mjs scripts/release-oss_test.mjs scripts/ci/ci_test.mjs
+node --test web/*_test.mjs scripts/*_test.mjs scripts/ci/*_test.mjs
 go test scripts/sync-sdk.go scripts/sync-sdk_test.go
 go test scripts/release.go scripts/release_test.go
 ~~~
 
-The documentation check covers public Markdown, example comments, setup HTML/catalog strings, relative links and anchors, and generated release-copy templates. It excludes vendored SDK bytes, required license files, machine metadata, and internal authoring skills. It does not claim new download URLs are published.
+The documentation check covers public Markdown, example comments, setup HTML/catalog strings, relative links and anchors, and generated release-copy templates. It excludes vendored SDK bytes, required license files, machine metadata, and internal authoring skills. The [GitHub release guide](github-release.md) documents download and configuration-page URLs.
 
 ## Linux integration
 
@@ -53,7 +53,8 @@ Modern and legacy packages use two actual compilers:
 
 ~~~sh
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.8
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.9 --skip-sdk-sync \
+  --github-repository beacon-observability/rumable
 ~~~
 
 Prepare SDK updates explicitly with `go run scripts/sync-sdk.go`, review bytes/metadata, and commit before building a release. The standalone builder syncs by default and rejects a dirty revision. Tagged CI uses `--skip-sdk-sync` to rebuild the reviewed bytes without following mutable sources.
@@ -62,7 +63,7 @@ An offline candidate can explicitly use `--skip-sdk-sync`. A local uncommitted c
 
 The output directory must not already exist. Builds inspect metadata, run tests/vet with both compilers, reject source drift, and produce ten Windows/Linux archives plus installers, setup files, manifest, sdk.json, and SHA256SUMS. build.json records revision, compiler, architecture, and binary digest. Documents, examples, and required third-party notices enter platform archives; source and test fixtures do not.
 
-The [release workflow](gitlab-ci-release.md) documents the actual upload allowlist and immutable/latest promotion. Compiler examples and historical version records are not promises about untested operating systems.
+The [GitHub release workflow](github-release.md) documents the actual upload allowlist and immutable/latest promotion. Compiler examples and historical version records are not promises about untested operating systems.
 
 ## Loading-mode regression
 

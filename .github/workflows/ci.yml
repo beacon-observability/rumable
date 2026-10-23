@@ -1,0 +1,24 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/check-docs.mjs
+      - run: node --test web/*_test.mjs scripts/*_test.mjs scripts/ci/*_test.mjs
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go test scripts/sync-sdk.go scripts/sync-sdk_test.go
+      - run: go test scripts/release.go scripts/release_test.go

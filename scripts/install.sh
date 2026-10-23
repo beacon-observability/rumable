@@ -30,7 +30,9 @@ main() {
   case "$version$digest" in *'@@'*) fail 'Use the CI-published installer, not the source template' ;; esac
   # A cached latest installer must still fetch the archive pinned in this script.
   base_url=${base_url%/}
-  case "$base_url" in */latest) base_url="${base_url%/latest}/$version" ;; esac
+  case "$base_url" in
+    https://github.com/*/releases/latest/download) base_url="${base_url%/releases/latest/download}/releases/download/v$version" ;;
+    */latest) base_url="${base_url%/latest}/$version" ;; esac
   for tool in curl sha256sum tar base64 cmp install mktemp; do
     command -v "$tool" >/dev/null 2>&1 || fail "Missing required tool: $tool"
   done
