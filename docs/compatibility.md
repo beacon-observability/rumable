@@ -46,6 +46,7 @@ TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blo
 ## IIS 与 PowerShell
 
 - 技术基线 **IIS 7.5+**，需要 **URL Rewrite 2.x**、Static Content 和匿名静态文件访问。
+- 目标应用必须使用已启动的独占应用池，子应用也需单独分配池。配置变更会回收目标池并等待旧工作进程退出，进程内会话可能丢失；共享池和停止的池会被拒绝，工具不自动分配或启动池。
 - 使用系统 Microsoft.Web.Administration API 和 Windows PowerShell，不依赖 .NET 6/8、PowerShell 7、ASP.NET Core 或 ARR 来注入页面。
 - 需要 **64 位 PowerShell 3.0+**（建议 5.1）。Windows 7 / Server 2008 R2 的默认 PowerShell 2.0 不满足 CLI 与 IIS 桥接脚本的内部 JSON 接口要求，需要运维预先部署适用的 WMF；工具不会自动安装系统组件。
 - TOML 配置文件使用 UTF-8；旧 PowerShell 的 `Out-File` 默认可能生成 UTF-16，请使用 `rumable init` 或显式 UTF-8 写入配置。

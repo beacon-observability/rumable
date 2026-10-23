@@ -41,6 +41,8 @@
 
 Windows 一键脚本要求 **管理员、PowerShell 5.1+、64 位 Windows**。手动 CLI 的 IIS 桥接基线为 **64 位 Windows PowerShell 3+**，推荐 5.1；旧系统必须选择 legacy 包。Nginx 要求 **1.9.4+ 且带 http_sub_module**；IIS 要求 **7.5+ 和 URL Rewrite 2.x**。安装脚本不安装这些服务器或组件。
 
+IIS 目标应用必须使用**已启动的独占应用池**，子应用也要有自己的池。启用、更新、回滚和停用会回收该池，等待旧工作进程退出后检查页面；进程内会话可能丢失，请在可接受回收影响的维护窗口操作。工具不自动分配池，不回收共享池，也不执行整台 IIS 重启。
+
 操作系统、CPU 架构和服务器组件要求见[兼容性说明](docs/compatibility.md)。
 
 ## 2. 准备 RUM 参数与网站条件
@@ -707,6 +709,8 @@ DataKit 模式在同一个 `[sites.rum]` 表内删除 `site` / `clientToken`，�
 
 在 IIS 管理器记录网站名称、应用路径和实际匿名文件读取身份。根应用路径是 `/`；子应用 `/shop` 对应 `publicURL=https://www.example.com/shop/`，路径配置使用 `/shop/`、`/shop/index.html`，不是物理磁盘目录。
 
+在「应用程序池」确认目标池已启动，并通过「查看应用程序」确认只有该目标应用使用它。共享池需由运维先为目标分配独占池；父应用和子应用不能共用同一个池接入。已有接入不要直接更换池名或向池中加入其他应用，应先按原部署信息停用并规划调整，避免触发归属漂移保护。
+
 以管理员身份使用系统原生 64 位 Windows PowerShell。URL Rewrite 2.x、Static Content、匿名访问和 JavaScript MIME 应已可用。全路径业务路由、ANCM 或入站重写需允许应用下 `/__rumable__/` 由静态文件处理器提供；虚拟目录本身不会自动覆盖业务 handler。
 
 ### 7.2 生成和修改配置
@@ -781,7 +785,7 @@ if ($LASTEXITCODE -ne 0) { throw '启用失败，请保留状态并检查恢复�
 & $rumable probe --state-dir $state --site $siteId
 ```
 
-CLI 管理所选站点/应用的受管规则、资源映射和压缩属性，不执行整台 IIS 重启。check 在首次启用前不能证明尚未创建的资源映射能被匿名读取，enable 后的资源探测仍可能暴露 ACL/handler 问题。下一步必须进行浏览器验收。
+CLI 管理所选站点/应用的受管规则、资源映射和压缩属性，并回收目标独占池使配置生效；随后进行 HTTP 检查。check 在首次启用前不能证明尚未创建的资源映射能被匿名读取，enable 后的资源探测仍可能暴露 ACL/handler 问题。下一步必须进行浏览器检查。
 
 ## 8. 配置路径、采样与回放
 
@@ -830,6 +834,8 @@ defaultPrivacyLevel = "mask"
 | 后端入库 | 上报响应成功，并在观测云对应应用查到本次访问的事件/字段；有回放时另验回放可播放 |
 
 在真实浏览器打开目标页面，开发者工具 Network 开启 Preserve log，再刷新：
+
+IIS 接入前已打开的页面，先保留原缓存执行普通刷新，不使用硬刷新或 Disable cache。检查首页和其他主要 HTML 页面，预期响应为 200、包含一条当前初始化脚本，业务内容正常。自动发现默认通常只检查首页，需要按实际模板配置更多 `probePaths`；首页通过不能代替其他页面检查。异常时先保存请求、响应和失败输出，再定位对应缓存或压缩配置。
 
 1. 检查 document 响应、`init.<hash>.js` 和 `sdk.<hash>.js`。CDN 模式 SDK 为外部 URL。
 2. Console 执行 `document.querySelectorAll('script[data-rumable]').length`，本次页面预期为 1。
@@ -916,7 +922,7 @@ if ($LASTEXITCODE -ne 0) { throw '配置应用失败，请先检查原因' }
 
 备份原 TOML、完整状态目录及服务器配置；下载新版本到新目录并校验。将 `rumable` / `$rumable` 指向新版本，保留原站点 ID、目标和状态目录，按[第 10.1 节](#101-修改-rum-参数)选择完整配置的 `enable` 或发现配置的 `setup --discover`；也可从配置页生成同目标的一键命令。只替换 CLI 不会立刻改变已部署 SDK；实际 enable/setup 后才更新站点。
 
-升级后用 `"$rumable" version`（Windows 为 `& $rumable version`）查看当前程序内的 SDK 版本和摘要，用原 state/site 执行 `status` 查看已部署快照，再执行 `probe` 并检查浏览器请求与观测云入库。清理 CDN、代理及 Service Worker 的旧 HTML 缓存，以新页面、新会话验收。仅执行 `enable --component otel` 不更新 Web SDK；需要时使用 `enable --component rum`。
+升级后用 `"$rumable" version`（Windows 为 `& $rumable version`）查看当前程序内的 SDK 版本和摘要，用原 state/site 执行 `status` 查看已部署快照，再执行 `probe` 并检查浏览器请求与观测云入库。IIS 首次接管旧部署时会记录池归属并回收一次；后续配置完全相同的重复操作不额外回收。先在原浏览器页面普通刷新，确认取得当前初始化脚本；若 CDN、代理或 Service Worker 仍提供旧 HTML，保留响应证据后按对应缓存策略处理，再检查新页面和新会话。仅执行 `enable --component otel` 不更新 Web SDK；需要时使用 `enable --component rum`。
 
 保留旧 CLI 和版本化资源。普通 rollback 恢复上一次部署的脚本与配置，不替你卸载新 CLI，也不自动恢复磁盘上的 TOML。回滚后若再次 enable，仍会按 TOML 重新应用，因此需要同步检查期望配置。
 
@@ -961,6 +967,8 @@ Windows：
 | uninstall | 恢复受管挂接/设置、移除资源映射并归档状态，之后普通 rollback 不再恢复该站点 |
 
 普通历史仅维护当前与上一次成功快照，重复 rollback 会来回切换，不是不断往更早版本回退。停用不终止用户已经打开页面中的 SDK；旧 HTML 缓存也可能仍加载 SDK，需按浏览器/CDN/代理/Service Worker 的缓存策略处理。
+
+IIS 停用会恢复原压缩设置及继承关系，并回收目标池。普通刷新后，新加载的 HTML 应不含本部署的注入。业务缓存策略恢复后可能返回 304，应检查浏览器实际复用的正文是否仍有注入，不能只根据状态码判断停用是否生效。旧哈希脚本和公共资源映射继续保留给旧页面使用。配置和状态完全相同的重复停用不会额外回收。
 
 ### 10.4 完整卸载
 
@@ -1018,11 +1026,13 @@ Linux 若只想恢复首次自动挂接但保留站点状态，可在 disable �
 | expected HTTP 200，实际 301/302/401/403 | 使用直接返回完整 HTML 的验收路径；检查匿名访问、绑定、DNS、TLS 与命中实例 |
 | `no safe literal <head>` | 检查页面模板及标签前同名文本；不能通过改用 `</head>` 随意绕过 |
 | IIS 资源返回 401/403/404 | 检查实际匿名身份的 ACL、公共目录、StaticFile、JavaScript MIME、路由例外 |
+| requires a dedicated application pool / pool is not Started | 确认仅目标应用使用该池且池已启动；共享池需先由运维调整，工具不会自动分配或启动池 |
+| Old application pool worker did not exit | 检查目标池的长请求和回收状态，不强杀进程；保留事务，条件恢复后使用原 state-dir/site 执行 rollback |
 | Static or dynamic compression is enabled | 审查所选应用影响后明确允许压缩变更 |
 | encoded response | 上游/应用仍输出压缩 HTML，或直出了 .gz/.br 文件；先处理来源 |
 | CSP ... blocks | 根据实际策略放行脚本、上报和 Worker，工具不会改 CSP |
 | existing RUM integration found | 检查业务已有 SDK，确定保留还是迁移，不能重复接入 |
-| stale bootstrap URL / 注入版本不一致 | 清理旧 HTML 缓存、检查 CDN/负载均衡是否命中其他实例 |
+| stale bootstrap URL / 注入版本不一致 | 先保存失败证据，检查目标池生效状态、请求是否命中其他实例及对应 HTML 缓存，再处理已定位的缓存 |
 | external change / asset drift | 外部修改了受管文件/规则，先审查差异，不能靠删除状态绕过 |
 | unfinished transaction | 保留状态与日志，执行同 state-dir/site 的 rollback；先看恢复是否完整 |
 | operation lock | 先确认相关 Rumable 进程确实已退出，备份现场，才能移除确认过期的 operation.lock |
@@ -1032,6 +1042,8 @@ Linux 若只想恢复首次自动挂接但保留站点状态，可在 disable �
 恢复顺序：保存失败输出和状态 → 检查是否仍有进程 → 确认锁归属 → 判断是普通 transaction.json 还是 attachment applying/restoring → 分别执行 rollback 或 Linux rollback --attachment → 再查 status/probe。恢复失败时保留日志，不手工编辑 state.json 或删除事务后重新安装。
 
 若要给支持人员反馈，提供：Rumable/OS/Web 服务器版本、安装方式、脱敏配置、site ID、state-dir、失败阶段、退出码及 status/probe 结果。不要公开完整状态备份或令牌。
+
+IIS 操作探测失败时，站点私有状态目录保留 `last-operation-probe-failure.json`；恢复探测失败另存 `last-recovery-probe-failure.json`。按时间核对对应失败，重试前先保存这两个文件和完整输出；自动恢复成功不会删除已有失败记录，文件存在不代表当前仍失败。
 
 ## 12. 服务端 OTel（独立可选能力）
 

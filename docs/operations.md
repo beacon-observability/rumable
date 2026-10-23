@@ -139,6 +139,6 @@ IIS RUM 和 OTel 均先提交配置、持久化快照，再以独立调用校验
 | `existing RUM integration found` | 业务已有 SDK，应保留现有接入或先明确迁移 |
 | `encoded response` | 上游/静态源仍返回压缩内容，先解决源压缩 |
 | `CSP ... blocks` | 修改站点的实际安全策略后重试；工具不会自动放宽 |
-| `stale bootstrap URL` | HTML 缓存未失效，按缓存层清理 |
+| `stale bootstrap URL` | 先保留失败输出与探测证据，核对目标池生效状态、请求命中的实例和实际 HTML 缓存，再处理已定位的缓存 |
 | `external change` / `asset drift` | 受管项被其他操作修改，先审查现场差异 |
 | `injection and script availability only` | HTML/文件检查通过，不等于浏览器执行或观测云入库成功 |

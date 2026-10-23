@@ -1,8 +1,10 @@
 # Windows / IIS 验收
 
-0.1.8 加入 RUM 应用池激活步骤，尚未完成 Windows 实机验收。0.1.7 用户实测为 29 项通过、5 项失败、5 项未验证：S3 条件 GET 收到 304；CT 更新/停用收到旧正文；FAULT 已恢复 IIS 配置，但恢复后的 HTTP 校验失败。不能把稍后 rollback 成功解释成已确认的缓存过期机制。
+0.1.8 已收到项目维护者提供的 Windows 实机报告：50 项中 **41 项通过、0 项产品失败、9 项未验证**。独占池回收、两组 gzip 缓存后的 second.html 首次普通刷新、两轮更新/回滚/停用和故障自动恢复通过；共享池和停止池按预期拒绝。完整范围、9 项未验证说明及证据位置见 [0.1.8 实机验收记录](verification.md)。本机未重新执行该 Windows 环境。
 
-复测需保留旧站点、状态及浏览器缓存，在新副本上运行一键安装。目标应用必须使用独占池；子应用单独分配池。重点检查：提交后旧 worker 已退出；安装前有 gzip 缓存的 second.html 首次普通刷新；0.1.7 同配置升级；两轮 env 更新、回滚和停用；文件级 gzip 故障后的自动恢复。首次普通刷新前不额外发送 identity/probe，也不清缓存。验证共享池在变更前被拒绝，未选应用不受影响；长请求或回收失败应留下可恢复事务，不强杀进程。错误证据另见私有状态目录的 last-operation-probe-failure.json 和 last-recovery-probe-failure.json。后续成功不得覆盖首次失败，真实入库需独立证明。
+后续回归继续保留旧站点、状态及浏览器缓存，在新副本上运行一键安装。目标应用必须使用独占池；子应用单独分配池。重点检查：提交后旧 worker 已退出；安装前有 gzip 缓存的 second.html 首次普通刷新；旧版本同配置升级；两轮 env 更新、回滚和停用；文件级 gzip 故障后的自动恢复。首次普通刷新前不额外发送 identity/probe，也不清缓存。长请求回收超时仍需补测，恢复不完整时应保留事务，不强杀进程。错误证据另见私有状态目录的 last-operation-probe-failure.json 和 last-recovery-probe-failure.json。预期故障拒绝且自动恢复成功计为通过；首次失败不能被后续成功覆盖，真实入库需独立证明。
+
+历史对照：0.1.7 用户实测为 29 项通过、5 项失败、5 项未验证，包含 S3 条件 GET 304、CT 更新/停用旧正文及 FAULT 恢复后 HTTP 校验失败。历史结果保留，不将 0.1.8 实测成功解释为已确认具体缓存层或模块顺序。
 
 2026-10-22 已收到用户提供的 0.1.4 原生 Windows 报告：下载、CLI 安装和发现通过，IIS 注入及事务恢复失败。0.1.5 包含对应修复，旧现场按[恢复与复测](windows-0.1.4-recovery.md)操作。以下“本轮没有实机”指本机执行范围；用户报告与本地 mock 证据分开保留。
 
@@ -243,7 +245,9 @@ Remove-TestDeployment $report.peer (Join-Path $env:TEMP $report.peer)
 
 本轮 macOS/OrbStack 没有 Windows/IIS。实际池回收、IIS API、Windows PowerShell 5.1、Agent 加载和真实入库，均需保存目标环境结果后才能标为通过。
 
-## 0.1.7 动态压缩、冷页面与 304 回归（待 Windows 实机验收）
+## 动态压缩、冷页面与 304 回归
+
+本节保留从 0.1.7 引入的回归场景；0.1.8 已完成的静态站点覆盖和仍未验证项以 [实机记录](verification.md)为准。
 
 `windows-smoke.ps1` 要求静态和动态压缩模块均可用，覆盖两种属性的继承、显式 true、显式 false；启用后两者均关闭，停用后分别恢复原值及继承关系。`second.html` 刻意不加入 probePaths：安装前预热 gzip，保存真实 ETag、Last-Modified；首次启用后分别及组合携带旧校验头发起条件 GET，再检查无条件响应、重复启用和 identity，避免预热掩盖错误。便携 PowerShell 测试只验证逻辑和模拟 API，不能替代此原生测试。
 
