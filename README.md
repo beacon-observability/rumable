@@ -20,7 +20,8 @@ Linux / Nginx 和 Windows / IIS 均支持一键接入、自动发现站点及同
 
 | 你的任务 | 阅读入口 |
 |---|---|
-| 第一次安装、选择同域/CDN 和同步/异步 | [使用指南](USER-GUIDE.md#1-sdk-注入加载与更新) |
+| 第一次安装 | [一键接入](USER-GUIDE.md#3-一键接入推荐) |
+| 选择同域/CDN 和同步/异步 | [SDK 配置示例](USER-GUIDE.md#43-四种接入方式的完整配置示例) |
 | 已接入站点升级、停用或回滚 | [日常维护](USER-GUIDE.md#10-修改配置升级停用回滚和卸载) |
 | 查询 TOML 参数、默认值和限制 | [配置参考](docs/configuration.md) |
 | 排查压缩、缓存、CSP、配置漂移 | [运维手册](docs/operations.md) |
@@ -45,6 +46,6 @@ rumable status --state-dir /var/lib/rumable --site website
 rumable probe --state-dir /var/lib/rumable --site website
 ```
 
-只替换 CLI 不会更新已部署 SDK；本地 SDK 的完整升级步骤和 CDN 缓存、摘要、回滚限制见[SDK 更新机制](USER-GUIDE.md#14-sdk-如何更新和回滚)。停用、回滚和升级都需处理旧 HTML 缓存。HTTP 探测通过不等于浏览器执行或真实入库通过。
+只替换 CLI 不会更新已部署 SDK；本地 SDK 的完整升级步骤和 CDN 缓存、摘要、回滚限制见[SDK 更新机制](USER-GUIDE.md#44-sdk-如何更新和回滚)。停用、回滚和升级都需处理旧 HTML 缓存。HTTP 探测通过不等于浏览器执行或真实入库通过。
 
 想先体验注入和浏览器请求，可运行[本地 Linux / Nginx 演示](examples/local-demo/README.md)。演示请求进入本地模拟接收端。

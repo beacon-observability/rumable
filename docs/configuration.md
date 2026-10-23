@@ -1,6 +1,6 @@
 # TOML 配置参考
 
-本页用于查字段。首次接入和 SDK 选择见[使用指南](../USER-GUIDE.md#1-sdk-注入加载与更新)，升级与恢复见[日常维护](../USER-GUIDE.md#10-修改配置升级停用回滚和卸载)。
+本页用于查字段。首次接入见[一键接入](../USER-GUIDE.md#3-一键接入推荐)，SDK 选择见[配置示例](../USER-GUIDE.md#43-四种接入方式的完整配置示例)，升级与恢复见[日常维护](../USER-GUIDE.md#10-修改配置升级停用回滚和卸载)。
 
 ## 配置格式
 
@@ -43,7 +43,7 @@ integrity = false
 
 check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript MIME 和发布包摘要；自建 CDN 必须发布相同字节，不接受其他版本或精简版。CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及所需 Worker，工具不会修改策略。CDN 不可达、摘要不一致或 SRI 缺少允许站点 Origin（或 `*`）的 Access-Control-Allow-Origin 时阻止启用。
 
-官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；2026-10-22 核对无 SRI 所需 CORS 头，默认 integrity=false 可直接加载。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
+官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；默认 `integrity=false`。开启 SRI 前必须确认 CDN 返回允许跨域读取的 CORS 响应头，且内容与安装包摘要一致。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
 
 部署快照保存实际 URL、SDK 版本和摘要，回滚使用历史引用；工具不能恢复外部 CDN 文件。外部旧内容被覆盖/删除时回滚探测会失败并恢复本次受管配置。停用不依赖 CDN 可达；保留的本地 SDK 副本不会自动作为失败降级，异步模式的下载不阻塞 HTML 解析；同步模式在浏览器完成脚本请求或判定失败之前会阻塞解析。源为 bundled 时填写非空 url 或 integrity=true 会被拒绝，避免配置被静默忽略。
 
@@ -55,7 +55,7 @@ check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript
 - 页面需避免已有 SDK 接入；预检拒绝常见业务 SDK 和其他部署，已有同步标签须与受管快照匹配。双层服务器不应重复注入。
 - nonce-only、strict-dynamic、Trusted Types 等策略需站点专门适配；同域托管不代表上报同域，访问者仍需能连接上报地址。
 
-脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#14-sdk-如何更新和回滚)。
+脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#44-sdk-如何更新和回滚)。
 
 ## 参数校验
 

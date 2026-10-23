@@ -1,16 +1,16 @@
 # Rumable 安装、配置与使用指南
 
-从这里完成 SDK 选择、安装接入、验收和后续维护。普通安装不需要 Git、Go、Node.js 或数据库。文档使用长期有效的 latest 入口，具体安装包、SDK 和功能支持以配置页读取的发布清单为准。已安装的 CLI 不会因刷新文档或配置页自动升级。
+按“选择接入方式 → 准备参数 → 安装接入 → 检查数据”的顺序完成首次接入；配置示例和日常维护可按需查阅。普通安装不需要 Git、Go、Node.js 或数据库。文档使用长期有效的 latest 入口，具体安装包、SDK 和功能支持以配置页读取的发布清单为准。已安装的 CLI 不会因刷新文档或配置页自动升级。
 
-首次接入推荐直接使用[第 4 节的一键接入](#4-一键接入推荐)：填写页面、复制命令、在服务器执行，无需自己编写 TOML 或预先安装 CLI。SDK 选择与手动配置示例见第 1 节；离线或分步安装使用第 5–7 节；已接入站点查第 8–11 节。完整字段查[配置参考](docs/configuration.md)，压缩、缓存和恢复细节查[运维手册](docs/operations.md)，平台条件查[兼容性](docs/compatibility.md)。
+首次接入推荐使用[第 3 节的一键接入](#3-一键接入推荐)：填写页面、复制命令、在服务器执行，无需自己编写 TOML 或预先安装 CLI。SDK 选择与手动配置示例见第 4 节；离线或分步安装使用第 5–7 节；已接入站点查第 8–11 节。完整字段查[配置参考](docs/configuration.md)，压缩、缓存和恢复细节查[运维手册](docs/operations.md)，平台条件查[兼容性](docs/compatibility.md)。
 
 ## 目录
 
-- [1. SDK 注入、加载与更新](#1-sdk-注入加载与更新)
-- [直接查看四种接入方式的完整示例](#13-四种接入方式的完整配置示例)
-- [2. 先选择安装方式和环境](#2-先选择安装方式和环境)
-- [3. 准备 RUM 参数与网站条件](#3-准备-rum-参数与网站条件)
-- [4. 一键接入（推荐）](#4-一键接入推荐)
+- [1. 先选择安装方式和环境](#1-先选择安装方式和环境)
+- [2. 准备 RUM 参数与网站条件](#2-准备-rum-参数与网站条件)
+- [3. 一键接入（推荐）](#3-一键接入推荐)
+- [4. SDK 注入、加载与更新](#4-sdk-注入加载与更新)
+- [四种接入方式的完整示例](#43-四种接入方式的完整配置示例)
 - [5. 手动下载、校验并安装 CLI](#5-手动下载校验并安装-cli)
 - [6. 手动配置 Linux / Nginx](#6-手动配置-linux--nginx)
 - [7. 手动配置 Windows / IIS](#7-手动配置-windows--iis)
@@ -20,9 +20,196 @@
 - [11. 常见问题与恢复](#11-常见问题与恢复)
 - [12. 服务端 OTel（独立可选能力）](#12-服务端-otel独立可选能力)
 
-## 1. SDK 注入、加载与更新
+## 1. 先选择安装方式和环境
 
-### 1.1 SDK 如何注入
+| 你的情况 | 选择 |
+|---|---|
+| 服务器能访问 OSS，使用常见网站配置 | 第 3 节：页面生成一键安装命令 |
+| 不希望在服务器在线下载安装器，或需要逐步审查配置变化 | 第 5 节安装 CLI，再按第 6 / 7 节操作 |
+| 服务器不能访问外网 | 在联网机器下载完整压缩包及 SHA256SUMS，传到服务器校验后手动安装 |
+| Nginx 使用自定义启动参数、首页跳转或需要指定验收路径 | 页面高级手动模式，或完整 TOML 手动配置 |
+| 只需要服务端 Trace，不需要浏览器 RUM | 第 12 节；页面和 setup 当前只处理 RUM |
+
+“手动安装 CLI”和“手动修改 Nginx 配置”是两回事。手动下载包之后，仍可让 `attach` 自动修改 Nginx 配置；只有自动挂接不支持的布局，才需要按生成的 `ATTACH.md` 人工修改。
+
+| 环境 | 当前接入范围 |
+|---|---|
+| Linux + Nginx | 支持手动流程、自动站点发现和一键安装 |
+| Windows + IIS | 支持手动流程、自动站点发现、一键安装和系统识别 |
+| Windows + Nginx / macOS + Nginx | 不属于当前一键安装与自动挂接支持范围 |
+| 真正 32 位 Windows | 有 x86 CLI 包，但不能执行 IIS 管理和一键接入 |
+
+Windows 一键脚本要求 **管理员、PowerShell 5.1+、64 位 Windows**。手动 CLI 的 IIS 桥接基线为 **64 位 Windows PowerShell 3+**，推荐 5.1；旧系统必须选择 legacy 包。Nginx 要求 **1.9.4+ 且带 http_sub_module**；IIS 要求 **7.5+ 和 URL Rewrite 2.x**。安装脚本不安装这些服务器或组件。
+
+操作系统、CPU 架构和服务器组件要求见[兼容性说明](docs/compatibility.md)。
+
+## 2. 准备 RUM 参数与网站条件
+
+### 2.1 从观测云 Web 应用取得参数
+
+| 参数 | 填什么 | 是否必填 |
+|---|---|---|
+| applicationId | 要接入的 Web 应用 ID | 必填 |
+| site | OpenWay 的 HTTP(S) 地址，例如 `https://openway.example.com` | OpenWay 模式必填 |
+| clientToken | 该应用的浏览器 Client Token | OpenWay 模式必填 |
+| datakitOrigin | 浏览器可访问的 DataKit 地址，例如 `https://datakit.example.com` | DataKit 模式必填 |
+| service / env / version | 业务服务名、运行环境和业务版本 | 建议填写，便于查询区分 |
+
+OpenWay 和 DataKit **二选一**。这里的 `site` 是上报端地址，不是业务网站地址，也不是 IIS 站点名称。上报地址只填写协议、主机和可选端口，不加 `/v1/write/rum`、查询参数或 Token；SDK 自己拼接请求路径。
+
+HTTPS 网站需要 HTTPS 上报地址。地址必须从访问者的浏览器可达，仅服务器可达不够。Client Token 会随初始化脚本提供给浏览器；不要使用管理 API Key、SSH 密钥或服务端凭据。
+
+本文的 `REPLACE_...`、`example.com` 都是占位值，必须替换才能验证真实数据。任意填写 appId/token 只能用于检查是否发出请求，不能当作接入真实应用成功。
+
+### 2.2 确认网站可被检查
+
+- 网站已运行。执行 CLI 的服务器能够通过网站地址访问目标实例，DNS、端口和 TLS 证书正常。负载均衡/CDN 后的网站还需保证验收请求确实到达本次修改的实例，不能命中其他节点或旧 HTML 缓存。
+- 至少准备一个无需登录、直接返回 **HTTP 200、text/html、完整 HTML** 的验收页面。CLI 不跟随 301/302、不携带登录 Cookie。首页跳转时改用实际页面路径。
+- 页面开头有标准 `<head>` 标签。`<HEAD>` 可以；`<head lang="...">`、`<head >` 或标签前的注释/属性中先出现 `<head>` 文本不符合当前注入检查。
+- 每种页面模板及实际 HTML handler 至少有一个验收路径。只验证首页不能证明其他模板都可注入。
+- 站点尚未通过其他方式接入同一 SDK。工具能识别常见已有接入，但不能识别所有藏在业务 bundle 中的动态初始化；需要同时检查业务现状。
+- CSP 允许初始化脚本、SDK、上报地址以及所需 Worker；工具不会自动放宽 CSP。
+- 源 HTML 不能已经是 gzip/br 压缩内容。Nginx 输出 gzip 可保留；代理源压缩、预压缩静态文件和应用中间件压缩需按检查结果处理。
+
+### 2.3 区分三个安装位置
+
+| 内容 | Linux 一键安装默认位置 | Windows 一键安装默认位置 |
+|---|---|---|
+| CLI | `/opt/rumable/<所选版本>/rumable` | 原生 `%ProgramFiles%\Rumable\<所选版本>\rumable.exe` |
+| 运行状态、备份、版本化脚本 | `/var/lib/rumable` | `%ProgramData%\Rumable` |
+| 你维护的 TOML | 页面下载后自行保存，例如 `/etc/rumable/website.toml` | 页面下载后自行保存，例如 `C:\ProgramData\RumableConfig\website.toml` |
+
+安装器只解压 CLI；完整文档和示例在平台 ZIP/TAR 包中。安装器把命令中的配置解码到临时文件，结束后删除临时文件，**不会替你维护一份长期 TOML**。请保存页面下载的配置，以及版本、站点 ID、目标网站和状态目录。
+
+状态目录不能放到网站根目录。它不等同于缓存，不能通过删除它来“重装”。同一个站点的后续命令始终使用同一个状态目录和接入标识。
+
+## 3. 一键接入（推荐）
+
+**打开配置页 → 填写应用参数 → 复制安装命令 → 在 Web 服务器执行 → 选择网站 → 验收数据。** 不需要自己编写 TOML，也不需要预先安装 CLI；命令会下载、校验并安装对应平台的 CLI，然后接入网站。执行前完成第 1–2 节的平台条件检查和应用参数准备。
+
+### 3.1 填写参数并复制一键命令
+
+打开 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，点击“读取发布版本”后使用页面生成的完整命令。使用 `static.guance.com`；不要把页面链接替换成 OSS 原始域名，后者可能强制下载 HTML。本地 `file://` 页面可能无法正常加载模块或清单，优先使用线上页。
+
+配置页右上角只提供“简体中文”和“English”两个选项。首次打开时按浏览器语言偏好选中对应语言，没有匹配项时默认选中 English。手动选择会在当前浏览器记住，下次打开优先使用；切换不会清空已填参数或改变生成的配置与命令。
+
+1. 选择 OpenWay 或 DataKit，填写 applicationId 和对应上报参数。
+2. 填写 service、env、业务 version。初次验证建议会话采样 100%，回放先关闭；需要回放时按第 8 节单独开启并验收。
+3. 在“选择 SDK 来源与加载方式”中选择网站同域或 CDN，再选择异步或同步；两项独立，支持四种组合。区别和手动配置见[完整示例](#43-四种接入方式的完整配置示例)。CDN 默认使用官方 v3 地址，自建 CDN 可修改地址并按需开启 SRI。
+4. 选择 **Linux · Nginx** 或 **IIS · Windows**。默认不必填写网站 URL、IIS 名称或 Nginx 路径，安装时在服务器发现。
+5. 确认页面已读取发布清单，并显示 Rumable 与 Web SDK 版本。清单读取失败时不会生成可复制的安装命令。
+6. 下载 TOML 留存，切换到安装命令并复制完整内容。生成与复制均不会改动服务器；执行命令才开始接入。
+
+以“Linux / Nginx + 网站同域 + 异步”为例，在页面中填写：
+
+| 页面选项 | 示例 | 需要你做什么 |
+| --- | --- | --- |
+| 上报方式 | OpenWay | 也可选择 DataKit，并填写对应地址 |
+| 应用 ID | `YOUR_APPLICATION_ID` | 替换为控制台 Web 应用的 ID |
+| 上报地址 | `https://openway.example.com` | 替换为实际 OpenWay 地址，不追加 API 路径 |
+| Client Token | `YOUR_CLIENT_TOKEN` | 替换为对应浏览器接入令牌 |
+| SDK 来源 | 网站同域（默认） | 首次验证可保持默认 |
+| 加载方式 | 异步（默认） | 首次验证可保持默认 |
+| 服务器类型 | Linux · Nginx | Windows 网站选择 IIS · Windows |
+| 手动指定站点与路径 | 不勾选 | 执行命令时自动发现并选择网站 |
+
+选择 CDN 或同步也使用上述一键接入流程，无需手写 TOML。选择 CDN 时填写脚本地址；选择同步前，先了解其阻塞 HTML 解析的影响，见[加载方式](#42-选择异步或同步)。
+
+页面只在本地浏览器序列化 RUM 和 SDK 加载参数，没有把配置提交到 OSS 的步骤。命令中的 Base64 是 TOML 的编码，**不是加密**，用来避免引号、换行等被终端改变。不要把包含接入令牌的完整命令贴到公开工单。
+
+### 3.2 Linux / Nginx 一键执行
+
+登录实际运行 Nginx 的 Linux 环境，准备 root/sudo 权限和 `curl`、CA 证书、`sha256sum`、`tar`、`base64` 等基础工具。自动脚本识别 x86、x64、ARM64，选择现代 Linux 包；它不会按内核版本改选 legacy 包，旧内核走第 5 节。
+
+页面生成的命令已经自带 Bash `pipefail`，脚本下载失败和安装失败都会返回非零。服务器需安装 Bash；不必额外设置当前终端。仍须检查成功日志、status 和 probe。
+
+自动命令的结构如下，**请执行页面生成的实际命令，不要直接执行占位示例**：
+
+```sh
+bash -o pipefail -c 'curl --proto "=https" --proto-redir "=https" -fsSL "INSTALLER_URL_FROM_PAGE" | sudo sh -s -- --base-url "ARTIFACT_BASE_FROM_PAGE" --config "CONFIG_FROM_PAGE" --discover'
+```
+
+脚本下载同版本压缩包，校验内置 SHA-256，安装 CLI，再执行自动发现和接入。单个站点/地址直接选择；多个候选输入编号；通配名称无法确定访问地址时需输入可访问 URL。Nginx 来自 PATH 或标准位置，使用默认配置；不会猜测当前服务自定义的 `-c/-p`。
+
+一键安装器已带 `--yes`：执行生成的命令即同意接入变更，选定目标后会直接应用。它不能代替站点或地址选择。无交互终端且候选不唯一时应停止，不会默认修改第一个站点。容器中的 Nginx 应在对应容器/配置命名空间内接入，并持久化配置及状态卷；不要在宿主机安装器里猜测另一个容器的目录。
+
+### 3.3 Windows / IIS 一键执行
+
+以管理员身份打开 Windows PowerShell 5.1，优先使用系统原生 64 位版本。粘贴页面生成的 **PowerShell 命令**，不要粘贴 Linux 的 curl/sh 命令，也不要在 cmd.exe 中直接运行。
+
+```powershell
+# 查看当前环境；这不是安装命令。
+$PSVersionTable.PSVersion
+[Environment]::Is64BitOperatingSystem
+[Environment]::Is64BitProcess
+```
+
+一键命令的结构如下，**请执行页面生成的实际命令，不要直接执行占位示例**：
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'INSTALLER_URL_FROM_PAGE').Content)) -BaseUrl 'ARTIFACT_BASE_FROM_PAGE' -Config 'CONFIG_FROM_PAGE' -Discover
+```
+
+安装器自动识别 Windows 实际版本与原生 CPU 架构，选择 x64/ARM64 和 modern/legacy 包。64 位系统上的 32 位 PowerShell 仍安装原生包，使用 ProgramW6432 定位原生 Program Files；真正的 32 位 Windows 在下载前拒绝 IIS 接入。
+
+执行一键命令即同意接入变更。站点发现只列出运行中的 HTTP(S) 网站及应用。选择要接入的网站；多个绑定时选择对应 URL；无明确主机名的通配绑定可能需要输入 URL。如果静态或动态压缩已开启，按提示确认是否允许关闭所选应用的 IIS 压缩，或在页面高级选项中预先同意。
+
+工具会隔离私有状态文件，并查询所选 IIS 应用的匿名读取身份和应用池身份：只开放公共脚本读取和父目录遍历。已有状态目录不会整体重置 ACL。安装器仍不调整匿名认证、StaticFile handler 或业务入站重写例外；401/403 等错误按第 7 节诊断。
+
+不要给整个 `%ProgramData%\Rumable` 递归授予 Everyone/IIS 读取或写入权限。自动化测试可在页面命令末尾增加 `-NonInteractive`；候选不唯一或还需补充信息时立即报错，不等待选择。它不能代替目标选择或压缩许可。
+
+### 3.4 哪些情况启用高级手动模式
+
+展开高级选项，勾选“手动指定站点与路径”，再填写：
+
+| 字段 | 示例及含义 |
+|---|---|
+| 网站地址 | `https://www.example.com/`；IIS 子应用用 `https://www.example.com/shop/` |
+| 接入标识 | `website`；后续更新、停用和回滚保持不变 |
+| 注入路径 | 每行一个路径前缀，例如 `/shop/` |
+| 排除路径 | 每行一个路径前缀，例如 `/shop/downloads/`，排除优先 |
+| 验收路径 | 真实返回 HTML 200 的完整 URL 路径，例如 `/shop/index.html` |
+| Nginx 程序/配置 | `/usr/sbin/nginx` 与实际配置文件；额外 `-p/-e` 需直接编辑完整 TOML |
+| IIS 网站/应用 | IIS 管理器中的网站名与 `/` 或 `/shop`，不是物理目录 |
+
+自动模式下载的是 `schemaVersion + server + [rum]` 的**发现配置**，只能给 `setup --discover` 使用；高级手动模式和 `init` 产生 `[[sites]]` 的**完整站点配置**，可用于 render/check/enable/setup。两种配置不能混用。
+
+如果完整 Nginx 配置仍有多个匹配候选，页面命令无法携带 `--target` 选择，改用第 6 节的分步 attach。自动挂接不支持的复杂 handler 也需人工审查。
+
+### 3.5 成功后保存信息并检查状态
+
+终端应打印 `Site ID: auto-...`（自动模式）和 `RUM setup complete`。保存以下信息，后续更新与恢复都要使用：
+
+- 页面下载的 TOML，以及页面显示的所选 Rumable 版本。
+- 终端输出的站点 ID 和 URL；高级手动模式使用配置中的 `id` 和 `publicURL`。
+- CLI 路径和状态目录：按[默认安装位置](#23-区分三个安装位置)填写，CLI 路径中的版本取本次所选版本。完整备份状态目录；Nginx 输出 `Backup:` 时另行记录该路径。
+
+以下命令中的 CLI 路径和站点 ID 必须替换为实际值。一键安装不会把 CLI 自动加入 PATH。
+
+Linux：
+
+```sh
+rumable="/请替换为本次实际安装目录/rumable"
+sudo "$rumable" status --state-dir /var/lib/rumable --site auto-替换为实际ID
+sudo "$rumable" probe --state-dir /var/lib/rumable --site auto-替换为实际ID
+```
+
+Windows：
+
+```powershell
+$rumable = Read-Host '输入本次实际安装的 rumable.exe 完整路径'
+$state = Join-Path $env:ProgramData 'Rumable'
+$siteId = 'auto-替换为实际ID'
+& $rumable status --state-dir $state --site $siteId
+& $rumable probe --state-dir $state --site $siteId
+```
+
+RUM 接入成功应看到 `rumEnabled=true`、`drift=""`、`pendingTransaction=false`，probe 成功。接下来直接按[第 9 节](#9-检查是否接入成功)检查浏览器与真实数据；验收通过即完成首次接入，不需要继续执行第 5–7 节的手动安装。
+
+## 4. SDK 注入、加载与更新
+
+### 4.1 SDK 如何注入
 
 Rumable 通过 Nginx 的 HTML 替换或 IIS 的出站重写，在网站响应的标准 `<head>` 后加入脚本。业务源代码无需修改。CLI 执行完即退出；SDK 在访问者浏览器运行，直接向配置的 OpenWay / DataKit 上报。
 
@@ -37,7 +224,7 @@ SDK 来源和加载方式是两个独立选项：
 
 同域资源位于网站的 `__rumable__/<站点ID>/` 下，以 `sdk.<摘要>.js`、`init.<摘要>.js` 命名。SDK 来源不改变数据上报地址；同域托管也不等于同域上报。
 
-### 1.2 选择异步或同步
+### 4.2 选择异步或同步
 
 **异步**适合优先避免脚本下载阻塞 HTML 解析的站点。初始化脚本带 `async`，随后动态异步加载 SDK；初始化完成前的错误、请求和交互可能无法采集。
 
@@ -45,9 +232,9 @@ SDK 来源和加载方式是两个独立选项：
 
 两种方式都不注入内联 JavaScript，不自动放宽 CSP。SDK 加载/初始化失败不会主动抛出初始化脚本异常；同步请求仍需等浏览器完成或判定失败后才继续。CDN 失败不会自动切换到本地副本。
 
-### 1.3 四种接入方式的完整配置示例
+### 4.3 四种接入方式的完整配置示例
 
-希望直接通过页面生成安装命令，请先看[一键接入](#4-一键接入推荐)。本节的完整 TOML 示例用于手动配置、离线接入或逐项审查参数。
+希望直接通过页面生成安装命令，请先看[一键接入](#3-一键接入推荐)。本节的完整 TOML 示例用于手动配置、离线接入或逐项审查参数。
 
 `source` 表示 **SDK 从哪里下载**，`loading` 表示 **SDK 如何加载**。两项独立选择：
 
@@ -306,7 +493,8 @@ Windows 将 `server` 改为 `"iis"`，并按实际授权在 `[rum]` 之前设置
 Nginx 通过实际安装的 CLI 执行，终端选择站点后会打印接入标识：
 
 ```sh
-sudo rumable setup --discover --config /etc/rumable/discovery.toml --state-dir /var/lib/rumable
+rumable="/请替换为实际安装目录/rumable"
+sudo "$rumable" setup --discover --config /etc/rumable/discovery.toml --state-dir /var/lib/rumable
 ```
 
 Windows 在管理员终端使用实际 exe、配置文件和状态目录执行 `setup --discover`。后续继续使用原站点 ID、目标和状态目录；不要用另一个任意 ID 接管同一部署。
@@ -315,7 +503,7 @@ Windows 在管理员终端使用实际 exe、配置文件和状态目录执行 `
 
 CDN 地址必须是完整 HTTPS 脚本地址，不含账号密码、查询参数或片段。启用及探测时，远程内容必须与安装包的 SDK 摘要一致，自建 CDN 也一样。CSP 需允许实际 SDK 地址。`integrity=true` 会启用 SRI，跨域时需 CDN 允许 CORS；官方 v3 地址默认关闭，开启前核对实际响应头与安装检查结果。
 
-### 1.4 SDK 如何更新和回滚
+### 4.4 SDK 如何更新和回滚
 
 | 来源 | 更新机制 | 回滚能力 |
 |---|---|---|
@@ -328,187 +516,6 @@ CDN 地址必须是完整 HTTPS 脚本地址，不含账号密码、查询参数
 可变 CDN 更新后，旧安装包的 `check/enable/probe` 可能因摘要不一致失败，此时需要升级到匹配的新包或使用匹配的固定 CDN 地址。正在打开的页面不会热替换 SDK。升级后处理旧 HTML 缓存，并用新页面和新会话验证实际采集与回放。
 
 页面里的“应用版本”是业务标签，`remoteConfiguration` 调整采集参数，两者都不更新 SDK 文件。外置 Worker 需自行保持与实际 SDK 版本匹配。
-
-## 2. 先选择安装方式和环境
-
-| 你的情况 | 选择 |
-|---|---|
-| 服务器能访问 OSS，使用常见网站配置 | 第 4 节：页面生成一键安装命令 |
-| 不希望在服务器在线下载安装器，或需要逐步审查配置变化 | 第 5 节安装 CLI，再按第 6 / 7 节操作 |
-| 服务器不能访问外网 | 在联网机器下载完整压缩包及 SHA256SUMS，传到服务器校验后手动安装 |
-| Nginx 使用自定义启动参数、首页跳转或需要指定验收路径 | 页面高级手动模式，或完整 TOML 手动配置 |
-| 只需要服务端 Trace，不需要浏览器 RUM | 第 12 节；页面和 setup 当前只处理 RUM |
-
-“手动安装 CLI”和“手动修改 Nginx 配置”是两回事。手动下载包之后，仍可让 `attach` 自动修改 Nginx 配置；只有自动挂接不支持的布局，才需要按生成的 `ATTACH.md` 人工修改。
-
-| 环境 | 当前接入范围 |
-|---|---|
-| Linux + Nginx | 支持手动流程、自动站点发现和一键安装 |
-| Windows + IIS | 支持手动流程、自动站点发现、一键安装和系统识别 |
-| Windows + Nginx / macOS + Nginx | 不属于当前一键安装与自动挂接支持范围 |
-| 真正 32 位 Windows | 有 x86 CLI 包，但不能执行 IIS 管理和一键接入 |
-
-Windows 一键脚本要求 **管理员、PowerShell 5.1+、64 位 Windows**。手动 CLI 的 IIS 桥接基线为 **64 位 Windows PowerShell 3+**，推荐 5.1；旧系统必须选择 legacy 包。Nginx 要求 **1.9.4+ 且带 http_sub_module**；IIS 要求 **7.5+ 和 URL Rewrite 2.x**。安装脚本不安装这些服务器或组件。
-
-操作系统、CPU 架构和服务器组件要求见[兼容性说明](docs/compatibility.md)。
-
-## 3. 准备 RUM 参数与网站条件
-
-### 3.1 从观测云 Web 应用取得参数
-
-| 参数 | 填什么 | 是否必填 |
-|---|---|---|
-| applicationId | 要接入的 Web 应用 ID | 必填 |
-| site | OpenWay 的 HTTP(S) 地址，例如 `https://openway.example.com` | OpenWay 模式必填 |
-| clientToken | 该应用的浏览器 Client Token | OpenWay 模式必填 |
-| datakitOrigin | 浏览器可访问的 DataKit 地址，例如 `https://datakit.example.com` | DataKit 模式必填 |
-| service / env / version | 业务服务名、运行环境和业务版本 | 建议填写，便于查询区分 |
-
-OpenWay 和 DataKit **二选一**。这里的 `site` 是上报端地址，不是业务网站地址，也不是 IIS 站点名称。上报地址只填写协议、主机和可选端口，不加 `/v1/write/rum`、查询参数或 Token；SDK 自己拼接请求路径。
-
-HTTPS 网站需要 HTTPS 上报地址。地址必须从访问者的浏览器可达，仅服务器可达不够。Client Token 会随初始化脚本提供给浏览器；不要使用管理 API Key、SSH 密钥或服务端凭据。
-
-本文的 `REPLACE_...`、`example.com` 都是占位值，必须替换才能验证真实数据。任意填写 appId/token 只能用于检查是否发出请求，不能当作接入真实应用成功。
-
-### 3.2 确认网站可被检查
-
-- 网站已运行。执行 CLI 的服务器能够通过网站地址访问目标实例，DNS、端口和 TLS 证书正常。负载均衡/CDN 后的网站还需保证验收请求确实到达本次修改的实例，不能命中其他节点或旧 HTML 缓存。
-- 至少准备一个无需登录、直接返回 **HTTP 200、text/html、完整 HTML** 的验收页面。CLI 不跟随 301/302、不携带登录 Cookie。首页跳转时改用实际页面路径。
-- 页面开头有标准 `<head>` 标签。`<HEAD>` 可以；`<head lang="...">`、`<head >` 或标签前的注释/属性中先出现 `<head>` 文本不符合当前注入检查。
-- 每种页面模板及实际 HTML handler 至少有一个验收路径。只验证首页不能证明其他模板都可注入。
-- 站点尚未通过其他方式接入同一 SDK。工具能识别常见已有接入，但不能识别所有藏在业务 bundle 中的动态初始化；需要同时检查业务现状。
-- CSP 允许初始化脚本、SDK、上报地址以及所需 Worker；工具不会自动放宽 CSP。
-- 源 HTML 不能已经是 gzip/br 压缩内容。Nginx 输出 gzip 可保留；代理源压缩、预压缩静态文件和应用中间件压缩需按检查结果处理。
-
-### 3.3 区分三个安装位置
-
-| 内容 | Linux 一键安装默认位置 | Windows 一键安装默认位置 |
-|---|---|---|
-| CLI | `/opt/rumable/<所选版本>/rumable` | 原生 `%ProgramFiles%\Rumable\<所选版本>\rumable.exe` |
-| 运行状态、备份、版本化脚本 | `/var/lib/rumable` | `%ProgramData%\Rumable` |
-| 你维护的 TOML | 页面下载后自行保存，例如 `/etc/rumable/website.toml` | 页面下载后自行保存，例如 `C:\ProgramData\RumableConfig\website.toml` |
-
-安装器只解压 CLI；完整文档和示例在平台 ZIP/TAR 包中。安装器把命令中的配置解码到临时文件，结束后删除临时文件，**不会替你维护一份长期 TOML**。请保存页面下载的配置，以及版本、站点 ID、目标网站和状态目录。
-
-状态目录不能放到网站根目录。它不等同于缓存，不能通过删除它来“重装”。同一个站点的后续命令始终使用同一个状态目录和接入标识。
-
-## 4. 一键接入（推荐）
-
-**打开配置页 → 填写应用参数 → 复制安装命令 → 在 Web 服务器执行 → 选择网站 → 验收数据。** 不需要自己编写 TOML，也不需要预先安装 CLI；命令会下载、校验并安装对应平台的 CLI，然后接入网站。执行前确认第 2–3 节的平台条件和应用参数。
-
-### 4.1 填写参数并复制一键命令
-
-打开 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)，点击“读取发布版本”后使用页面生成的完整命令。使用 `static.guance.com`；不要把页面链接替换成 OSS 原始域名，后者可能强制下载 HTML。本地 `file://` 页面可能无法正常加载模块或清单，优先使用线上页。
-
-配置页右上角只提供“简体中文”和“English”两个选项。首次打开时按浏览器语言偏好选中对应语言，没有匹配项时默认选中 English。手动选择会在当前浏览器记住，下次打开优先使用；切换不会清空已填参数或改变生成的配置与命令。
-
-1. 选择 OpenWay 或 DataKit，填写 applicationId 和对应上报参数。
-2. 填写 service、env、业务 version。初次验证建议会话采样 100%，回放先关闭；需要回放时按第 8 节单独开启并验收。
-3. 配套新页面在“选择 SDK 来源与加载方式”中提供网站同域 / CDN、异步 / 同步。页面或所选安装包不支持时，按提示选择可用方式；手动配置见[完整示例](#13-四种接入方式的完整配置示例)。CDN 默认使用官方 v3 地址，自建 CDN 可修改地址并按需开启 SRI。
-4. 选择 **Linux · Nginx** 或 **IIS · Windows**。默认不必填写网站 URL、IIS 名称或 Nginx 路径，安装时在服务器发现。
-5. 确认页面已读取发布清单，并显示 Rumable 与 Web SDK 版本。清单读取失败时不会生成可复制的安装命令。
-6. 下载 TOML 留存，切换到安装命令并复制完整内容。生成与复制均不会改动服务器；执行命令才开始接入。
-
-以“Linux / Nginx + 网站同域 + 异步”为例，在页面中填写：
-
-| 页面选项 | 示例 | 需要你做什么 |
-| --- | --- | --- |
-| 上报方式 | OpenWay | 也可选择 DataKit，并填写对应地址 |
-| 应用 ID | `YOUR_APPLICATION_ID` | 替换为控制台 Web 应用的 ID |
-| 上报地址 | `https://openway.example.com` | 替换为实际 OpenWay 地址，不追加 API 路径 |
-| Client Token | `YOUR_CLIENT_TOKEN` | 替换为对应浏览器接入令牌 |
-| SDK 来源 | 网站同域（默认） | 首次验证可保持默认 |
-| 加载方式 | 异步（默认） | 首次验证可保持默认 |
-| 服务器类型 | Linux · Nginx | Windows 网站选择 IIS · Windows |
-| 手动指定站点与路径 | 不勾选 | 执行命令时自动发现并选择网站 |
-
-页面提供 SDK 选项且所选安装包支持时，可以在同一流程中选择 CDN 或同步，无需改成手写 TOML。旧页面没有这些选项时，先打开 latest 入口并重新读取发布清单；按页面提示选择可用方式。选择 CDN 时再填写脚本地址。
-
-页面只在本地浏览器序列化 RUM 和 SDK 加载参数，没有把配置提交到 OSS 的步骤。命令中的 Base64 是 TOML 的编码，**不是加密**，用来避免引号、换行等被终端改变。不要把包含接入令牌的完整命令贴到公开工单。
-
-### 4.2 Linux / Nginx 一键执行
-
-登录实际运行 Nginx 的 Linux 环境，准备 root/sudo 权限和 `curl`、CA 证书、`sha256sum`、`tar`、`base64` 等基础工具。自动脚本识别 x86、x64、ARM64，选择现代 Linux 包；它不会按内核版本改选 legacy 包，旧内核走第 5 节。
-
-页面生成的命令已经自带 Bash `pipefail`，脚本下载失败和安装失败都会返回非零。服务器需安装 Bash；不必额外设置当前终端。仍须检查成功日志、status 和 probe。
-
-自动命令的结构如下，**请执行页面生成的实际命令，不要直接执行占位示例**：
-
-```sh
-bash -o pipefail -c 'curl --proto "=https" --proto-redir "=https" -fsSL "INSTALLER_URL_FROM_PAGE" | sudo sh -s -- --base-url "ARTIFACT_BASE_FROM_PAGE" --config "CONFIG_FROM_PAGE" --discover'
-```
-
-脚本下载同版本压缩包，校验内置 SHA-256，安装 CLI，再执行自动发现和接入。单个站点/地址直接选择；多个候选输入编号；通配名称无法确定访问地址时需输入可访问 URL。Nginx 来自 PATH 或标准位置，使用默认配置；不会猜测当前服务自定义的 `-c/-p`。
-
-`--yes` 仅确认接入变更，不能代替站点或地址选择。无交互终端且候选不唯一时应停止，不会默认修改第一个站点。容器中的 Nginx 应在对应容器/配置命名空间内接入，并持久化配置及状态卷；不要在宿主机安装器里猜测另一个容器的目录。
-
-### 4.3 Windows / IIS 一键执行
-
-以管理员身份打开 Windows PowerShell 5.1，优先使用系统原生 64 位版本。粘贴页面生成的 **PowerShell 命令**，不要粘贴 Linux 的 curl/sh 命令，也不要在 cmd.exe 中直接运行。
-
-```powershell
-# 查看当前环境；这不是安装命令。
-$PSVersionTable.PSVersion
-[Environment]::Is64BitOperatingSystem
-[Environment]::Is64BitProcess
-```
-
-一键命令的结构如下，**请执行页面生成的实际命令，不要直接执行占位示例**：
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'INSTALLER_URL_FROM_PAGE').Content)) -BaseUrl 'ARTIFACT_BASE_FROM_PAGE' -Config 'CONFIG_FROM_PAGE' -Discover
-```
-
-安装器自动识别 Windows 实际版本与原生 CPU 架构，选择 x64/ARM64 和 modern/legacy 包。64 位系统上的 32 位 PowerShell 仍安装原生包，使用 ProgramW6432 定位原生 Program Files；真正的 32 位 Windows 在下载前拒绝 IIS 接入。
-
-站点发现只列出运行中的 HTTP(S) 网站及应用。选择要接入的网站；多个绑定时选择对应 URL；无明确主机名的通配绑定可能需要输入 URL。如果静态或动态压缩已开启，按提示确认是否允许关闭所选应用的 IIS 压缩，或在页面高级选项中预先同意。
-
-工具会隔离私有状态文件，并查询所选 IIS 应用的匿名读取身份和应用池身份：只开放公共脚本读取和父目录遍历。已有状态目录不会整体重置 ACL。安装器仍不调整匿名认证、StaticFile handler 或业务入站重写例外；401/403 等错误按第 7 节诊断。
-
-不要给整个 `%ProgramData%\Rumable` 递归授予 Everyone/IIS 读取或写入权限。自动化测试可在页面命令末尾增加 `-NonInteractive`；候选不唯一或还需补充信息时立即报错，不等待选择。它不能代替目标选择或压缩许可。
-
-### 4.4 哪些情况启用高级手动模式
-
-展开高级选项，勾选“手动指定站点与路径”，再填写：
-
-| 字段 | 示例及含义 |
-|---|---|
-| 网站地址 | `https://www.example.com/`；IIS 子应用用 `https://www.example.com/shop/` |
-| 接入标识 | `website`；后续更新、停用和回滚保持不变 |
-| 注入路径 | 每行一个路径前缀，例如 `/shop/` |
-| 排除路径 | 每行一个路径前缀，例如 `/shop/downloads/`，排除优先 |
-| 验收路径 | 真实返回 HTML 200 的完整 URL 路径，例如 `/shop/index.html` |
-| Nginx 程序/配置 | `/usr/sbin/nginx` 与实际配置文件；额外 `-p/-e` 需直接编辑完整 TOML |
-| IIS 网站/应用 | IIS 管理器中的网站名与 `/` 或 `/shop`，不是物理目录 |
-
-自动模式下载的是 `schemaVersion + server + [rum]` 的**发现配置**，只能给 `setup --discover` 使用；高级手动模式和 `init` 产生 `[[sites]]` 的**完整站点配置**，可用于 render/check/enable/setup。两种配置不能混用。
-
-如果完整 Nginx 配置仍有多个匹配候选，页面命令无法携带 `--target` 选择，改用第 6 节的分步 attach。自动挂接不支持的复杂 handler 也需人工审查。
-
-### 4.5 成功后保存信息并检查状态
-
-终端应打印 `Site ID: auto-...`（自动模式）和 `RUM setup complete`。以实际输出替换下方 ID；不要把占位 ID 当作真实值。
-
-Linux：
-
-```sh
-rumable="/请替换为安装器输出的CLI目录/rumable"
-sudo "$rumable" status --state-dir /var/lib/rumable --site auto-替换为实际ID
-sudo "$rumable" probe --state-dir /var/lib/rumable --site auto-替换为实际ID
-```
-
-Windows：
-
-```powershell
-$rumable = Read-Host '输入安装器输出的 rumable.exe 完整路径'
-$state = Join-Path $env:ProgramData 'Rumable'
-$siteId = 'auto-替换为实际ID'
-& $rumable status --state-dir $state --site $siteId
-& $rumable probe --state-dir $state --site $siteId
-```
-
-RUM 接入成功应看到 `rumEnabled=true`、`drift=""`、`pendingTransaction=false`，probe 成功。脚本成功只覆盖 HTTP 注入和资源可达，继续按第 9 节检查浏览器与真实数据。
 
 ## 5. 手动下载、校验并安装 CLI
 
@@ -529,7 +536,7 @@ RUM 接入成功应看到 `rumEnabled=true`、`drift=""`、`pendingTransaction=f
 | Windows x86 CLI | windows | 386 | modern |
 | 旧 Windows x64 / x86 CLI | windows | amd64 / 386 | legacy |
 
-`386` 是 x86 32 位，`amd64` 是 Intel/AMD x64，`arm64` 是 ARM64；x86 Windows CLI 不能管理 IIS。现代或 legacy 的选择以[兼容矩阵](docs/compatibility.md)为准；只选清单中实际存在且适合目标环境的条目。
+`386` 是 x86 32 位，`amd64` 是 Intel/AMD x64，`arm64` 是 ARM64；真正的 32 位 Windows 不能管理 IIS；x86 CLI 在 64 位 Windows 上可以调用系统原生的 64 位 PowerShell 管理 IIS，安装时优先选用系统原生架构包。现代或 legacy 的选择以[兼容矩阵](docs/compatibility.md)为准；只选清单中实际存在且适合目标环境的条目。
 
 把 `artifactBase` 相对发布清单地址解析为下载目录，再在该目录下取所选 `file` 和 `SHA256SUMS`。下方脚本按照当前发布目录约定自动完成解析并核对清单，用户无需输入发布版本号。
 
@@ -794,7 +801,7 @@ CLI 管理所选站点/应用的受管规则、资源映射和压缩属性，不
 
 ### 8.2 采样与会话回放
 
-在已有 `[sites.rum]` 表内修改，不要再声明重复表：
+完整站点配置在已有 `[sites.rum]` 表内修改；自动发现配置在 `[rum]` 表内修改。不要重复声明同名表：
 
 ```toml
 sessionSampleRate = 100
@@ -807,9 +814,9 @@ defaultPrivacyLevel = "mask"
 
 回放默认关闭。上述表示 RUM 会话采样 100%，普通回放采样 20%；回放仍依赖会话采样。`mask` 是默认隐私等级。回放、普通请求压缩和远程配置可能需要 Worker；默认 Blob Worker 要求有效 CSP 允许 `blob:`，也可配置匹配 SDK 版本的同源 workerUrl。工具不会自动托管外置 Worker 或修改 CSP。
 
-修改后重新 enable / 执行同目标安装命令；用新页面和新会话验收，避免已有会话的采样结果影响判断。旧页面不会被远程关闭录制。
+修改后按[第 10.1 节](#101-修改-rum-参数)选择对应的应用方式；用新页面和新会话验收，避免已有会话的采样结果影响判断。旧页面不会被远程关闭录制。
 
-其他静态参数见[配置参考](docs/configuration.md)。SDK 来源与加载方式见[第 1 节](#1-sdk-注入加载与更新)。
+其他静态参数见[配置参考](docs/configuration.md)。SDK 来源与加载方式见[第 4 节](#4-sdk-注入加载与更新)。
 
 ## 9. 检查是否接入成功
 
@@ -834,55 +841,115 @@ CLI 检查 HTTP 注入和资源可达；浏览器上报和数据入库按上述�
 
 ## 10. 修改配置、升级、停用、回滚和卸载
 
-### 10.1 修改 RUM 参数
+先备份原 TOML、完整状态目录和服务器配置。重新打开终端后，先设置下面三个变量；本节命令不会自动查找之前安装的 CLI。
 
-**自动模式：** 回到 latest 配置页，读取并确认将使用的安装包，再填写新参数，再执行生成的命令，重新选择同一站点。已有 ID、URL 和路径范围从状态复用；保存新下载的发现配置。不要把自动 ID 改成另一个手动 ID 去接管已有部署。
-
-**手动模式：** 编辑原完整 TOML，再运行 enable。不重复 init/render，不删状态目录。
-
-Linux（root 会话，沿用前述变量）：
+Linux（具备 sudo 权限；用实际值替换路径和 ID）：
 
 ```sh
-"$rumable" enable --config "$config" --state-dir "$state" --site "$site_id"
-"$rumable" probe --state-dir "$state" --site "$site_id"
+rumable="/请替换为原部署实际安装目录/rumable"
+state="/var/lib/rumable"
+site_id="替换为原站点ID"
 ```
 
-Windows（管理员，沿用前述变量）：
+Windows（管理员终端）：
 
 ```powershell
-& $rumable enable --config $config --state-dir $state --site $siteId
-& $rumable probe --state-dir $state --site $siteId
+$rumable = Read-Host '输入原部署使用的 rumable.exe 完整路径'
+$state = Join-Path $env:ProgramData 'Rumable'
+$siteId = Read-Host '输入原站点 ID'
 ```
 
-发现配置使用 setup --discover，不能直接给 enable。SDK 来源与加载方式可在页面调整后重新执行同目标命令；新旧发布包的兼容要求见第 1 节。要改变自动站点的 probePaths，请依据记录的原 ID/URL/目标整理完整 TOML，校对身份后再执行。Nginx binary/args、IIS site/application 和 publicURL 属于部署身份，不支持用普通更新迁移目标。
+如果原部署使用自定义状态目录，修改 `state` / `$state` 为原值。下面每一步成功后再继续；发生错误时先按终端提示处理。
+
+### 10.1 修改 RUM 参数
+
+先查看保存的 TOML，按其格式选择更新方式，不要混用命令：
+
+| 原配置 | 识别方式 | 更新入口 |
+| --- | --- | --- |
+| 一键接入默认的自动发现配置 | 顶层有 `server`，参数在 `[rum]`、`[sdk]` | 页面重新生成一键命令，或使用 `setup --discover` |
+| 高级手动模式或手动创建的完整站点配置 | 有 `[[sites]]`，参数在 `[sites.rum]`、`[sites.sdk]` | 编辑原文件后使用 `enable` |
+
+**自动发现配置：** 以留存的 TOML 为准，回到 [latest 配置页](https://static.guance.com/rumable/latest/setup/index.html)填写完整参数，仅调整需要修改的选项，避免遗漏原来的采样、回放或 SDK 设置。读取并核对所选安装包后，保存新 TOML，在原服务器执行生成的命令，选择原网站和绑定。重新运行一键命令也会安装所选包，应同时核对其 SDK 版本。
+
+如果原部署使用自定义状态目录，或只想用当前 CLI 应用修改后的发现配置，可以直接执行以下命令；配置路径替换为保存的实际文件：
+
+Linux：
+
+```sh
+sudo "$rumable" setup --discover --config /etc/rumable/discovery.toml --state-dir "$state"
+```
+
+Windows：
+
+```powershell
+& $rumable setup --discover --config 'C:\ProgramData\RumableConfig\discovery.toml' --state-dir $state
+if ($LASTEXITCODE -ne 0) { throw '配置应用失败，请先检查原因' }
+```
+
+同目标发现会复用原 ID、URL 和路径范围。核对输出的站点 ID 与原记录一致；不要用新的手动 ID 接管已有部署。发现配置不能直接交给 `enable`。
+
+**完整站点配置：** 编辑原 TOML，保留原站点 ID 和部署目标。不重复 `init/render`，不删除状态目录。以下配置路径替换为原文件：
+
+Linux：
+
+```sh
+config="/etc/rumable/website.toml"
+sudo "$rumable" enable --config "$config" --state-dir "$state" --site "$site_id"
+```
+
+Windows：
+
+```powershell
+$config = 'C:\ProgramData\RumableConfig\website.toml'
+& $rumable enable --config $config --state-dir $state --site $siteId
+if ($LASTEXITCODE -ne 0) { throw '配置应用失败，请先检查原因' }
+```
+
+两种方式完成后都要用同一 CLI、状态目录和站点 ID 执行 `status`、`probe`，再按[第 9 节](#9-检查是否接入成功)确认新页面和数据。SDK 来源、加载方式和 RUM 参数都按这套流程更新。
+
+要改变自动站点的 `probePaths`，请依据原 ID、URL 和服务器目标整理完整 TOML，校对身份后再执行 `enable`。Nginx binary/args、IIS site/application 和 publicURL 属于部署身份，不支持用普通更新迁移目标。
 
 ### 10.2 升级 CLI / SDK
 
-同域 SDK 不自动追新。完整步骤为：备份 → 下载并校验包含目标 SDK 的新包 → 对原站点应用 → 检查版本与实际采集。CDN 地址更新后的缓存、摘要和回滚限制见[第 1 节](#1-sdk-注入加载与更新)。
+同域 SDK 不自动追新。完整步骤为：备份 → 下载并校验包含目标 SDK 的新包 → 对原站点应用 → 检查版本与实际采集。CDN 地址更新后的缓存、摘要和回滚限制见[第 4 节](#4-sdk-注入加载与更新)。
 
-备份原 TOML、完整状态目录及服务器配置；下载新版本到新目录并校验。将 `$rumable` 指向新版本，继续使用原 state/site/config 执行 enable，或用新版本配置页执行同目标 setup。只替换 CLI 不会立刻改变已部署 SDK；实际 enable/setup 后才更新站点。
+备份原 TOML、完整状态目录及服务器配置；下载新版本到新目录并校验。将 `rumable` / `$rumable` 指向新版本，保留原站点 ID、目标和状态目录，按[第 10.1 节](#101-修改-rum-参数)选择完整配置的 `enable` 或发现配置的 `setup --discover`；也可从配置页生成同目标的一键命令。只替换 CLI 不会立刻改变已部署 SDK；实际 enable/setup 后才更新站点。
 
-升级后用 `rumable version` 查看当前程序内的 SDK 版本和摘要，用原 state/site 执行 `status` 查看已部署快照，再执行 `probe` 并检查浏览器请求与观测云入库。清理 CDN、代理及 Service Worker 的旧 HTML 缓存，以新页面、新会话验收。仅执行 `enable --component otel` 不更新 Web SDK；需要时使用 `enable --component rum`。
+升级后用 `"$rumable" version`（Windows 为 `& $rumable version`）查看当前程序内的 SDK 版本和摘要，用原 state/site 执行 `status` 查看已部署快照，再执行 `probe` 并检查浏览器请求与观测云入库。清理 CDN、代理及 Service Worker 的旧 HTML 缓存，以新页面、新会话验收。仅执行 `enable --component otel` 不更新 Web SDK；需要时使用 `enable --component rum`。
 
 保留旧 CLI 和版本化资源。普通 rollback 恢复上一次部署的脚本与配置，不替你卸载新 CLI，也不自动恢复磁盘上的 TOML。回滚后若再次 enable，仍会按 TOML 重新应用，因此需要同步检查期望配置。
 
 ### 10.3 停用与回滚
 
+只想停止采集时，执行停用和检查即可。
+
 Linux：
 
 ```sh
-"$rumable" disable --state-dir "$state" --site "$site_id"
-"$rumable" probe --state-dir "$state" --site "$site_id"
-# 确实需要恢复前一成功状态时，再执行：
-"$rumable" rollback --state-dir "$state" --site "$site_id"
+sudo "$rumable" disable --state-dir "$state" --site "$site_id"
+sudo "$rumable" probe --state-dir "$state" --site "$site_id"
 ```
 
 Windows：
 
 ```powershell
 & $rumable disable --state-dir $state --site $siteId
+if ($LASTEXITCODE -ne 0) { throw '停用失败，请先检查原因' }
 & $rumable probe --state-dir $state --site $siteId
-# 确实需要恢复前一成功状态时，再执行：
+```
+
+**回滚是另一项操作，可能重新启用采集。** 只有需要恢复前一个成功部署时才执行，不要在正常停用后接着运行。
+
+Linux：
+
+```sh
+sudo "$rumable" rollback --state-dir "$state" --site "$site_id"
+```
+
+Windows：
+
+```powershell
 & $rumable rollback --state-dir $state --site $siteId
 ```
 
@@ -897,17 +964,31 @@ Windows：
 
 ### 10.4 完整卸载
 
-先 disable，确认新页面不再注入，并处理仍引用旧脚本的 HTML 缓存。再预览并确认：
+先按第 10.3 节停用，确认新页面不再注入，并处理仍引用旧脚本的 HTML 缓存。先预览卸载范围：
+
+Linux：
 
 ```sh
-"$rumable" uninstall --state-dir "$state" --site "$site_id" --dry-run
-"$rumable" uninstall --state-dir "$state" --site "$site_id"
+sudo "$rumable" uninstall --state-dir "$state" --site "$site_id" --dry-run
 ```
 
-Windows 对应：
+Windows：
 
 ```powershell
 & $rumable uninstall --state-dir $state --site $siteId --dry-run
+```
+
+检查预览结果，确认目标及变更范围后，再执行卸载。
+
+Linux：
+
+```sh
+sudo "$rumable" uninstall --state-dir "$state" --site "$site_id"
+```
+
+Windows：
+
+```powershell
 & $rumable uninstall --state-dir $state --site $siteId
 ```
 
