@@ -56,7 +56,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/__demo__/stats') { json(res,200,{startedAt, total, types, requests, simulation:true}); return; }
   if (url.pathname === '/api/products') {
     await new Promise(resolve => setTimeout(resolve,180));
-    json(res,200,{products:[{id:'desk-01',name:'极简桌面灯',price:129},{id:'cup-02',name:'旅行咖啡杯',price:69}], server:'Linux Node web service', at:new Date().toISOString()}); return;
+    json(res,200,{products:[{id:'desk-01',name:'Minimal desk lamp',price:129},{id:'cup-02',name:'Travel coffee cup',price:69}], server:'Linux Node web service', at:new Date().toISOString()}); return;
   }
   if (url.pathname === '/api/slow') {
     await new Promise(resolve => setTimeout(resolve,900));

@@ -1,135 +1,145 @@
-# 页面配置与一键接入
+# Configuration page and one-command setup
 
-面向安装用户的完整步骤、可执行命令和失败处理见[用户指南：自动脚本安装](../USER-GUIDE.md#3-一键接入推荐)。本页主要说明页面行为、产品集成与 CI 约定；手动选包及配置见[手动安装](../USER-GUIDE.md#5-手动下载校验并安装-cli)，无需访问 Git。
+See the [user guide](../USER-GUIDE.md#3-one-command-setup) for operator steps. This page describes static-page integration, discovery, manifest contracts, and publishing. The product is Rumable; executable/schema/deployment identifiers remain compatible with rumable.
 
-页面位于 `web/`，是无构建依赖的静态页面。参数来自当前 Rumable 的 `RUM` 配置和内置 Web SDK 3.3.21 的初始化能力。它可以直接部署到静态站点，或将生成器模块接入现有控制台。
+## Page and release entry points
 
-产品长期使用[latest 在线配置页](https://static.guance.com/rumable/latest/setup/index.html)或[latest 发布清单](https://static.guance.com/rumable/latest/manifest.json)。固定版本 `0.1.6` 仍可通过对应版本目录访问。Windows 一键安装与启停回滚测试见 [Windows 验收手册](windows-acceptance.md#一键安装入口验收windows-x64)。
+The page lives in web/ and needs no build dependencies. Public copy is English. It can be served as static files or its generator module can be integrated into an existing console. Serve it over HTTP(S), not file://.
 
-## 当前可用流程
+Use the actual published release base supplied by the operator. Relative paths are:
 
-1. 页面填写 RUM 配置，选择 SDK 来源（同域/CDN）、加载方式（异步/同步）和 Linux/Nginx 或 Windows/IIS，生成不含网站目标的 TOML。网站、路径和程序位置等字段收起到高级选项，勾选“手动指定站点与路径”才启用。
-2. 线上页面自动读取同版本发布清单，也可切换 latest 或指定版本。
-3. 根据服务器类型生成一条带配置的命令：Linux 下载并运行 `install.sh`，IIS 下载并运行 `install.ps1`。
-4. 安装脚本自动识别架构、下载指定版本包，按脚本内固定摘要校验 SHA-256，安装版本化 CLI，解码临时 TOML，执行 `rumable setup --discover --yes`；手动模式不带 `--discover`。
-5. 自动发现本机站点：单站点自动选中，多站点/多访问地址在终端选择；通配绑定等无法确定域名时提示输入。确定目标后，`setup` 在单次操作锁内完成首次 render、Nginx attach、enable；已有站点复用原状态进行更新。目标变化、外部修改或未完成事务会阻止操作。
+| Relative path | Purpose |
+| --- | --- |
+| latest/setup/index.html | Entry redirecting to the current stable version page |
+| latest/manifest.json | Version, SDK metadata, digests, and artifactBase |
+| latest/install.sh | Linux installer |
+| latest/install.ps1 | Windows installer |
+| <version>/setup/index.html | Immutable release page |
+| <version>/manifest.json | Immutable manifest |
 
-配置在浏览器本地生成，无配置服务依赖，不上传到 OSS。命令中的 Base64 只是防止 shell 转义改变 TOML，不是加密；包含的 clientToken 是浏览器公开令牌，不得填写管理 API Key。临时配置在结束时删除；受管状态保存配置，后续 disable/rollback 不依赖临时文件。需要修改时重新生成命令。自动发现格式的 TOML 使用 `setup --discover --config rumable.toml --state-dir ... --yes`；手动模式的完整 TOML 才能直接交给 `enable`。
+This documentation does not announce a new hosted endpoint. Do not substitute a guessed product domain. Package-default SDK delivery remains selected by omission of an explicit CDN URL; custom CDN URLs must serve identical package SDK bytes.
 
-当前一键入口仅做 RUM，默认同域 + 异步提供 SDK；不静默安装 Nginx、IIS、URL Rewrite，不部署 OTel Agent。Nginx 仍需 http_sub_module。IIS 需要可匿名访问且有读取权限的 public 资源、URL Rewrite 和管理员权限；页面显式提供静态和动态压缩变更选项。Windows 命令要求管理员权限和 PowerShell 5.1+，自动读取真实系统版本与原生架构；Windows 10 / Server 2016+ 选择现代包，Windows 7 SP1 / Server 2008 R2 SP1、8/8.1、Server 2012/2012 R2 选择 legacy 包。32 位 PowerShell 运行在 64 位 Windows 时仍安装原生 x64/ARM64 CLI 到原生 Program Files；真正 32 位 Windows 在下载前提示 IIS 不支持。不会自动安装或升级 WMF、IIS 或 URL Rewrite。
+## Current flow
 
-## 页面生成的短命令
+1. Enter browser RUM details, SDK source/loading, and Linux/Nginx or Windows/IIS. Website fields stay in advanced manual targeting.
+2. Load a matching immutable/latest manifest. A hosted version page discovers ../manifest.json; a console can pass ?manifest= with the actual URL.
+3. Generate TOML and a short installation command locally.
+4. The versioned installer detects architecture/flavor, downloads the selected archive, checks its compiled-in SHA-256, installs the CLI, decodes temporary TOML, and runs setup --discover --yes. Manual targeting omits --discover.
+5. Discovery selects a unique complete target or asks through the terminal. setup rechecks the selected target and composes render, Linux attachment, and enable under one operation lock.
+6. Existing sites reuse their saved ID/URL/paths/state. Changed identity, unmanaged edits, or unfinished transactions stop deployment.
 
-0.1.6 生成的 Linux 命令自带 Bash pipefail，需安装 Bash。Windows 同版补齐私有文件 DACL 和公共资源读取权限，并修复桥接输出、空排除条件及旧事务恢复。旧 0.1.4 / 0.1.5 的失败现场必须先按[恢复与复测流程](windows-0.1.4-recovery.md)处理，再执行新的一键命令。
+Base64 preserves configuration through shell quoting and is not encryption. Browser Client Tokens are public SDK credentials, not management keys. Config is not uploaded by the page. The installer deletes temporary TOML; operators must save the downloaded copy.
 
-Linux 命令结构如下（域名和配置为示意，实际由页面填入）：
+The page and setup handle RUM only. They do not install Nginx/IIS/URL Rewrite or deploy OTel Agents. Linux needs http_sub_module. IIS needs administrator access, URL Rewrite, static resources, anonymous read permissions, a dedicated started pool, and compression consent.
 
-```sh
-bash -o pipefail -c 'curl --proto "=https" --proto-redir "=https" -fsSL "https://下载域名/rumable/版本/install.sh" | sudo sh -s -- --base-url "https://下载域名/rumable/版本/" --config "<Base64 RUM 配置>" --discover'
-```
+## Command structure
 
-Windows 在管理员身份的 PowerShell 5.1+ 中执行页面生成的命令，结构如下。`<Base64 RUM 配置>` 必须由页面填写后生成，不能原样执行：
+The actual page command pins a selected immutable version, even when discovered through latest:
 
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://static.guance.com/rumable/0.1.6/install.ps1').Content)) -BaseUrl 'https://static.guance.com/rumable/0.1.6/' -Config '<Base64 RUM 配置>' -Discover
-```
+~~~sh
+bash -o pipefail -c 'curl --proto "=https" --proto-redir "=https" -fsSL "INSTALLER_URL_FROM_PAGE" | sudo sh -s -- --base-url "ARTIFACT_BASE_FROM_PAGE" --config "BASE64_CONFIG_FROM_PAGE" --discover'
+~~~
 
-Windows CLI 安装到原生 `%ProgramFiles%\Rumable\0.1.6\rumable.exe`，状态保存在 `%ProgramData%\Rumable`。保留页面下载的 TOML，配置变更后可重新生成命令；启停与回滚始终使用相同接入标识和状态目录。一键安装器只提取 CLI；完整文档和配置示例在平台包中。发布包不含自动验收脚本；普通用户无需仓库权限，可按用户指南手动验收。开发者完整自动验收脚本从仓库同版本 tag 获取，详见 Windows 验收手册。
+~~~powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'INSTALLER_URL_FROM_PAGE').Content)) -BaseUrl 'ARTIFACT_BASE_FROM_PAGE' -Config 'BASE64_CONFIG_FROM_PAGE' -Discover
+~~~
 
-只有下载入口、发布目录和配置留在命令里，校验、安装、清理和 setup 均由脚本处理。`--base-url` 从 manifest 的 `artifactBase` 相对地址推导，不需要 CI 配置公开下载域名；旧固定版本清单没有此字段时沿用清单目录。Linux 自动选择 x86（32 位）/ x64 / ARM64，IIS 自动识别原生 x64 / ARM64 及 modern / legacy 包。读取 latest 后生成的命令仍绑定一个固定版本；安装期间 latest 更新不会改变已选包。安装脚本通过 HTTPS 获取，包摘要由脚本固定；CI 同时校验脚本和包的完整性。
+These are structural examples, not ready-to-run commands. Bash pipefail propagates download and installation failures. Windows requires administrator Windows PowerShell 5.1+, detects native x64/ARM64 and the real OS version, and selects modern/legacy. A 32-bit host on 64-bit Windows still uses native Program Files. Native 32-bit Windows is rejected before IIS installation.
 
-产品也可固定调用 `https://static.guance.com/rumable/latest/install.sh` 或 `https://static.guance.com/rumable/latest/install.ps1`，base URL 使用同目录 `https://static.guance.com/rumable/latest/`，安装器自行转到脚本内绑定的版本。需要审计或复现时优先保存页面生成的固定版本命令与 TOML。
+Installers remain in /opt/rumable/<version> or native Program Files\Rumable\<version>; state remains /var/lib/rumable or ProgramData\Rumable. Normal installation extracts only the CLI; platform archives hold manuals/examples/notices. Automatic acceptance scripts remain in matching source tags.
 
-## 站点自动发现与手动设置
+Resolve artifactBase against the manifest URL before resolving installer/package file names. Older immutable manifests without artifactBase use their own directory. A later latest update must not change an already generated command's selected package. The downloaded installer is HTTPS; archive hashes are pinned inside it.
 
-- Nginx 从 PATH 或标准安装位置查找程序，读取其默认配置及有效 include；不会猜测自定义启动参数。使用自定义 `-c` / `-p`、非首页验收、仅部分路径或无法识别的布局时，使用高级手动配置。
-- IIS 只读枚举运行中的 HTTP(S) 站点和应用。端口、域名和应用路径来自绑定；无主机名的通配绑定不会冒用 localhost，会要求填写实际可访问 URL。
-- 安装脚本的 `--yes` 只确认接入操作，不会代替站点、地址或压缩调整的选择。交互从终端读取，不消费 Linux 管道中的脚本；无终端且有歧义时停止，不修改站点。
-- 0.1.6 的 Windows CLI 先检查标准输入是否是控制台；安装器识别重定向输入或 PowerShell 非交互启动并传递 `--non-interactive`。自动化也可显式给 install.ps1 传 `-NonInteractive`，或给 setup 传 `--non-interactive`；仍可自动接入唯一且信息完整的目标，歧义立即失败。
-- 新站点生成稳定的 `auto-...` 接入标识；重复安装恢复原 ID、URL、注入/排除/验收路径，继续复用同一状态目录。不会因为 Nginx 行号变化创建第二次接入。选择结束后重新检查目标，防止等待输入期间配置变化导致接错站点。
-- IIS 静态或动态压缩开启时，只有已勾选高级选项或在终端同意后才调整；卸载/回滚继续使用原备份机制。已有管理状态的配置、外部修改和未完成事务仍会检查。
-- 自动模式默认验证网站或应用首页。需要登录、首页重定向、非完整 HTML、多种模板、HTTPS 上报或 Worker 同源限制导致验证失败时，按提示使用高级设置，补齐适合该网站的验收路径。自动发现不会跳过预检或放宽 TLS/CSP。
-- 老版本清单没有 `rum-discovery-v1` 时，页面拒绝生成自动发现命令；仍可用高级手动模式生成兼容配置。
+## Discovery and advanced targeting
 
-## SDK 来源、加载与安装包兼容
+- Nginx discovery uses PATH/standard binaries and default effective includes, not guessed custom service startup arguments. Use complete TOML for custom -c/-p, non-home verification, or unsupported layouts.
+- IIS enumeration is read-only and covers running HTTP(S) sites/applications. Binding host/port/application define the URL. Wildcard bindings require actual input instead of invented localhost.
+- --yes confirms changes, not an ambiguous site/address or missing compression permission. Terminal input does not consume a Linux download pipe.
+- The Windows installer detects redirected/noninteractive input and passes --non-interactive. Explicit -NonInteractive/--non-interactive is supported. A unique complete target can proceed; ambiguity fails.
+- New auto-... IDs are stable. Repeated setup preserves previous site IDs, URL ranges, and state even when Nginx line numbers move. The selected target is rechecked after terminal input.
+- IIS compression consent covers static and dynamic attributes in the selected application. Original snapshots/inheritance support disable/rollback.
+- Automatic probes usually cover the home page only. Redirects, authentication, fragment HTML, CSP/Workers, and multiple templates can require manual probe paths.
+- Discovery TOML goes to setup --discover. Complete [[sites]] configuration goes to render/check/enable or manual setup.
 
-页面提供“SDK 来源与加载方式”独立区域。CDN 地址默认使用官方 v3，可改为自建 HTTPS 地址；SRI 默认关闭，切回同域不输出 CDN 专属字段。右侧摘要显示所选来源和加载方式，更新说明按来源变化。两种加载方式的时序和更新机制见[用户指南](../USER-GUIDE.md#4-sdk-注入加载与更新)。
+## SDK and release compatibility
 
-| 配置 | 自动发现格式 | 完整站点格式 | 发布清单要求 |
-|---|---|---|---|
-| 同域 + 异步（默认） | 省略 sdk 表 | 省略 sites.sdk 表 | 原有能力即可 |
-| CDN + 异步 | `[sdk]` source/url/integrity | `[sites.sdk]` source/url/integrity | 自动模式增加 rum-discovery-sdk-v1 |
-| 同域/CDN + 同步 | `[sdk]` loading="sync" | `[sites.sdk]` loading="sync" | rum-sdk-loading-v1；自动模式同时需要 rum-discovery-sdk-v1 |
+| Selection | Discovery format | Complete format | Manifest requirement |
+| --- | --- | --- | --- |
+| Bundled/async | sdk table can be omitted | sites.sdk can be omitted | Original setup capabilities |
+| CDN/async | [sdk] source, optional url, integrity | [sites.sdk] equivalents | Discovery additionally needs rum-discovery-sdk-v1 |
+| Bundled/CDN with sync | [sdk] loading=sync | [sites.sdk] loading=sync | rum-sdk-loading-v1; discovery also needs rum-discovery-sdk-v1 |
 
-同步选项不能通过仅更新静态页交付：CLI、Nginx/IIS 注入逻辑、检查和恢复都必须来自配套包。旧清单会禁止生成不兼容命令，仍允许下载配置以供新 CLI 使用。异步省略 loading，保证已支持 CDN 的旧包仍可处理手动 CDN 配置。加载方式、CDN 地址及 SRI 会进入安装命令中的 TOML，自动发现后传给所选站点。
+Default CDN delivery omits url and lets the CLI resolve the release-recorded source. An explicit custom HTTPS URL is retained in TOML. The page never renames protocol fields or turns arbitrary third-party SDKs into compatible packages.
 
-发布清单里的 sdk.version 是包内版本；可变 CDN 的实际版本可能随后变化。读取 latest 只选择本次安装包，不会更新已接入站点，也不是定时更新任务。
+Changing only a static page cannot add CLI support. Old manifests block incompatible command generation but still permit configuration download. Async loading omits loading for compatibility with older CDN-capable complete configurations. Source, loading, URL, and integrity are forwarded to discovery-selected sites.
 
-## SDK 字段对应
+sdk.version describes the package, not future bytes at a mutable CDN. Reading latest chooses an installation version; it neither upgrades deployed sites nor schedules updates.
 
-| 页面配置 | SDK / Rumable 字段 |
-|---|---|
-| SDK 来源、加载方式、CDN 地址、SRI | sdk.source、sdk.loading、sdk.url、sdk.integrity（完整配置使用 sites.sdk） |
-| 应用 ID | applicationId |
-| OpenWay / DataKit | site + clientToken / datakitOrigin，互斥 |
-| 服务、环境、业务版本 | service、env、version |
-| 会话及错误补偿采样 | sessionSampleRate、sessionOnErrorSampleRate |
-| 回放开关、普通和错误回放采样 | sessionReplayEnabled 控制 bootstrap 是否启动录制；sessionReplaySampleRate、sessionReplayOnErrorSampleRate 传入 SDK。关闭时归零 |
-| 交互采集与名称隐私 | trackUserInteractions、actionNameAttribute、enablePrivacyForActionName |
-| 默认隐私、会话存储 | defaultPrivacyLevel、sessionPersistence |
-| 长动画帧、压缩、远程配置 | enableLongAnimationFrame、compressIntakeRequests、remoteConfiguration |
-| 会话跨子域、HTTPS Cookie、存储回退 | trackSessionAcrossSubdomains、useSecureSessionCookie、allowFallbackToLocalStorage |
-| Worker、链路范围、协议、采样 | workerUrl、allowedTracingUrls、traceType、tracingSampleRate |
+## Field mapping
 
-表单开放常用静态字段，其余已支持的高级静态配置可使用完整 TOML 模板。`setUser`、自定义上下文、`startView`、`beforeSend`、函数/正则匹配器等需要业务代码，不伪装成纯配置开关。`trackViewsManually` 未在页面提供，避免零代码接入后没有业务调用 startView 而丢失视图。远程配置可能覆盖静态选项；Worker、链路跨域请求和真实入库仍需目标环境验收。
+| Page concept | Compatible field |
+| --- | --- |
+| Application ID | applicationId |
+| Browser gateway | site + clientToken; reporting selector openway |
+| Direct collector | datakitOrigin; reporting selector datakit |
+| Service/environment/application version | service, env, version |
+| Session/error compensation | sessionSampleRate, sessionOnErrorSampleRate |
+| Replay | sessionReplayEnabled plus both replay rates |
+| Interaction and action privacy | trackUserInteractions, actionNameAttribute, enablePrivacyForActionName |
+| Privacy/storage | defaultPrivacyLevel, sessionPersistence |
+| Frames/compression/remote settings | enableLongAnimationFrame, compressIntakeRequests, remoteConfiguration |
+| Cookie/subdomains/fallback | useSecureSessionCookie, trackSessionAcrossSubdomains, allowFallbackToLocalStorage |
+| Worker and trace propagation | workerUrl, allowedTracingUrls, traceType, tracingSampleRate |
 
-## CI → OSS 约定
+Advanced static options remain available through complete TOML. setUser, manual startView, callbacks, and function/RegExp matchers require application code. Manual view mode is not exposed in the page because a zero-code install cannot supply missing startView calls.
 
-复用 `scripts/release.go` 打包。新增输出 `manifest.json`，包含 schemaVersion、version、revision、SDK 元数据、`rum-setup-v1` / `rum-install-v1` / `rum-discovery-v1` / `rum-discovery-sdk-v1` / `rum-sdk-loading-v1` 能力、安装脚本及各平台包的文件名和 SHA-256；manifest 本身进入 SHA256SUMS。依赖许可证随包发布。
+## CI and static hosting
 
-CI 与 OSS 变量、受保护 tag、重试和验收见 [GitLab CI 发布说明](gitlab-ci-release.md)。实际目录：
+scripts/release.go emits manifest schemaVersion/version/revision, SDK metadata, capabilities, installers, and package file/digest records. The manifest itself enters SHA256SUMS. Licenses stay in platform archives.
 
-```text
+~~~text
 rumable/
   <version>/
     install.sh
     install.ps1
     manifest.json
     SHA256SUMS
-    rumable_<version>_linux_amd64.tar.gz
-    rumable_<version>_linux_arm64.tar.gz
-    rumable_<version>_windows_amd64.zip
     sdk.json
-    ...其他平台包（文档、配置示例和许可证位于包内）
+    rumable_<version>_linux_amd64.tar.gz
+    rumable_<version>_windows_amd64.zip
+    ...other platform archives
     setup/
       index.html
       app.mjs
       generator.mjs
+      i18n.mjs
       styles.css
-```
+~~~
 
-CI 先验证、打包并上传安装脚本、全部包和配置页，核对远端摘要，再发布 manifest；报告输出固定版本的 OSS 路径，供控制台选择。相同版本内容变化会被拒绝；下一次发布使用新版本号，不覆盖已有版本。OSS 使用 HTTPS；跨域部署页面时允许页面域名 GET manifest。同版本 `setup/index.html` 自动读取清单；也可用 `?manifest=https://<OSS域名>/rumable/<version>/manifest.json` 指定，在控制台集成时由平台注入地址。
+See [GitLab/OSS release](gitlab-ci-release.md) for protected tags, credentials, immutable retries, the exact allowlist, and latest promotion. Source documents and test files are not public standalone release objects.
 
-正式版本完成后再更新 `rumable/latest/` 的配置页入口、安装器和清单；清单最后更新，不长期缓存。latest 页面跳到同版本页面，避免 HTML/CSS/JS 混用。旧版本重试不会让 latest 回退，预发布版本不更新 latest。产品读取清单后按 `artifactBase` 解析具体包地址，不能直接把含版本号的包名拼到 latest 目录。
+Upload and read back the complete immutable file set before publishing manifest. Promote stable latest only afterward, with no-store headers and manifest last. Redirect latest to the matching version page to avoid mixed HTML/JS/CSS. Older retries cannot roll latest backward; prereleases do not update it.
 
-实际 OSS 凭据由项目 CI 管理，不需要公开域名变量。页面在未读到有效清单时禁用“复制接入命令”，仍可预览/下载 TOML；不会生成指向不存在安装包的假成功命令。安装脚本使用所选固定版本及构建时写入的包摘要，不在执行时漂移到 latest。
+Use correct HTML MIME and inline disposition on an actual static-site domain. Some raw object-storage domains force HTML download despite document tags. Configure hosting/CORS externally. Cross-origin pages need permission to GET manifest; the publisher does not change ACL/CORS/domain/CDN settings.
 
-## 恢复行为
+The page disables command copying until a valid manifest loads. It does not fabricate success for nonexistent installers.
 
-接入失败由现有事务机制恢复注入配置；恢复失败保留 transaction.json，下一次 setup 必须先 rollback。首次 Nginx 挂接也有独立备份。已经挂接的资源位置保留，避免失败期间收到 HTML 的浏览器无法加载旧 SDK；清理 HTML 缓存后，可 disable，再 rollback --attachment --yes 撤销首次挂接。页面开关是下次部署的期望配置，不是在线管理主机的即时开关。
+## Failure recovery and verification
 
-不放宽 CSP，也不保证任意 HTML 可直接接入。当前文本过滤要求标准 `<head>`；每种受管页面模板都应纳入 probePaths。HTTP 检查通过只证明注入和资源可用，页面可另用实际 RUM 事件到达情况判断接入成功；不要把命令复制或脚本退出码当作观测云已收到数据。
+Setup uses existing transactions and backup ownership. Failed restoration retains transaction.json and blocks new setup until rollback. Attachment recovery is separate. Assets remain for cached HTML until reviewed detach/uninstall.
 
-## 本地验证
+The page does not relax CSP or guarantee arbitrary HTML. Every selected template should be represented in probePaths. Verify deployment, browser execution, and stored events separately.
 
-```sh
+~~~sh
 python3 -m http.server 18872 --bind 127.0.0.1 --directory web
-node --test web/generator_test.mjs
+node --test web/generator_test.mjs web/i18n_test.mjs
+node scripts/check-docs.mjs
 go test ./...
 bash scripts/smoke-onboarding.sh
 bash scripts/smoke-discovery.sh
-# 发布后，从真实 OSS 下载脚本与包，在临时容器验证注入和恢复：
-RUMABLE_PUBLIC_MANIFEST=https://static.guance.com/rumable/0.1.6/manifest.json bash scripts/smoke-discovery.sh
-```
+~~~
 
-两项 smoke 在临时 Docker Nginx 中执行页面生成的真实 Linux 命令；OSS 下载用本地脚本和归档替代，实际执行校验、安装、首次接入、重复运行、升级、回滚、停用和撤销。不会对宿主机 /opt、/var/lib 或 Nginx 进行修改。自动发现 smoke 还覆盖多站点无终端拒绝、管道安装时终端选择、未选中站点不变。Windows 脚本契约测试见 `scripts/test-windows-installer.ps1`；Windows API 与 IIS 原生行为仍需 Windows 环境验收。
+Smoke scripts use temporary containers and local download substitutes before release, executing real validation/install/attachment/lifecycle paths. To test actual published downloads, set RUMABLE_PUBLIC_MANIFEST to the operator-supplied real versioned URL. These tests do not modify host /opt, /var/lib, or Nginx.
+
+Portable Windows installer tests are in scripts/test-windows-installer.ps1. Native API, permissions, and runtime behavior require a separate Windows environment.

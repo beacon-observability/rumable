@@ -1,157 +1,118 @@
-# Windows / IIS 验收
+# Windows and IIS acceptance
 
-0.1.8 已收到项目维护者提供的 Windows 实机报告：50 项中 **41 项通过、0 项产品失败、9 项未验证**。独占池回收、两组 gzip 缓存后的 second.html 首次普通刷新、两轮更新/回滚/停用和故障自动恢复通过；共享池和停止池按预期拒绝。完整范围、9 项未验证说明及证据位置见 [0.1.8 实机验收记录](verification.md)。本机未重新执行该 Windows 环境。
+The maintainer supplied a native 0.1.8 report with **41 passed, 0 product failures, and 9 unverified out of 50**. It covered selected static-site scenarios, dedicated-pool activation, first ordinary refresh after gzip caching, repeated lifecycle changes, and failure recovery. This host did not rerun that Windows environment. See [verification records](verification.md) for provenance and limits.
 
-后续回归继续保留旧站点、状态及浏览器缓存，在新副本上运行一键安装。目标应用必须使用独占池；子应用单独分配池。重点检查：提交后旧 worker 已退出；安装前有 gzip 缓存的 second.html 首次普通刷新；旧版本同配置升级；两轮 env 更新、回滚和停用；文件级 gzip 故障后的自动恢复。首次普通刷新前不额外发送 identity/probe，也不清缓存。长请求回收超时仍需补测，恢复不完整时应保留事务，不强杀进程。错误证据另见私有状态目录的 last-operation-probe-failure.json 和 last-recovery-probe-failure.json。预期故障拒绝且自动恢复成功计为通过；首次失败不能被后续成功覆盖，真实入库需独立证明。
+Keep old sites/state/browser caches intact and test new copies. First-refresh evidence precedes extra identity/probe requests or cache clearing. Correct rejection with successful restoration can pass failure handling; a later successful response cannot replace the first failure. Real ingestion is separate.
 
-历史对照：0.1.7 用户实测为 29 项通过、5 项失败、5 项未验证，包含 S3 条件 GET 304、CT 更新/停用旧正文及 FAULT 恢复后 HTTP 校验失败。历史结果保留，不将 0.1.8 实测成功解释为已确认具体缓存层或模块顺序。
+Historical 0.1.7 reported 29 passed, 5 failed, and 5 unverified, including conditional 304, stale update/disable HTML, and failed recovery HTTP confirmation. The later result does not prove a particular cache layer or module order. Retained 0.1.4/0.1.5 failures use the [recovery procedure](windows-0.1.4-recovery.md).
 
-2026-10-22 已收到用户提供的 0.1.4 原生 Windows 报告：下载、CLI 安装和发现通过，IIS 注入及事务恢复失败。0.1.5 包含对应修复，旧现场按[恢复与复测](windows-0.1.4-recovery.md)操作。以下“本轮没有实机”指本机执行范围；用户报告与本地 mock 证据分开保留。
+## Test boundaries
 
-以下为 RUM 的 IIS 7.5+ 验收。服务端 OTel 另用 [windows-otel-smoke.ps1](https://gitlab.jiagouyun.com/guance/rumable/-/blob/release-oss-v0.1.5/scripts/windows-otel-smoke.ps1)，仅针对 IIS 10 的独占 .NET 应用池，配置和可执行步骤见 [OTel 手册](otel.md#iis-安装和操作)。本轮没有 Windows 实机，不能把 PowerShell 解析/mock 结果当作 IIS 或 Agent 运行通过。
+RUM tests require IIS 7.5+ and 64-bit Windows PowerShell. Server OTel has a stricter [IIS 10 flow](#7-iis-10-otel-acceptance). x86 CLI on x64 uses Sysnative; native 32-bit Windows cannot manage IIS. ARM64 needs its own native acceptance.
 
-发布包提供 Windows x86/x64/ARM64 CLI；本手册的 IIS 流程仍要求 64 位 Windows 与 64 位 Windows PowerShell。x86 CLI 在 x64 系统经 Sysnative 运行管理桥接；真正 32 位 Windows 不运行本 IIS 验收。脚本核对实际架构与 build.json，ARM64 必须在对应原生系统独立验收。
+Linux/OrbStack can cross-compile and run PowerShell 7 syntax/serialization/mock contracts. It cannot prove Windows PowerShell 5.1, IIS API commits, NTFS ACLs, pool behavior, or Agent loading. See [OrbStack architecture](https://docs.orbstack.dev/architecture).
 
-本流程在目标 Windows 上运行，只创建一个随机命名的 Rumable-Acceptance 测试站点、根应用池和三个各自独占池的子应用，绑定 127.0.0.1:19182。默认完成后清理，证据单独保存。它不重启 IIS、不安装组件、不改变已有站点、全局压缩或配置委派。
+The suite creates a random loopback-only site, root pool, and three child applications with dedicated pools; default port is 19182. It does not restart IIS, install components, change existing sites/global compression/delegation, or restore a whole-server backup.
 
-本机 macOS / OrbStack 的脚本边界测试不能证明 Windows / IIS 已通过。下表每行都必须在对应实机或 Windows VM 单独执行，并保留报告。
+## One-command installer acceptance
 
-### OrbStack 能验证什么
+Use isolated administrator Windows PowerShell 5.1+, 64-bit Windows, IIS, URL Rewrite 2.x, and a dedicated started pool.
 
-[OrbStack 使用 Linux 虚拟机和共享 Linux 内核](https://docs.orbstack.dev/architecture)，不能直接运行 Windows / IIS。Linux 上的 PowerShell 7 可以检查脚本语法、配置序列化与模拟接口；Windows 可执行文件的交叉编译也可以在这里完成。这些检查不能验证 Windows PowerShell 5.1、IIS 配置提交、Windows 权限或应用池行为。
+1. Open the actual release setup page. Record version, revision, and SDK. Select test credentials/site/binding, not production, and record compression consent.
+2. Save TOML and execute the generated command. It verifies ZIP, installs native CLI, and invokes discovery/setup. Record exit status without exposing tokens.
+3. For the first-refresh regression, capture the real browser refresh before any extra probe warms caches. Then check the actual installed CLI/state/ID:
 
-完整验收应准备独立的 x64 Windows Server 2016+ / IIS 10 测试机，按下方步骤运行。现有 `windows-smoke.ps1` 覆盖 CLI 的注入、启停、升级和回滚；新的一键 `install.ps1` 下载、校验、安装及 `setup` 入口还需单独在该测试机验收，不能由现有 CLI 脚本通过推断安装器已通过。
+~~~powershell
+$nativePrograms = $env:ProgramFiles
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+  $nativePrograms = $env:ProgramW6432
+}
+$rumable = Join-Path $nativePrograms 'Rumable\0.1.8\rumable.exe'
+$state = Join-Path $env:ProgramData 'Rumable'
+$site = 'REPLACE_ACTUAL_SITE_ID'
+& $rumable version
+& $rumable status --state-dir $state --site $site
+& $rumable probe --state-dir $state --site $site
+~~~
 
-## 一键安装入口验收（Windows x64）
+Require rumEnabled=true, empty drift, no pending transaction, one current script[data-rumable], valid script/SDK responses, and intact business content including a closing-head JavaScript string.
 
-本节验证从 OSS 安装到 IIS 生效的完整入口，可交给 Windows 上的 Codex 在独立测试站点执行。需要管理员身份的 PowerShell 5.1+、64 位 Windows、IIS 与 URL Rewrite 2.x。0.1.5 安装器自动选择原生 x64 / ARM64 和 modern / legacy 包；旧系统也要先安装适用的 PowerShell 5.1。真正 32 位 Windows 在下载前拒绝 IIS 接入。下方手工 CLI 验收仍覆盖 PS 3 基线。
+4. Repeat setup without duplicate injection. Change env, redeploy, then rollback and verify the original script URL.
+5. Disable, check newly requested HTML has no injection, and confirm old assets remain. Rollback restores the preceding enabled state; disable again.
+6. Retain unfinished transactions and recover with the same state/site. Never delete state and reinstall blindly.
 
-无法访问 Git 的用户可以直接从 OSS 获取 CLI、文档和配置示例，按[用户指南](../USER-GUIDE.md#7-手动配置-windows--iis)自建临时站点并手动验收。下面“完整自动验收”的仓库脚本是开发者测试工具，不是安装依赖。0.1.5 一键安装自动隔离私有文件并开放公共脚本读取权限；验收时按用户指南核对实际身份和 NTFS ACL。
+Independently test native x64 PowerShell, x86 PowerShell on x64, native/emulated ARM64, old-system legacy selection, non-administrator/old-PowerShell/native-32-bit refusal, single/multiple sites, multiple/wildcard bindings, compression refusal/approval, noninteractive ambiguity, and stable ID/path reuse.
 
-1. 发布成功后打开固定入口 `https://static.guance.com/rumable/latest/setup/index.html`，记录跳转后的实际版本与清单 revision；本节路径以 `0.1.5` 为例。选 Windows/IIS，填写测试应用的 applicationId、OpenWay / DataKit 配置。默认自动发现站点；多个站点或应用时在终端选择测试目标，不要选择生产站点。通配绑定需补充 URL，静态和动态压缩变更需终端同意或事先勾选。需要指定路径时启用高级手动模式。网站验收路径须返回带标准 `<head>` 的 HTML。
-2. 下载并保存 TOML，在管理员 PowerShell 中执行页面生成的一条安装命令。它下载 `install.ps1`，按检测结果下载并校验同版本 ZIP，安装原生 CLI，再运行 `setup --discover`（手动模式为 `setup`）。记录命令退出结果；日志或截图中不要暴露令牌。
-3. 检查状态及页面资源：
+Installers/archives do not contain test scripts. Obtain matching source separately. Portable scripts/test-windows-installer.ps1 uses API substitutes for archive/hash/config/retry/cleanup, not native matrix evidence.
 
-   ```powershell
-   $nativePrograms = $env:ProgramFiles
-   if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { $nativePrograms = $env:ProgramW6432 }
-   $rumable = Join-Path $nativePrograms 'Rumable\0.1.5\rumable.exe'
-   $state = Join-Path $env:ProgramData 'Rumable'
-   $site = 'auto-替换为安装输出的标识' # 手动模式则使用页面填写的标识
-   & $rumable version
-   & $rumable status --state-dir $state --site $site
-   & $rumable probe --state-dir $state --site $site
-   ```
+Record OS/IIS/PowerShell/CLI version, archive digest, ID, initial/repeat installation, updates/rollback/disable, browser behavior, and separate stored-event evidence. Full suites retain report.json and sanitized cli.log.
 
-   要求 `rumEnabled=true`、`drift` 为空、`pendingTransaction=false`，探测成功。同源初始化脚本和 SDK 返回 200。浏览器中只出现一个本次部署的 `script[data-rumable]`，原有业务功能正常；额外验证包含 JavaScript 字符串 `"</head>"` 的页面未被改坏。
-4. 再次执行相同一键命令，确认没有重复注入。修改测试环境 env，重新生成命令更新，再执行 `rollback --state-dir $state --site $site`；验证恢复上一配置的初始化脚本 URL。
-5. 执行 `disable --state-dir $state --site $site`，确认新请求的 HTML 不再注入；旧版本静态资源应保留给缓存页面。再次执行 `rollback` 应恢复刚停用前的状态，最后再 `disable` 清理测试站点的注入。以上命令均由 `& $rumable` 调用，状态目录和接入标识保持一致。
-6. 如出现未完成事务，保留 `%ProgramData%\Rumable` 中的状态、日志和备份，记录失败阶段，再用 CLI 的 `rollback` 恢复；不要删除状态后盲目重装。需要验证原生提交故障、压缩继承和多应用隔离时，继续运行下方完整自动验收。
+## 1. Select environment and archive
 
-一键安装和 Windows ZIP 均不包含测试源码或验收脚本。自动验收脚本从仓库对应版本 tag 获取（见第 3 节）；测试的 CLI 从 `https://static.guance.com/rumable/0.1.5/rumable_0.1.5_windows_amd64.zip` 下载，按 `SHA256SUMS` 校验后解压。CLI 测试成功与真实观测云入库分别记录；实际事件须在浏览器请求收到 2xx 后查询观测云确认。
+| x64 environment | IIS | Flavor | PowerShell acceptance |
+| --- | --- | --- | --- |
+| Windows 7 SP1 / Server 2008 R2 SP1 | 7.5 | Legacy, actual Go 1.20.14 | Native 64-bit PS 3.0 and separate 5.1 |
+| Server 2012 / 2012 R2 | 8.0 / 8.5 | Legacy | System PS and separate 5.1 |
+| Windows 10 / Server 2016+ | 10.0 | Modern, Go 1.26.x | Native 64-bit PS 5.1 |
+| Legacy binary on modern Windows | 10.0 | Legacy | Supplementary, not old-OS evidence |
 
-必须单独验证的自动识别分支：x64 系统原生 PS、x64 系统 32 位 PS、ARM64 原生及模拟进程、旧系统 legacy 包、非管理员/PS 版本过低/32 位 Windows 拒绝。检查日志中检测到的版本/架构及包名，确保 32 位进程没有安装到 Program Files (x86)。单站点、多站点、多绑定、通配绑定输入、压缩确认拒绝/同意、无终端歧义拒绝、重复安装与原 ID/路径保持分别记录。
+Check build.json, executable version, and SHA-256. Old systems reject modern archive metadata before launching when available. Keep complete package layout.
 
-本地及 CI 可先运行 `pwsh -NoProfile -File scripts/test-windows-installer.ps1`，覆盖真实 ZIP 解压、摘要、版本化目录、配置传递、重复安装和失败清理；Windows API、网络与 IIS 操作由替身代替，不能据此标记上述原生矩阵通过。
+Default PS 2.0 is insufficient. Deploy compatible WMF/.NET beforehand; PowerShell 7 is not a substitute. See [WMF guidance](https://learn.microsoft.com/en-us/powershell/scripting/windows-powershell/wmf-overview).
 
-反馈结果请包含 Windows / IIS / PowerShell 版本、Rumable 版本、下载包 SHA-256、接入标识、首次/重复安装、停用、配置回滚、业务页面与数据上报结果；完整自动验收另附 `report.json` 和脱敏的 `cli.log`。
+## 2. Prepare an isolated machine
 
-## 1. 选择环境和发布包
+Full tests require Static Content, static/dynamic compression, anonymous access, management APIs, and URL Rewrite outbound rules. Registered 64-bit ASP.NET 4.x Integrated is needed by fixtures for dynamic/chunked/source-gzip/post-commit failure scenarios, not every product installation.
 
-| 目标环境（x64） | IIS | Rumable 包 | PowerShell 验收 |
-|---|---|---|---|
-| Windows 7 SP1 / Server 2008 R2 SP1 | 7.5 | windows_amd64_legacy-go1.20.14 | 64 位 Windows PowerShell 3.0，另跑 5.1 |
-| Server 2012 / 2012 R2 | 8.0 / 8.5 | windows_amd64_legacy-go1.20.14 | 系统版本及 5.1 分别记录 |
-| Windows 10 / Server 2016+ | 10.0 | windows_amd64_go1.26.x | 64 位 Windows PowerShell 5.1 |
-| 现代 Windows 上验证 legacy 包 | 10.0 | windows_amd64_legacy-go1.20.14 | 补充验证，不能替代旧系统行 |
-
-旧 Windows 必须使用真实 Go 1.20.14 编译的 legacy 包。脚本先检查解压目录的 build.json，再记录可执行文件 version 输出和 SHA-256；旧系统发现现代包元数据时会在启动二进制前拒绝。单独复制 exe、缺少 build.json 时，只能在尝试启动后判断，建议保留完整发布包。
-
-旧系统自带 PowerShell 2.0 不满足要求；应先按[微软 WMF 说明](https://learn.microsoft.com/en-us/powershell/scripting/windows-powershell/wmf-overview)部署适用的 Windows PowerShell 和 .NET 依赖。脚本按 PS 3 / .NET 4 基线编写，仍需对应矩阵实跑；不使用 PowerShell 7 来代替旧 Windows 验收。Go、WMF、IIS 与浏览器的兼容性分别记录。
-
-## 2. 准备独立测试机
-
-完整流程需要：
-
-- IIS 静态内容、静态内容压缩、匿名访问、管理 API，以及 URL Rewrite 2.x 的出站规则能力。
-- 已注册的 64 位 ASP.NET 4.x Integrated handler，用于动态 HTML、普通 chunked、应用生成 gzip 和提交失败后的 HTTP 恢复测试。它是测试夹具的依赖，不是 Rumable 注入所有业务站点的前提。
-- 管理员权限、空闲的回环端口；默认 19182，可用 Port 参数改变。
-
-在一次性 Server 2016+ VM 上，可先用服务器角色安装命令准备 IIS / ASP.NET，再安装官方 URL Rewrite 2.x：
+On a disposable Server 2016+ VM, prepare roles and install URL Rewrite before acceptance:
 
 ~~~powershell
 Install-WindowsFeature Web-Server,Web-Static-Content,Web-Stat-Compression,Web-Dyn-Compression,Web-Asp-Net45,Web-Mgmt-Console
 ~~~
 
-Windows 10 / Windows 7 可在“启用或关闭 Windows 功能”准备相应 IIS 功能；Server 2008 R2 使用服务器管理器安装 IIS 7.5 和静态压缩。旧系统另需适用的 .NET 4.x；微软的[旧 IIS ASP.NET 注册步骤](https://learn.microsoft.com/en-us/visualstudio/debugger/remote-debugging-aspnet-on-a-remote-iis-7-5-computer)使用 Framework64 下的 aspnet_regiis.exe -ir。组件安装和必要重启应在验收前完成，不要在已有生产服务器上试跑角色安装命令。
+Use corresponding Windows Features/Server Manager on other systems. Complete prerequisites and necessary restarts beforehand; do not experiment with role installation on production.
 
-静态 gzip 测试会预热文件，但不修改全局 httpCompression 参数。MIME、最小文件大小、CPU 或命中频率限制导致始终不压缩时，测试会失败并保留记录；不要把“配置值为 true”当作线上 gzip 已生效。参见[微软压缩测试条件](https://learn.microsoft.com/en-us/iis/extensions/iis-compression/using-iis-compression#testing-iis-compression)。
+Static gzip tests warm actual files without changing global httpCompression. MIME/min-size/CPU/frequency conditions preventing real gzip must remain failed/partial evidence; a true configuration flag is insufficient. See [compression testing](https://learn.microsoft.com/en-us/iis/extensions/iis-compression/using-iis-compression#testing-iis-compression).
 
-## 3. 执行完整验收
+## 3. Run full acceptance
 
-先核对 Windows ZIP 的 SHA-256 与随发布提供的 SHA256SUMS，再用资源管理器完整解压到对应目录，保留 docs 和 build.json；旧 PS 3 不需要使用 Expand-Archive。验收脚本及其夹具只在仓库中提供，必须与 CLI 的版本一致。以下示例将源码检出到 `C:\Rumable\source`，不向安装目录复制测试源码：
+Verify the archive and extract separately from matching source, for example source under C:\Rumable\source. Obtain release-oss-v<version> using maintainer-supplied repository access. Do not guess a clone URL.
 
-```powershell
-git clone --depth 1 --branch release-oss-v0.1.5 ssh://git@gitlab.jiagouyun.com:40022/guance/rumable.git C:\Rumable\source
-```
-
-也可以登录 GitLab 下载该 tag 的源码归档，完整解压到上述目录；需有仓库读取权限。下面的脚本使用绝对路径，`-Binary` 始终指向单独解压的正式安装包。
-
-以下命令在“以管理员身份运行”的命令行执行，使用系统 64 位 Windows PowerShell：
+Administrator native Windows PowerShell:
 
 ~~~powershell
-# Windows 7 SP1 / Server 2008 R2 SP1，进入解压好的 legacy 包
-Set-Location C:\Rumable\legacy
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -ResultDir C:\RumableResults\iis75-legacy-01
-$LASTEXITCODE
-
-# IIS 10，进入解压好的现代包
-Set-Location C:\Rumable\modern
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-modern-01
+$ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+& $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary C:\Rumable\modern\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-modern-01
 $LASTEXITCODE
 ~~~
 
-结果目录必须不存在；每次运行使用新的目录，避免覆盖证据。若当前进程是 32 位，则应从 Sysnative 启动 64 位 PowerShell，或重新打开系统 64 位控制台。脚本会拒绝 32 位进程和 PowerShell 7。
+For IIS 7.5/8/8.5, use a real legacy binary and ExpectedIISVersion 7.5/8.0/8.5. ResultDir must not exist. Reopen native PowerShell or use Sysnative from a 32-bit process; tests reject x86 hosts and PS 7.
 
-同一台 IIS 10 上验证旧二进制部署、新二进制升级及回滚：
+Add -PreviousBinary with a schema/CLI-compatible old binary for actual binary upgrade/rollback. Without it, current-binary configuration updates are still tested. Do not launch modern previous binaries on old Windows.
 
-~~~powershell
-Set-Location C:\Rumable\modern
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -PreviousBinary C:\Rumable\legacy\rumable.exe -ExpectedIISVersion 10.0 -ResultDir C:\RumableResults\iis10-upgrade-01
-~~~
+-StaticOnly skips dynamic/chunked/source-gzip/post-commit HTTP recovery and always yields partial, exit 2. It cannot replace full acceptance.
 
-PreviousBinary 必须支持相同 TOML schema 和 CLI。每个应用会先由旧包 render / enable，再由新包改变初始化配置、enable / rollback。未提供 PreviousBinary 时，仍测试当前包的配置升级与回滚。旧 Windows 上不得提供现代包作为 PreviousBinary。
+## 4. Assertions and limits
 
-只安装静态站点角色时可先运行部分验收：
+| Scenario | Assertion |
+| --- | --- |
+| Compression | Inherited/local true/local false, actual gzip, disabled attributes while active, original attributes/inheritance afterward |
+| Consent | Reject required compression changes without permission |
+| Inheritance | Preserve parent/child business header rules and unrelated parent edits; reject owned namespace conflicts |
+| Native conflicts | Refuse rewriteBeforeCache and reserved mapping conflicts without replacing originals |
+| HTML/bypass | One tag for static/dynamic HTML; real chunked transfer; unchanged excluded/no-anchor/JSON; downloads bypass |
+| Assets/headers | Same-origin scripts/metadata/notices reachable and hashed; no original strong ETag; old assets survive rollback/disable |
+| Idempotency/update | Repeated enable leaves history stable; env/replay update changes script URL; rollback restores it |
+| Drift | Refuse disable/rollback after native/resource edits while preserving the changes |
+| Encoded source | Reject app-generated gzip without changing middleware |
+| Post-commit failure | Fixture 200 before commit/503 afterward, actual second request, restored baseline without drift/pending journal |
+| Isolation/cleanup | Each application baseline and parent unchanged; only report-owned resources removed |
 
-~~~powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-smoke.ps1 -Binary .\rumable.exe -ExpectedIISVersion 7.5 -StaticOnly -ResultDir C:\RumableResults\iis75-static-01
-~~~
+Post-commit HTTP failure is not every possible API exception, power loss, or concurrent administrator mutation. ARR/proxies, nonce CSP, browser variants, replay playback, and real ingestion need separate validation.
 
-StaticOnly 跳过动态、chunked、源 gzip 和提交后 HTTP 失败恢复，结果固定为 partial、退出码 2；它不能替代完整验收。ExpectedIISVersion 对 IIS 8 / 8.5 分别填写 8.0 / 8.5。
+Origin configuration changes do not invalidate all browser/CDN/Service Worker HTML. Keep diagnostic caches before intervention. A conditional 304 reusing old HTML is not current-injection proof.
 
-## 4. 实际覆盖与成功条件
-
-| 场景 | 断言 |
-|---|---|
-| 压缩原值与继承 | 三个应用分别继承父级开启、显式 true、显式 false；核对真实 gzip、启用后的关闭、停用后的局部属性存在性/原值及有效值 |
-| 压缩变更许可 | 原本开启且未许可时拒绝；原本关闭时无需许可也可 check |
-| 规则继承 | 父子业务 Header 规则持续有效；父级存在同名空间 Rumable 规则时拒绝；回滚保留部署期间的非受管父级变更 |
-| 配置冲突 | rewriteBeforeCache=true、保留资源虚拟目录冲突被拒绝，原映射保留 |
-| HTML 与旁路 | 静态、动态 HTML 均只有一个当前标签；普通 chunked 检查真实 Transfer-Encoding；排除路径、无锚点和 JSON 静态内容字节不变，动态下载 / JSON / 无锚点不注入 |
-| 资源与缓存头 | 初始化脚本、SDK、元数据和许可文件同域可达且摘要正确；改写 HTML 无原文强 ETag；停用及升级回滚后旧资源仍可加载 |
-| 幂等和升级 | 重复启用不改部署历史；改变 env / replay 参数生成新脚本 URL；rollback 恢复原 URL |
-| 外部修改 | 改动受管 IIS 规则或资源后，disable / rollback 拒绝并保留外部修改；测试最后归还原值 |
-| 压缩源不兼容 | 应用主动生成 gzip 时拒绝新部署，部署历史不变；不擅自修改应用中间件 |
-| 提交后的恢复 | 文件计数使预检首次 200、提交后探测 503；断言第二次请求确实发生、旧部署恢复、无漂移和未完成日志 |
-| 多应用隔离 | 三个应用最后均停用，压缩基线各自恢复，父站点设置不变 |
-| 清理 | 仅清理本轮站点、专用池、对应 location 节点和临时目录；证据目录保留 |
-
-“提交后的恢复”测试制造的是 HTTP 验证失败，不等于模拟了所有 IIS 配置 API 提交异常、断电或并发管理员写入。ARR / 代理源、真实云上报、CSP nonce、不同浏览器和会话回放播放仍需业务环境验收。
-
-IIS 启停与升级后须按业务缓存策略处理旧 HTML。脚本核对无条件及旧校验头条件请求，不证明浏览器、CDN 或服务工作线程中已缓存的页面同步失效；尤其不要把旧 HTML 的条件请求 304 当成新内容已经完成注入。定向复现时先保留原缓存采证，不要提前清除故障证据。
-
-## 5. 读取报告、保留与清理
+## 5. Reports and cleanup
 
 ~~~powershell
 $report = Get-Content -LiteralPath C:\RumableResults\iis10-modern-01\report.json -Raw | ConvertFrom-Json
@@ -161,94 +122,71 @@ $report.steps | Format-Table name,result,elapsedMs -AutoSize
 $report.cleanup
 ~~~
 
-退出码 0 表示本脚本范围内全部通过且清理成功（或显式 Keep）；1 表示环境、断言、证据写入或清理失败；2 表示部分验收。CLI 的预期拒绝也会记录在 cli.log，它们不会被算成脚本失败；意外成功则会使脚本失败。报告包含 OS / SP、IIS / URL Rewrite、PS / CLR、二进制版本及摘要、各步结果。deployment 目录保存本轮受管状态与资源，test-site-locations.xml 只保存本轮测试站点的局部配置，不导出整台服务器配置。
+Exit 0 means suite assertions/cleanup passed or explicit Keep; 1 means environment/assertion/evidence/cleanup failure; 2 means partial. Expected CLI refusals appear in logs without becoming suite failures; unexpected success fails.
 
-需要保留现场时，在完整运行命令末尾添加 -Keep 开关。每个应用正常结束时均停用；发生失败时可能保留失败阶段的配置，按报告排查。之后由原运行账户的管理员执行：
+Reports contain OS/service-pack, IIS/Rewrite, PS/CLR, binary versions/digests, and steps. deployment preserves private state/resources; test-site-locations.xml only contains this test's configuration.
+
+-Keep retains the scene. Successful applications end disabled; failures can leave intermediate state. From the original administrator account:
 
 ~~~powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-cleanup.ps1 -Report C:\RumableResults\iis10-modern-01\report.json
+& $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-cleanup.ps1 -Report C:\RumableResults\iis10-modern-01\report.json
 ~~~
 
-清理脚本核对随机测试名称、当前账户 TEMP 下的目录、站点物理路径，以及其他站点是否引用该池；不满足归属条件时停止。可重复执行，原报告保留。重启或强制终止后，先确认没有本轮脚本或 CLI 运行，再使用报告清理；不要对整台 IIS 执行恢复备份或 iisreset。
+Cleanup verifies random names, account TEMP paths, physical mappings, and other pool references. It refuses ambiguous ownership and can be repeated. Confirm no test/CLI process remains after termination/restart. Do not restore whole-server backups or run iisreset.
 
-## 6. 浏览器与真实上报另行验收
+## 6. Browser and real receiver acceptance
 
-自动流程使用 0% RUM / 遥测采样和不可用的本地接收地址，避免把测试数据写入任何真实应用。回放参数仅用于脚本升级与回滚验证，不代表录制上传已验证。
+Automated RUM fixtures use 0% session/telemetry sampling and a nonfunctional local receiver. Replay settings test lifecycle/hash changes, not recording/upload.
 
-在独立业务测试站点配置真实 OpenWay / DataKit、100% 接入采样与所需回放开关后，用受 SDK 支持的现代 Chrome 检查 Console / Network、唯一初始化、交互、错误、回放 Worker 与观测云数据。旧 Windows 服务器通过本脚本，不代表 IE 或旧 Chrome 支持当前 SDK，也不代表真实接收端的 CORS / TLS 已通过。
+Use a separate application with real compatible receiver details, 100% session sampling, and desired replay. Check Console/Network, one initialization, actions/errors, Workers/uploads, and stored events/playback. Passing an old Windows server test does not prove old-browser SDK support.
 
-## 7. IIS 10 OTel 专项验收
+## 7. IIS 10 OTel acceptance
 
-本节适用于 preview.3 及之后版本。使用对应发布包的 Windows CLI 和随包脚本，两者保持同一版本。前述 IIS 7.5 RUM 验收不能替代本节。
+Use preview.3 or later CLI and matching source scripts. RUM tests do not establish server tracing.
 
-准备 Windows 10/Server 2016+、IIS 10、64 位 Windows PowerShell 5.1、ASP.NET 4.x Integrated、.NET Framework 4.6.2+，预先安装并校验匹配目标池位数的官方 .NET Agent。机器/WAS/W3SVC 不得已有全局插桩。DataKit 先启用 gRPC 接收；Dataway 使用有效空间 Token，提前以已有安全方式设置到管理员进程的 tokenEnv 环境变量中。可选 WithRUM 需要 URL Rewrite 2 和静态文件能力。
+Prepare Windows 10/Server 2016+, IIS 10, native administrator PS 5.1, ASP.NET 4.x Integrated, .NET Framework 4.6.2+, and a verified Agent matching pool bitness. Reject conflicting machine/WAS/W3SVC instrumentation. Prepare actual gRPC intake or securely inject the gateway token into the administrator process. WithRUM additionally needs URL Rewrite/static resources.
 
-已有 Go 的 Windows 开发终端可在仓库根目录构建：
+Source-built test binary:
 
-```powershell
+~~~powershell
 $env:CGO_ENABLED='0'
 go build -buildvcs=false -o C:\RumableTest\rumable.exe .\cmd\rumable
-```
+~~~
 
-管理员的 64 位 Windows PowerShell 5.1 执行。ResultDir 每次必须不存在；默认占用 19780/19781 两个回环端口：
+Prefer the verified release binary for release acceptance. Each ResultDir is new; default loopback ports are 19780/19781.
 
-```powershell
-$ps="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$agent='C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
-& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
-  -Binary C:\RumableTest\rumable.exe -AgentPath $agent `
-  -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x64-01
-$LASTEXITCODE
+~~~powershell
+$ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$agent = 'C:\Program Files\OpenTelemetry .NET AutoInstrumentation'
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 -Binary C:\RumableTest\rumable.exe -AgentPath $agent -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x64-01
 
-# 32 位应用池；Agent 须带 win-x86 profiler。WithRUM 同时验证独立开关。
-& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
-  -Binary C:\RumableTest\rumable.exe -AgentPath $agent -X86 -WithRUM `
-  -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x86-rum-01
+# x86 pool and combined browser/server lifecycle.
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 -Binary C:\RumableTest\rumable.exe -AgentPath $agent -X86 -WithRUM -Backend datakit -Endpoint http://127.0.0.1:4317 -ResultDir C:\RumableResults\otel-x86-rum-01
 
-# 当前进程已安全设置 RUMABLE_DATAWAY_TOKEN 后，另跑 Dataway：
-& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 `
-  -Binary C:\RumableTest\rumable.exe -AgentPath $agent -WithRUM `
-  -Backend dataway -Endpoint https://dataway.example.com/otel -ResultDir C:\RumableResults\otel-dataway-01
-```
+# Set RUMABLE_DATAWAY_TOKEN securely in this process first.
+& $ps -NoProfile -ExecutionPolicy Bypass -File C:\Rumable\source\scripts\windows-otel-smoke.ps1 -Binary C:\RumableTest\rumable.exe -AgentPath $agent -WithRUM -Backend dataway -Endpoint https://gateway.example.com/otel -ResultDir C:\RumableResults\otel-gateway-01
+~~~
 
-| 场景 | 脚本实际断言 |
-|---|---|
-| 独占池与旁站 | 新建两个随机站点/池；目标池环境生效，旁站池环境、HTTP service 值和 PID 不变；共享目标池时拒绝启用 |
-| 重复启停 | 重复 enable/disable 不改变成功历史，实际服务请求的 PID 不变 |
-| 独立开关（WithRUM） | RUM/OTel 分别启停，注入一次且资源摘要正确；RUM 操作不改变 OTel 环境/PID，Dataway 当前 Token 暂时缺失也可操作 RUM |
-| 采样配置 | 0/100 转换为池环境 0/1；不将环境值当作采样统计或入库证明 |
-| 失败恢复 | 改变 serviceName 后应用主动返回 503；CLI 必须失败，旧历史、旧环境和实际服务代次恢复，无 transaction.json 残留 |
-| 外部修改 | 受管 serviceName 或新增信号级 exporter 覆盖时拒绝停用，保留外部值 |
-| 回滚 | 恢复已保存 profiler/凭据，实际应用显示恢复的 serviceName；Dataway 当前 Token 缺失时仍可回滚 |
-| 清理与报告 | 只清理两组测试资源，ResultDir 保留；池账户只能遍历状态父目录、读取公共脚本，不获准读取状态/事务文件 |
+Assertions cover dedicated/peer pool isolation, unchanged peer service/PID, shared-pool refusal, idempotency, independent controls, preserved credentials, sampler 0/100 conversion, actual worker recovery after post-commit 503, signal-specific drift refusal, saved-token rollback, and report-owned cleanup/ACLs. Sampler settings are not statistical or ingestion evidence.
 
-读取结果：
-
-```powershell
-$report=Get-Content C:\RumableResults\otel-dataway-01\report.json -Raw | ConvertFrom-Json
+~~~powershell
+$report = Get-Content C:\RumableResults\otel-gateway-01\report.json -Raw | ConvertFrom-Json
 $report.result
 $report.steps | Format-Table name,result,time -AutoSize
 $report.cleanup
-$report.traceId # 到观测云查询 Trace，核对 service.name 与上下游。
-```
+$report.traceId # Find at the receiver and verify parentage and service.name.
+~~~
 
-退出码 0 代表本脚本断言与清理通过（或显式 Keep），失败返回非零；report.json 与 cli.log 保留环境、二进制摘要和阶段结果，不保存原始 Token。默认纯 OTel 运行不覆盖 RUM 联合场景，应另跑 WithRUM。脚本是 .NET Framework 夹具；ASP.NET Core 的 No Managed Code、托管方式与 Agent 加载仍须在业务测试应用验收。
+This fixture is .NET Framework; ASP.NET Core No Managed Code/hosting/Agent loading needs separate tests. Default OTel-only runs do not cover WithRUM. Reports do not retain raw tokens.
 
-Keep 会保留两组站点/池与受限状态目录。之后在同一账户的管理员 64 位 PowerShell 中，按报告归属清理：
+Keep leaves two test resource groups. Load scripts/windows-iis-helpers.ps1 and use Remove-TestDeployment for report site/peer under the original administrator identity after verifying ownership.
 
-```powershell
-Add-Type -Path "$env:SystemRoot\System32\inetsrv\Microsoft.Web.Administration.dll"
-. C:\Rumable\source\scripts\windows-iis-helpers.ps1
-Remove-TestDeployment $report.site (Join-Path $env:TEMP $report.site)
-Remove-TestDeployment $report.peer (Join-Path $env:TEMP $report.peer)
-```
+## Compression, cold-page, and conditional-GET regression
 
-本轮 macOS/OrbStack 没有 Windows/IIS。实际池回收、IIS API、Windows PowerShell 5.1、Agent 加载和真实入库，均需保存目标环境结果后才能标为通过。
+Test inherited/local true/false for both compression attributes. Confirm both are disabled while active and independently restored.
 
-## 动态压缩、冷页面与 304 回归
+second.html intentionally stays outside probePaths. Warm gzip and preserve actual ETag/Last-Modified before installation. After enable, send separate/combined old validators before unconditional/repeat-enable/identity requests can mask the first result.
 
-本节保留从 0.1.7 引入的回归场景；0.1.8 已完成的静态站点覆盖和仍未验证项以 [实机记录](verification.md)为准。
+Keep a browser with pre-installation session/cache. Capture first ordinary refresh of / and /second.html using CDP/NetLog, status, and body. Distinguish unmodified 200 gzip from later 304 reuse. Require first-refresh 200 with one current tag; do not clear cache to avoid the regression.
 
-`windows-smoke.ps1` 要求静态和动态压缩模块均可用，覆盖两种属性的继承、显式 true、显式 false；启用后两者均关闭，停用后分别恢复原值及继承关系。`second.html` 刻意不加入 probePaths：安装前预热 gzip，保存真实 ETag、Last-Modified；首次启用后分别及组合携带旧校验头发起条件 GET，再检查无条件响应、重复启用和 identity，避免预热掩盖错误。便携 PowerShell 测试只验证逻辑和模拟 API，不能替代此原生测试。
-
-额外在真实浏览器保留安装前会话，覆盖 `/` 和 `/second.html` 的首次普通刷新，保存 CDP/NetLog、真实网络状态与正文。需要单独区分初始 200 gzip 漏注入，以及修正压缩配置后 304 复用旧正文。0.1.7 已加入目标应用的入站校验头清理；验收须证明首次普通刷新是 200 且恰好一条当前注入，不能用清缓存规避。同时检查新增入站规则及两项 allowedServerVariables 权限的快照、更新、回滚、停用恢复和外部漂移拒绝，保留旧 0.1.4–0.1.6 现场及证据。动态页面、chunked、JSON/下载旁路也须覆盖。
+Check inbound-rule/allowedServerVariables snapshot/update/rollback/disable/drift, dynamic/chunked pages, JSON/download bypass, and retained old failures independently. The 0.1.8 report establishes only the static coverage and limits recorded in [verification](verification.md).

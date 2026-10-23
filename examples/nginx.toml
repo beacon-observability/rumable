@@ -13,10 +13,10 @@ args = ["-c", "/etc/nginx/nginx.conf"]
 attachmentReviewed = false
 
 [sites.sdk]
-source = "bundled" # bundled（网站同域）或 cdn
-loading = "async" # sync 会阻塞 HTML 解析；需要支持同步加载的新版本
-# url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
-integrity = false # 仅 CDN 可开启，跨域时需要 CORS
+source = "bundled" # bundled (same origin) or cdn
+loading = "async" # sync blocks HTML parsing; requires a compatible release
+# Omit url to use the package-recorded source; a custom HTTPS CDN must serve identical bytes.
+integrity = false # CDN only; cross-origin loading requires CORS
 
 [sites.rum]
 applicationId = "REPLACE_APPLICATION_ID"

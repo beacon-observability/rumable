@@ -1,85 +1,90 @@
-# 版本说明
+# Changelog
+
+## Unreleased
+
+- Keep Rumable as the public product name and retain the rumable executable, configuration schema, state/resource paths, and deployment markers.
+- Publish English documentation, example comments, setup-page copy, generated archive README files, and latest redirect pages.
+- Use neutral application/receiver wording and release-relative installation guidance in public documents. No new hosted download channel is announced.
+- Keep package-default CDN configuration implicit so the CLI resolves the package-recorded SDK source; custom CDN URLs remain supported.
+- Add a public-documentation wording/language/link check to release validation. Runtime SDK bytes, required third-party notices, native dependencies, and collection protocols are unchanged.
 
 ## 0.1.5 · 2026-10-22
 
-- 修复 IIS 集合 Add 返回值污染 JSON，桥接只解析标准输出，保持错误输出分离。
-- 排除路径过滤空值，修复自动发现中 null 排除列表导致所有 HTML 被排除。
-- rollback 可严格核对并恢复 RUM-only 的“已提交但未记录 native 快照”旧事务，支持恢复再次中断后重试，拒绝不匹配的规则、映射、压缩和 OTel 设置。
-- Windows 输入重定向及 PowerShell 非交互启动不再等待隐藏控制台选择；新增 setup --non-interactive / 安装器 -NonInteractive。
-- Windows 私有文件使用原生受保护 DACL，公共脚本仅向实际匿名读取账户和池身份开放读取；不递归放开状态目录。
-- Linux 页面命令使用 Bash pipefail，下载失败与安装失败均返回非零。
-- PowerShell CI 增加真实桥接分支及旧事务回归，另提供原生 Windows 权限/控制台测试；Windows 实机复测结果仍待验证。
+- Discard IIS collection Add return values that polluted bridge JSON; parse stdout separately from stderr.
+- Remove empty excluded-path entries, fixing null discovery lists that excluded all HTML.
+- Strictly reconstruct and restore RUM-only legacy transactions committed without a recorded native snapshot. Retain retry support after interrupted recovery and reject mismatched rules, mappings, compression, and OTel.
+- Detect redirected Windows input and noninteractive PowerShell; add setup --non-interactive and installer -NonInteractive.
+- Protect private Windows files with native DACLs. Grant only public-script reads to actual anonymous/pool identities without recursively exposing state.
+- Generate Linux commands with Bash pipefail so download and installer failures return nonzero.
+- Extend portable bridge/legacy recovery contracts and provide native Windows permission/input tests; native retest was pending at this historical stage.
 
 ## 0.1.4 · 2026-10-21
 
-- Windows 安装器契约测试改在官方 PowerShell 独立容器中运行，不再在 Go 构建镜像中下载系统依赖。0.1.3 tag 流水线在 apt 依赖下载阶段停滞，尚未上传 OSS，取消该次任务后使用本版发布；原 tag 保留。
-
-- 简化接入页：默认只填 RUM 参数并选择安装环境；新增 `setup --discover`，自动枚举 Nginx / IIS 站点，单站点自动选中，多站点或多地址终端选择。手动站点、路径与程序位置保留在高级设置。
-- 重复自动接入沿用受管站点 ID、访问地址和路径；自动发现完成后仍执行原有锁、注入预检、备份、启停和回滚机制。无终端且目标不明确时停止，不默选站点。
-- Windows 安装器通过原生 API 识别 x64 / ARM64，按真实系统版本自动选择现代或 legacy 包，处理 32 位 PowerShell 的原生安装目录；不支持的系统在下载前拒绝，包摘要仍由安装器固定。
-- 页面自动读取发布清单，旧版清单不生成自动发现命令；Windows 下载前设置 TLS 1.2。HTML 发布同时设置正确 MIME 与 inline 响应头，配置页使用自定义域名访问。
-- 增加 Nginx 自动发现完整流程及 Windows 安装器契约测试；Windows/IIS 原生运行仍需测试机验收。
+- Move Windows installer contracts to a standalone official PowerShell container. The 0.1.3 tag pipeline stalled during apt downloads before OSS publication; it was cancelled and its tag retained.
+- Simplify the page to RUM details and server selection. Add setup --discover for Nginx/IIS, selecting a unique target or asking through the terminal. Keep manual targeting in advanced settings.
+- Repeat discovery reuses site ID/URL/paths and existing locks, preflight, backups, lifecycle, and recovery. Ambiguity without a terminal fails.
+- Detect native Windows architecture/version, select modern/legacy packages, and handle native installation directories from 32-bit PowerShell. Reject unsupported OS before downloading.
+- Load the page's matching manifest automatically, reject unsupported discovery commands, enable TLS 1.2 for Windows downloads, and publish HTML with correct MIME/inline headers.
+- Add discovery and Windows installer contracts. Native Windows/IIS still required separate acceptance.
 
 ## 0.1.2 · 2026-10-21
 
-- 收紧分发范围：平台安装包不再携带 Go 测试源码、验收脚本和测试夹具；保留程序、使用文档、配置示例及许可证。
-- OSS 公开目录只发布 10 个平台包、安装器、配置页和版本元数据，共 19 个文件。上传前按明确清单检查，额外文件即使摘要正确也会阻止发布。
-- Windows 自动验收改为从对应发布 tag 获取脚本，单独指定正式 CLI；固定 latest 入口继续随成功发布更新。0.1.1 历史产物保持不变。
-
+- Remove test source, acceptance scripts, and fixtures from platform archives; retain executable, manuals, examples, and notices.
+- Enforce the then-current 19-file OSS allowlist. Even checksum-valid unexpected files block publication.
+- Obtain Windows acceptance scripts from the matching source tag and select the release CLI separately. Keep historical 0.1.1 artifacts immutable.
 
 ## 0.1.1 · 2026-10-21
 
-- 新增 `rumable/latest/` 固定配置页、清单和 Linux / Windows 安装入口；正式版本完整发布后再更新，旧版本重试不回退 latest。
-- 清单增加 `artifactBase`，latest 发现与实际安装版本分开；页面命令及安装器均下载所选固定版本，保留历史目录和摘要校验。
-- CI 默认使用可访问的 Go 模块镜像并保留校验数据库，修复首轮流水线因 proxy.golang.org 下载超时而无法构建的问题。
-- 更新产品集成入口、main 发布流程和 Windows 一键安装验收文档。Windows/IIS 原生运行仍由目标测试机验收。
+- Add stable latest page, manifest, and Linux/Windows installer entries after complete stable publication; old retries cannot move latest backward.
+- Add artifactBase so latest discovery resolves immutable selected-version artifacts.
+- Use a reachable Go module mirror while keeping checksum-database validation after initial network failures.
+- Document main/tag release flow and separate Windows installation acceptance.
 
 ## 0.1.0 · 2026-10-21
 
-- 新增 Web SDK 配置页，按 OpenWay/DataKit、采样、回放、隐私及链路参数生成 TOML；从固定版本 OSS manifest 生成带摘要校验的 Linux/Windows 安装命令。
-- 新增 RUM-only `setup` 命令，组合首次准备、Nginx 自动挂接、启用及故障恢复；发布脚本新增 manifest.json 和独立 install.sh / install.ps1，页面只生成带配置的短命令。
-- 新增 GitLab CI / OSS 发布流程，沿用 browser-sdk 的 cloudcare-tools、Docker、受保护发布 tag 和 OSS_* 变量；固定版本文件集、同版本配置页、摘要回读和 manifest 最后发布，支持相同内容重试。
-- 新增 `scripts/release-oss.sh`：校验版本与干净工作区，支持预演，创建并推送唯一发布 tag、回读目标提交；拒绝版本冲突，推送失败可复用本地 tag 重试。
-- 补充 main 合并发布流程、公开下载路径和 Windows 一键安装验收步骤。Windows/IIS 原生验收由目标测试机执行，发布构建不代表 Windows 已通过。
-
-- RUM 注入改为标准 `<head>` 后插入，防止破坏 JavaScript 中的 `</head>` 字符串；预检拒绝不支持或有歧义的锚点。HTTP 探测和 CSP 检查使用 HTML 分词，忽略脚本文本、注释和惰性模板中的伪标签。
-- 修复 IIS 首次启用失败后保留资源映射、恢复再次中断时无法重试 rollback 的问题；仅接受日志能精确推导的恢复状态，继续拒绝外部修改。
+- Add a static SDK setup page generating TOML for existing reporting modes, sampling, replay, privacy, and tracing, plus checksum-pinned platform installation commands.
+- Add RUM-only setup composing initial preparation, Nginx attachment, enable, and recovery. Publish manifest and separate installers.
+- Add protected-tag GitLab/OSS publication with Docker, serial immutable uploads, checksum readback, manifest-last publication, and equal-byte retries.
+- Add release-oss.sh for clean-source/version/remote checks, dry run, annotated tag creation/push, commit readback, conflict refusal, and retry after rejected push.
+- Document public release layout and separate Windows acceptance; successful packaging is not native Windows execution.
+- Inject after a standard opening head instead of matching closing-head text that can occur in JavaScript. HTML tokenization ignores fake tags in script/comment/inert-template content.
+- Fix IIS retained mapping and repeated interrupted-restore recovery with exact journal-derived ownership checks.
 
 ## 0.1.0-preview.3 · 2026-10-20
 
-本地 preview 更新，提供 Windows/Linux x86、x64、ARM64 现代包，以及 Windows/Linux x86、x64 legacy 包。当前仅支持 Nginx、IIS，不提供 macOS 包；旧发布压缩包保持不变。
+Local preview with modern Linux/Windows x86/x64/ARM64 packages and legacy x86/x64 packages. Current servers are Nginx and IIS; no macOS archives. Earlier artifacts remain immutable.
 
-- 新增 `install-otel`：Nginx 准确版本 APT 包私有提取；IIS 官方 .NET Agent v1.17.0 下载、校验与读取权限设置。支持自定义离线/HTTPS 包，不升级服务器或全局注册 IIS。
-- 新增 `uninstall`：预览和确认后停用站点的 RUM/OTel、恢复受管配置、归档备份；可选清理未修改且无共享引用的受管依赖。
-- 修复 RUM 单独启停依赖未变更 OTel 接收端，以及停用后父层 Nginx 过滤规则改写缓存页面脚本的问题。
-- OTel 单组件操作保留已部署的浏览器 SDK、初始化脚本及 CDN 引用，不意外升级；Web SDK 升级使用普通 enable 或 enable --component rum。
-- 修复 http 块位于 include 文件时模块加载过晚；多文件恢复中断、临时配置无法解析时，可继续 rollback --attachment。
-- 包含 IIS 池隔离、事务落盘后独立回收、旧 worker 等待、重复恢复、RUM 操作保留凭据和增强验收脚本；Windows/IIS 实机仍需验收。
-- 删除 Apache RUM/OTel 实现、TOML 配置、模块构建与安装、自动挂接、Lua 资源、示例和专用脚本，不保留兼容分支。
-- 内置官方稳定 Web SDK 3.3.21，保留 Session Replay 默认关闭、同域/CDN 模式和站点级 TOML 配置。发布前在线同步与校验；现有站点不会后台升级。
+- Add install-otel: exact-version Nginx APT extraction and upstream .NET Agent v1.17.0 download/digest/ACL handling, plus offline/HTTPS archives. No server upgrades or global IIS registration.
+- Add uninstall with preview, ownership checks, RUM/OTel disable, configuration restore, state archive, and optional unchanged/unshared dependency removal.
+- Remove unchanged OTel endpoint reachability from RUM-only lifecycle dependencies and prevent inherited filters from rewriting cached SDK assets after disable.
+- Preserve browser SDK, initialization script, and CDN references during OTel-only operations.
+- Load modules before http-in-include configuration; continue interrupted multi-file attachment recovery even when temporary native configuration cannot parse.
+- Add dedicated-pool isolation, snapshot-before-recycle, old-worker waits, repeated recovery, RUM credential preservation, and expanded Windows acceptance contracts; native Windows was pending.
+- Remove Apache implementations, configuration, build/install, attachment, Lua assets, examples, and scripts without a compatibility branch.
+- Bundle stable SDK 3.3.21 with replay opt-in and same-origin/CDN configuration. Prepare SDK updates explicitly; deployed sites do not update in the background.
 
-用户步骤见[使用指南](USER-GUIDE.md)、[安装与卸载](docs/otel-installation.md)；编译、本地运行和未完成的目标环境验收见[验证记录](docs/verification.md)。以下为旧版的历史记录。
+See the [user guide](USER-GUIDE.md), [dependency guide](docs/otel-installation.md), and [verification records](docs/verification.md). Earlier entries below are historical, not current Apache support.
 
 ## 0.1.0-preview.2 · 2026-10-20
 
-- 增加 Linux Nginx、Linux Apache、IIS/.NET 的站点级 OTel 配置，RUM/OTel 独立开关和组件启停。
-- 支持 DataKit OTLP/gRPC；Dataway 使用 Linux Collector 转换或 IIS/.NET 直接 OTLP/HTTP，Token 保留在服务器侧。
-- 复用差异确认、挂接备份和部署回滚，增加 Linux 配置生效标记，连续确认配置代次，避免平滑重载的新旧 worker 交接窗口中提前返回。
-- Apache 要求包含请求隔离修复的模块；IIS 要求 IIS 10 和独占应用池，只在环境值真正变化时回收目标池。
-- 撤销挂接释放共享 exporter，未完成恢复阻止新部署；构建拒绝覆盖已有发布目录，并在完成前复核源码提交。
-- 使用说明和实际验收边界见 [OTel 手册](docs/otel.md)及[验证记录](docs/verification.md)。本版提供 Windows/Linux x86、x64、ARM64 现代包及适用的 legacy 包；不包含原生模块、.NET Agent 或 Collector。
+- Add site-level server OTel for Linux Nginx, then-supported Linux Apache, and IIS/.NET with independent RUM/OTel switches.
+- Support existing direct OTLP/gRPC collection and authenticated-gateway delivery through a Linux Collector or direct IIS OTLP/HTTP, keeping server tokens private.
+- Reuse preview, backup, and rollback. Confirm active Linux generation in consecutive rounds to avoid graceful-reload worker races.
+- Require an isolation-fixed Apache module and IIS 10 dedicated pool. Recycle IIS only when managed environment changes.
+- Release shared exporters on detach, block new deployment during incomplete recovery, reject existing release output directories, and recheck source revision.
+- Distribute CLI archives without native modules, .NET Agents, or Collector. See [OTel scope](docs/otel.md) and [verification](docs/verification.md).
 
 ## 0.1.0-preview.1 · 2026-10-20
 
-本地 preview 发布，提供 Windows / Linux 独立可执行文件、TOML 示例、使用指南、SDK 来源/摘要和第三方许可。未发布到远程 GitLab，不包含 macOS 发布包。
+Local preview with standalone Linux/Windows executables, TOML, manuals, SDK metadata/digest, and notices. No remote publication or macOS package at that stage.
 
-- 支持 Nginx 1.9.4+、Linux Apache 2.4.23+ 和 IIS 7.5+ 的完整 HTML 注入。
-- Linux 首次挂接支持站点识别、差异预览、确认、备份、故障恢复和撤销；启停与部署回滚有受管文件摘要和外部变更保护。
-- 站点使用 TOML 配置 OpenWay / DataKit、采样、采集、隐私、会话与回放；Session Replay 默认关闭。
-- SDK 默认同域，亦可按站点配置 CDN、固定 URL 和可选 SRI。发布构建前同步并校验官方稳定 v3 SDK；当前内置 3.3.21。
-- 提供 Windows x86/x64/ARM64、Linux x86/x64/ARM64；旧 Windows 和旧 x86 Linux 提供 Go 1.20.14 legacy 包。
-- Windows x86 CLI 在 64 位系统通过 Sysnative 调用 64 位 PowerShell；真正 32 位 Windows 不支持 IIS 配置管理。
+- Support HTML injection for Nginx 1.9.4+, then-supported Linux Apache 2.4.23+, and IIS 7.5+.
+- Add Linux site discovery, attachment diffs/confirmation/backups/recovery/undo and managed-digest drift protection.
+- Configure reporting, sampling, collection, privacy, storage, and replay per site; replay defaults off.
+- Default to same-origin SDK with optional CDN, pinned URL, and SRI. Review stable v3 SDK before release; bundle 3.3.21.
+- Provide modern Windows/Linux x86/x64/ARM64 and legacy old-Windows/Linux x86/x64 packages.
+- Use Sysnative to run the 64-bit Windows management bridge from x86 CLI on x64; native 32-bit Windows cannot manage IIS.
 
-Linux Nginx / Apache 与本机 Chrome 已有运行记录；Windows/IIS、旧内核和真实观测云入库仍须目标环境验收。支持范围与实际证据分别见[兼容性矩阵](docs/compatibility.md)和[验证记录](docs/verification.md)。Preview 不支持任意服务器配置、HTML 片段或流式 SSR，不自动放宽 CSP。
+Historical Linux/Chrome evidence did not establish native Windows, old-kernel, or real receiver acceptance. See [compatibility](docs/compatibility.md) and [verification](docs/verification.md). Previews do not guarantee arbitrary server layouts, HTML fragments, streaming SSR, or automatic CSP relaxation.
 
-旧部署升级：保留原 TOML、站点 ID、服务器目标与状态目录；换用对应平台的新可执行文件后执行 enable。普通 rollback 恢复上一成功部署，不会恢复已被外部 CDN 覆盖的文件。
+Keep old TOML, ID, target, and state when upgrading compatible deployments. Ordinary rollback restores a saved deployment, not an externally overwritten CDN file.

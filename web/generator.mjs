@@ -31,10 +31,14 @@ export function makeConfig(m) {
     sdkText = `\n[${manual ? 'sites.sdk' : 'sdk'}]\nsource = ${encode(sdkSource)}\n`;
   }
   if (sdkSource === 'cdn') {
-    const raw = (m.sdkURL || officialSDKURL).trim();
-    const remote = url(raw, {key:'field.sdkURL'}, {https: true});
-    if (raw.includes('?') || remote.pathname === '/') throw new SetupError('error.cdnPath');
-    sdkText += `url = ${encode(raw)}\nintegrity = ${!!m.sdkIntegrity}\n`;
+    const raw = String(m.sdkURL || '').trim();
+    if (raw) {
+      const remote = url(raw, {key:'field.sdkURL'}, {https: true});
+      if (raw.includes('?') || remote.pathname === '/') throw new SetupError('error.cdnPath');
+      sdkText += `url = ${encode(raw)}\n`;
+    }
+    // An omitted URL preserves the CLI's release-recorded SDK source.
+    sdkText += `integrity = ${!!m.sdkIntegrity}\n`;
   }
   if (sdkLoading === 'sync') sdkText += 'loading = "sync"\n';
   let base;

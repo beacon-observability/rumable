@@ -151,7 +151,7 @@ export async function publishLatest(artifacts, client, onVerified = () => {}) {
     if (comparison === 0 && sha256(previous) !== sha256(latestManifest)) throw Error('Latest already contains different metadata for this version');
   }
   const destination = `../../${manifest.version}/setup/index.html`;
-  const page = Buffer.from(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${destination}"><title>Rumable ${manifest.version}</title></head><body><a href="${destination}">打开 Rumable ${manifest.version} 配置页</a></body></html>\n`);
+  const page = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${destination}"><title>Rumable ${manifest.version}</title></head><body><a href="${destination}">Open Rumable ${manifest.version} setup</a></body></html>\n`);
   const aliases = [
     {name:'setup/index.html', content:page},
     ...['install.sh', 'install.ps1'].map(name => ({name, content:byName.get(name).content})),

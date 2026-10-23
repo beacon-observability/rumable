@@ -1,108 +1,97 @@
-# GitLab CI / OSS 发布
+# GitLab CI and OSS releases
 
-沿用 browser-sdk 的发布方式：受保护的发布 tag 触发、`cloudcare-tools` Shell Runner、Docker 内构建、`ali-oss` 上传、`OSS_*` 环境变量、resource group 串行发布及不含凭据的结果报告。此流程只发布 Rumable 安装脚本、安装包和静态配置页，不发布 npm 包。
+The existing deployment channel uses protected tags, a Shell Runner with Docker, ali-oss, OSS_* credentials, serial publication, and a credential-free report. Public documentation calls the product Rumable. Existing release tags, binary names, object paths, and the configured Runner label remain compatible.
 
-## 首次配置
+This workflow publishes platform archives, installers, and static setup files, not npm packages. It does not establish a new public download domain.
 
-在 GitLab Settings → CI/CD → Variables 配置以下变量，Environment scope 为 `*`，关闭变量引用展开。密钥使用 Masked 和 Protected；实际值不进入源码、命令参数或报告。
+## Initial configuration
 
-| 变量 | 用途 |
-|---|---|
-| `OSS_REGION` | 地域，例如 `oss-cn-hangzhou` |
-| `OSS_BUCKET` | 存放安装包和页面的 bucket |
-| `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 发布账号，只需目标 `rumable/*` 的 GetObject / PutObject 权限 |
-| `OSS_STS_TOKEN` | 可选，配套的 STS 临时凭据 |
+Configure GitLab CI/CD variables with environment scope *, variable expansion disabled, and secrets Masked/Protected:
 
-CI 不配置公开下载域名，只按固定 object key 上传。页面由所选 manifest 的 HTTPS 地址推导下载目录，并通过 `--base-url` 传给安装脚本；同一套产物可使用不同 OSS/CDN 域名。
+| Variable | Purpose |
+| --- | --- |
+| OSS_REGION | Storage region, such as oss-cn-hangzhou |
+| OSS_BUCKET | Artifact/page bucket |
+| OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET | Publishing identity with GetObject/PutObject on the intended rumable/* prefix |
+| OSS_STS_TOKEN | Optional matching temporary credential |
 
-配置页应使用 `https://static.guance.com/rumable/latest/setup/index.html` 等自定义域名。阿里云 OSS 原始域名可能返回 `x-oss-force-download: true` 并强制下载 HTML；不能仅靠 HTML 标签修复。上传器同时设置 `Content-Type: text/html; charset=utf-8` 与 `Content-Disposition: inline`，固定版本页和 latest 入口都覆盖。
+Public download domains are not CI variables. The page resolves files against the chosen HTTPS manifest and passes the resulting base URL to installers. Identical artifacts can use different hosting domains.
 
-配置 bucket/CDN 对 `rumable/*` 的匿名读取和正确 MIME 类型；跨域使用配置页时允许其域名 GET 清单。脚本不自动修改 bucket ACL、CORS、域名或 CDN。上传后的 SHA-256 回读使用 OSS API，不能代替公开域名/CDN 的下载验收。
+Use an actual static-site/custom domain that serves HTML inline. Some raw storage domains force HTML download. The publisher sets text/html; charset=utf-8 and Content-Disposition:inline for versioned and latest pages, but HTML tags cannot override a forced-download host.
 
-在 Settings → Repository → Protected tags 保护 `release-*`，仅允许发布负责人创建。启用 `cloudcare-tools` Runner，安装 Docker，并允许访问镜像仓库、Go 模块代理、npm registry 和 OSS。与 browser-sdk 相同，不使用 Shell executor 会忽略的 GitLab `image` 字段。
+Configure anonymous artifact reads, MIME, and page-origin GET CORS externally. The publisher does not change bucket ACL, CORS, domain, or CDN settings. OSS API readback is separate from public CDN/download acceptance.
 
-构建镜像包含 Go 1.26.1、Go 1.20.14 和 Node 22。可通过 `MODERN_GO_IMAGE`、`LEGACY_GO_IMAGE`、`RELEASE_NODE_IMAGE`、`RELEASE_POWERSHELL_IMAGE` 指向内部镜像或固定 digest；发布脚本仍校验编译器分别为 1.26.x 和 1.20.14。Windows 安装器、IIS 快照、RUM 恢复及 OTel 契约测试先在官方 PowerShell 7.4 独立容器中运行，挂载只读源码、不传发布凭据并禁用网络，不再在 Go 镜像中通过 apt 安装 PowerShell 依赖。`RELEASE_POWERSHELL_IMAGE` 可替换对应官方运行镜像。Node 仅供 CI 和本地页面测试，最终用户无需安装 Node/Go。
+Protect release-* tags and limit creation to release maintainers. Use the Runner selected in .gitlab-ci.yml with Docker and access to compiler/container registries, Go modules, npm, and OSS. A Shell executor uses explicit Docker commands rather than GitLab image settings.
 
-Runner 的 Go 模块下载默认使用 `GOPROXY=https://goproxy.cn,direct`，保留 `GOSUMDB=sum.golang.org` 校验；可用同名 CI 变量覆盖，两项会显式传入构建容器。不要通过关闭摘要校验绕过网络故障。
+Build images contain Go 1.26.x, Go 1.20.14, and Node. MODERN_GO_IMAGE, LEGACY_GO_IMAGE, RELEASE_NODE_IMAGE, and RELEASE_POWERSHELL_IMAGE can select reviewed images/digests. The builder validates compiler versions independently.
 
-## 版本准备与触发
+Portable PowerShell contracts run first in a separate official PowerShell 7.4 container with read-only source, no network, and no publishing secrets. These mocks are not native Windows acceptance. Node and Go are development/release tools, not user prerequisites.
 
-发布脚本在 Rumable 源码 Git 仓库中运行；Windows / Linux 分发包用于安装验收，不含 Git 元数据。
+GOPROXY defaults to a reachable mirror plus direct fallback; GOSUMDB remains sum.golang.org. Override by CI configuration when necessary; do not disable checksum verification to bypass network errors.
 
-先更新并审核源码、`internal/rumable/config.go` 的 `Version` 和版本说明；如需升级内置 SDK，在准备阶段运行 `go run scripts/sync-sdk.go`，将 SDK 与元数据一并提交。CI 验证其摘要，使用 tag 中已提交的 SDK，不在重试时下载变化的 latest。
+## Prepare and trigger a version
 
-同步加载与自动发现 SDK 参数需要页面和 CLI 同时发布。新清单分别声明 `rum-sdk-loading-v1`、`rum-discovery-sdk-v1`；仅替换旧版本目录下的页面无法增加 CLI 能力。应使用新版本号发布，不覆盖既有 0.1.5 包。页面会在读取旧清单时阻止生成不兼容的安装命令。
+Review source changes, the Version in internal/rumable/config.go, and release notes. For SDK updates, run scripts/sync-sdk.go during preparation, review the bytes/metadata, and commit. Tag CI verifies that committed digest and uses --skip-sdk-sync; retries do not follow mutable latest.
 
-将待发布改动合入 `main` 并推送，确认工作区干净、`main` 与 `origin/main` 一致，再使用仓库发布脚本创建与源码 Version 相同的发布 tag。当前版本为 `0.1.8`：
+CLI, page, and capability changes must be released together. The manifest advertises rum-sdk-loading-v1 and rum-discovery-sdk-v1 where implemented. Replacing a page in an old immutable directory cannot add CLI capabilities.
 
-```sh
+Merge and push reviewed source to main, verify a clean checkout aligned with origin/main, then use the release script. Version 0.1.8 illustrates the existing source version, not a new release created by this documentation change:
+
+~~~sh
 git switch main
 git pull --ff-only origin main
-
-# 只检查版本、工作区和远端 tag，不创建或推送 tag
 bash scripts/release-oss.sh 0.1.8 --dry-run
-
-# 创建附注 tag 并推送，触发 GitLab 的 OSS 发布流水线
+# Run only when publication of the reviewed version is authorized:
 bash scripts/release-oss.sh 0.1.8
-```
+~~~
 
-省略版本号时读取源码 Version，默认远端为 `origin`，可用 `--remote NAME` 指定已配置的远端。脚本检查实际 push URL，只推送当前提交的一个发布 tag，不提交代码或推送分支，不覆盖不同提交的同名 tag。推送失败保留本地 tag，修复原因后可重跑；远端已存在且提交相同时只报告现状，不会再次触发流水线。远端 tag 回读通过不等于 OSS 发布成功，仍需查看 GitLab 流水线及发布报告。
+Omitting the version reads source Version. The default remote is origin; --remote selects an existing remote. The script validates the actual push destination and creates/pushes only one annotated matching release tag. It neither commits nor pushes branches and refuses conflicting tags.
 
-普通分支、普通 `v...` tag、未保护的 tag 均不发布；不需要 GitLab API token。脚本不会配置受保护 tag 规则；首次使用必须完成前述 GitLab 设置。CI 不修改版本、不提交代码或推送分支。正式版本全部验证成功后更新 latest，预发布版本只发布自身版本目录。
+A failed push retains the local tag for retry. An identical existing remote tag is reported without retriggering a pipeline. Successful tag readback does not prove storage publication; inspect the pipeline/report.
 
-## 执行顺序
+Branches, ordinary v... tags, and unprotected tags do not publish. No GitLab API token is required. The script does not configure tag protection. Stable versions promote latest only after verification; prereleases only publish their own version directory.
 
-1. 核对受保护 tag、源码 Version、commit、OSS 变量。
-2. 按独立 lockfile 安装发布依赖，运行页面/发布脚本回归及 Windows 安装脚本的可移植契约测试（不代替 Windows 实机验收）。
-3. 使用两套 Go 编译器分别运行全量 test/vet、SDK 同步和归档测试，生成全部 10 个平台包。
-4. 生成同版本 `install.sh`、`install.ps1`、`setup/` 配置页、manifest、SDK 元数据和 SHA256SUMS。公开目录只允许 10 个平台包、2 个安装器、5 个页面文件及 3 个元数据/校验文件，共 20 个对象；上传前拒绝任何额外文件，即使其摘要正确。使用文档、配置示例和许可证只放在平台包内。
-5. 预读 OSS 全部同名对象：相同字节可重试，任何不同字节均停止，不覆盖旧版本。
-6. 逐项上传并 GET 回读校验 SHA-256；全部通过后才上传和验证 `manifest.json`。报告写入脚本、页面和清单的 OSS object key。
-7. 正式版本更新 `latest/setup/index.html`、两个安装器，再更新 `latest/manifest.json`，逐项回读校验。latest 使用 `Cache-Control: no-store, max-age=0`；固定版本仍使用长期不可变缓存。
+## Execution order
 
-当前目录为 `rumable/0.1.8/...`（版本号不带 preview 后缀），后续使用 `rumable/<version>/...`，配置页是 `rumable/<version>/setup/index.html`，清单是 `rumable/<version>/manifest.json`。脚本路径为同目录的 `install.sh` 和 `install.ps1`，内置本次构建版本及包摘要，不包含下载域名。配置页自动读取同版本清单；填写 Web SDK 参数并选择安装环境后即可复制接入命令。
+1. Verify protected tag, source version, commit, and required storage variables.
+2. Check English documentation, wording, and local links; verify pinned SDK hash.
+3. Install publishing dependencies from their lockfile and run page/installer/release contracts.
+4. Run tests/vet and packaging contracts with both real Go compilers.
+5. Build ten platform archives, two installers, five setup files, sdk.json, manifest.json, and SHA256SUMS.
+6. Validate the public allowlist: 20 objects. Documents, examples, and license notices stay inside platform archives; unexpected standalone files are rejected even with valid hashes.
+7. Pre-read existing immutable objects. Equal bytes can be reused; any different bytes stop publication.
+8. Upload each object and GET-read its SHA-256. Upload/verify manifest only after all preceding objects pass.
+9. For a stable version, promote latest page and installers, then latest manifest, verifying each readback.
 
-发布完成后的公开入口：
+Versioned paths remain rumable/<version>/...; the page is setup/index.html and installers are install.sh/install.ps1 in that same version directory. Public URLs are formed from the operator's actual HTTPS base, not guessed product-hosting addresses.
 
-- 配置页：`https://static.guance.com/rumable/0.1.8/setup/index.html`
-- 清单：`https://static.guance.com/rumable/0.1.8/manifest.json`
-- Linux / Windows 安装器：`https://static.guance.com/rumable/0.1.8/install.sh`、`https://static.guance.com/rumable/0.1.8/install.ps1`
-- Windows x64：`https://static.guance.com/rumable/0.1.8/rumable_0.1.8_windows_amd64.zip`
+| Stable relative entry | Purpose |
+| --- | --- |
+| latest/setup/index.html | Redirect to a complete immutable version page |
+| latest/manifest.json | Version/digests/artifactBase |
+| latest/install.sh | Linux installation entry |
+| latest/install.ps1 | Windows installation entry |
 
-产品集成使用下面四个固定地址：
+Resolve artifactBase=../<version>/ against the manifest URL before resolving installer or package files. Generated commands pin a version. A direct latest installer uses its compiled-in version to resolve the corresponding immutable directory, avoiding mixed old/new files.
 
-| 固定入口 | 用途 |
-|---|---|
-| `https://static.guance.com/rumable/latest/setup/index.html` | 跳转到最新正式版配置页 |
-| `https://static.guance.com/rumable/latest/manifest.json` | 读取版本、包摘要、`artifactBase` |
-| `https://static.guance.com/rumable/latest/install.sh` | Linux 安装入口 |
-| `https://static.guance.com/rumable/latest/install.ps1` | Windows 安装入口 |
+Latest only advances numerically. Older retries skip promotion when a newer version exists. Equal-version different metadata is refused. Multiple latest writes are not atomic, but each alias references an already complete immutable release; retry can finish partial promotion. Latest uses no-store, max-age=0; immutable versions retain long-lived caching.
 
-清单的 `artifactBase` 为 `../<version>/`，通过 `new URL(manifest.artifactBase, manifestURL)` 得到版本目录，再解析包或安装器的 `file`。页面即使读取 latest 清单，也生成固定版本命令。直接使用 latest 安装器时，将 base URL 设为 `https://static.guance.com/rumable/latest/`；脚本会按自身固定版本转换到对应目录，避免旧脚本与新包混用。
+x-oss-forbid-overwrite and a serial resource group supplement byte checks. This header does not enforce immutability in a versioned/suspended bucket; use one writer for the prefix. See [OSS PutObject](https://www.alibabacloud.com/help/en/oss/developer-reference/putobject). The pipeline does not change bucket versioning.
 
-latest 只允许版本号向前推进，比较数字版本号；旧 tag 重试发现更高版本时会跳过 latest。同版本但清单内容不同会拒绝。latest 多对象更新不是事务，但每个页面/安装器都指向已经完整发布的固定版本；失败时可重试，清单最后更新。CDN 应遵守 latest 的不缓存响应头，不对该目录配置强制长期缓存。
+## Distribution scope and retry
 
-公开域名仅用于文档与接入入口，不成为 CI 变量。发布后同时核对清单中的 revision 与 tag 提交、公开下载的 SHA-256 与 SHA256SUMS；本地旧测试包的 revision 为 `uncommitted` 时，不要用它替代 CI 的正式构建产物。
+Platform archives contain the executable, build.json, SDK metadata, English documents, TOML examples, and required third-party licenses. They exclude Go source, fixtures, acceptance/CI scripts, and Git metadata. Obtain automated acceptance scripts from the matching release-oss-v<version> source tag.
 
-上传设置 `x-oss-forbid-overwrite`，同时由 `rumable-oss-release` resource group 串行执行。该头在已开启/暂停版本控制的 bucket 上无效，参见 [OSS PutObject 说明](https://www.alibabacloud.com/help/zh/oss/developer-reference/putobject)；因此同一 `rumable/*` 前缀须仅由这套流水线写入，禁止其他发布者并发修改。脚本仍会预读拒绝不同内容并回读核对，不会修改 bucket 的版本控制设置。
+Publication is not a multi-file transaction. A failed run can leave verified partial objects; manifest is withheld until the complete set passes. Retry the same failed job after fixing network/environment issues without changing source. Source/compiler changes need a new version, not a forced tag or overwritten release.
 
-## 分发范围
+release-report.json and dist/ are retained as CI artifacts for 30 days even on failure. status=verified proves OSS API readback. Also open the public page, fetch manifest and archives through actual hosting, verify digests/revision, install on target servers, and validate disable/rollback and real ingestion.
 
-从 0.1.2 开始，平台包只包含可执行文件、build.json、SDK 元数据、使用文档、配置示例和第三方许可证。Go 源码、测试夹具、验收脚本、CI 脚本和 Git 元数据均不进入平台包，也不单独上传 OSS。构建脚本和上传器分别使用明确的文件清单，避免将整个仓库或测试目录作为发布目录。
+Pushing main does not publish. Native Windows/IIS and actual telemetry ingestion are separate acceptance requirements.
 
-自动验收使用仓库中与安装包相同的 `release-oss-v<version>` tag，按 [Windows 验收手册](windows-acceptance.md)指定已下载的二进制。安装器和配置页的 JS 是运行必需的公开文件。已有 0.1.1 历史包不覆盖，修正通过 0.1.2 发布，latest 指向新版本。
+Local release-logic tests require no live credentials:
 
-## 重试与验收
-
-上传不是多文件事务。失败时，报告记录已验证对象，可能已有部分文件存在；新 manifest 不会在前序对象未通过校验时发布。修复网络或变量后，Retry 同一个 tag 的失败 job，已存在的相同文件被复用。需要改源码或编译器时准备新版本；不要强推/复用发布 tag，不要覆盖已有版本目录。
-
-报告 `release-report.json` 和 `dist/` 作为 GitLab artifacts 保留 30 天，失败也保留。`status=verified` 表示完整文件集已在 OSS API 回读确认；还须从公开地址访问配置页、读取清单、下载核对包，并在目标服务器验收接入、停用和回滚。Windows/IIS 和真实观测云事件入库需对应环境验证。
-
-推送 `main` 本身不发布。创建受保护发布 tag 才会启动发布流水线；Windows/IIS 验收另按 [Windows 测试手册](windows-acceptance.md)执行，不能由 CI 成功推断 Windows 已通过。
-
-本地发布逻辑测试不需要真实凭据：
-
-```sh
+~~~sh
+node scripts/check-docs.mjs
 node --test scripts/ci/ci_test.mjs web/generator_test.mjs scripts/installer_test.mjs scripts/release-oss_test.mjs
 go test scripts/release.go scripts/release_test.go
-```
+~~~

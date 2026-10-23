@@ -1,49 +1,50 @@
-# Linux Web + Nginx + Rumable 本地演示
+# Local Rumable demo: Linux Web service and Nginx
 
-访问地址：[http://127.0.0.1:18874/](http://127.0.0.1:18874/)。只绑定本机回环地址。
+Open [http://127.0.0.1:18874/](http://127.0.0.1:18874/). The demo is bound to loopback only.
 
-该目录提供两个 Linux 容器：Node Web 服务返回业务 HTML 和 API，Nginx 反向代理后由正式 Rumable 0.1.5 安装器注入 SDK。业务 HTML 不写 SDK 初始化代码。上报地址指向同一演示服务的模拟接收端，使用虚拟 appId/token、100% 会话采样、关闭回放，不向真实观测云应用发送数据。
+Two Linux containers run a Node Web service and Nginx. The existing version-pinned 0.1.5 installer injects the SDK through Nginx; business HTML does not initialize it. Dummy application/token values, 100% session sampling, and replay disabled keep requests at the same-origin mock receiver. No real application ingestion is performed.
 
-## 启动与接入
+## Start
 
-开发机需有 Docker Compose、Node.js（支持原生 ESM、TextEncoder 与 btoa）和 curl。无需在 Linux 容器内编译 Rumable。
+Requirements: Docker Compose, curl, and Node.js with native ESM, TextEncoder, and btoa. No CLI compilation inside the Linux containers is needed.
 
-在项目根目录执行：
+From the repository root:
 
-```sh
+~~~sh
 bash examples/local-demo/start.sh
-```
+~~~
 
-脚本拉取镜像，启动服务，读取 OSS 0.1.5 清单，调用项目实际页面生成器，执行生成的一键命令。CLI 和 SDK 来自 OSS 正式包。首次使用网络下载，后续保留版本化安装与状态；重复执行复用同一接入标识。
+The script starts services, reads its pinned release manifest, invokes the real page generator, and runs its generated installation command. The first run downloads the published CLI/SDK package; later runs reuse versioned installation/state and the same site identity.
 
-浏览器打开首页，点击“获取商品列表”“慢请求”“演示错误”或进入第二个页面。Network 筛选 `/v1/write/rum`，等待 SDK 批量发送。页面右侧从模拟接收端读取实际 POST 数量、时间和字节数；204 只表示模拟端已接收，不表示真实观测云入库。解析不了的载荷仍计请求数，不伪造事件分类。演示错误按钮产生的 Console error 是预期测试行为。
+The demo's existing package download configuration is retained. This documentation does not create or claim a new Beacon-hosted package channel.
 
-接收记录在 Web 容器内存中，最多显示最近 40 条；重启 Web 容器清零。模拟端不验证应用或 Token，不应用于生产。
+Open the home page, load products, make a slow request, trigger the expected error, or navigate to checkout. Filter Network by /v1/write/rum and wait for SDK batching. The receiver panel displays actual POST times, counts, bytes, and recognized event types. Unknown payloads count as requests without invented categories.
 
-生成的 TOML、实际命令、安装日志、status/probe 在项目 `.local-demo/`，已忽略 Git，不会进入 OSS 发布包。
+A mock 204 proves local receipt, not receiver authentication, real storage, or replay playback. The receiver does not validate credentials and is not production infrastructure. Requests are kept in Web-container memory, limited to 40 entries, and reset on restart. The intentional error button is expected to produce a Console error.
 
-## 检查、停用与重新启用
+Generated TOML/commands, install logs, status, and probes are saved under ignored .local-demo/. These are not release objects.
 
-```sh
+## Inspect and disable
+
+~~~sh
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml ps
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml exec -T nginx /opt/rumable/0.1.5/rumable status --state-dir /var/lib/rumable
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml logs --tail 20 web
 
-# 停止新页面注入，保留演示站点及状态：
+# Stop injection on newly fetched pages; retain demo/state.
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml exec -T nginx /opt/rumable/0.1.5/rumable disable --state-dir /var/lib/rumable
-# 重新执行 start.sh 会按原配置恢复接入。
-```
+~~~
 
-后端原始 HTML 与 Nginx 响应可以分别读取，确认只有经过 Nginx 的响应被注入。实际接入走 Rumable，测试服务不自行添加 `data-rumable` 标签。
+Run start.sh again to re-enable using the saved identity. Compare raw backend HTML with Nginx output: only the filtered response has the managed data-rumable tag. The fixture does not inject it itself.
 
-## 停止与移除
+## Stop or remove
 
-```sh
-# 停止服务，保留容器和所有状态：
+~~~sh
+# Retain containers and state.
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml stop
 
-# 移除本演示的容器和网络，保留状态卷：
+# Remove only this demo's containers/network; retain named volumes.
 docker compose -p rumable-user-demo -f examples/local-demo/compose.yaml down
-```
+~~~
 
-确认不再需要演示与回滚证据后，才给上述 down 加 `--volumes` 删除本演示的命名卷。不要使用影响其他项目的 Docker 全局清理命令。服务配置为 `unless-stopped`，Docker 可用时持续运行，主动 stop 后不会自行重新启动。
+Add --volumes only after confirming this demo's evidence/state is no longer required. Do not use global Docker pruning. Services use unless-stopped: an explicit stop prevents automatic restart.

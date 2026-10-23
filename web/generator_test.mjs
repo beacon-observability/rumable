@@ -55,7 +55,7 @@ if (process.argv.includes('--fixtures')) {
       assert.doesNotMatch(bundled, /\[(?:sites\.)?sdk\]|pinned.js|integrity/);
       assert.equal(bundled,makeConfig({...model,server,manualTarget}));
       const official = makeConfig({...m,sdkURL:'',sdkIntegrity:false});
-      assert.ok(official.includes(officialSDKURL));
+      assert.doesNotMatch(official, /^url =/m);
       assert.match(official, /integrity = false/);
     }
   });
@@ -63,7 +63,7 @@ if (process.argv.includes('--fixtures')) {
     const old = {...manifest,capabilities:[...manifest.capabilities,'rum-discovery-v1']};
     const m = {...model,manualTarget:false,sdkSource:'cdn'};
     for (const server of ['nginx','iis']) {
-      assert.throws(() => makeCommand({...m,server},old,source), /不支持自动发现时配置 CDN/);
+      assert.throws(() => makeCommand({...m,server},old,source), /cannot configure CDN or loading mode during discovery/);
       assert.doesNotThrow(() => makeCommand({...m,server,manualTarget:true},old,source));
       assert.doesNotThrow(() => makeCommand({...m,server,sdkSource:'bundled'},old,source));
     }
@@ -80,11 +80,11 @@ if (process.argv.includes('--fixtures')) {
       assert.match(config, /loading = "sync"/);
       assert.ok(config.includes(manualTarget ? '[sites.sdk]' : '[sdk]'));
       assert.ok(makeCommand(m,current,source).includes(Buffer.from(config).toString('base64')));
-      assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-sdk-loading-v1')},source), /不支持同步加载/);
-      if (!manualTarget) assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-discovery-sdk-v1')},source), /不支持自动发现/);
+      assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-sdk-loading-v1')},source), /does not support synchronous loading/);
+      if (!manualTarget) assert.throws(() => makeCommand(m,{...current,capabilities:current.capabilities.filter(c => c !== 'rum-discovery-sdk-v1')},source), /cannot configure CDN or loading mode during discovery/);
       assert.doesNotMatch(makeConfig({...m,sdkLoading:'async'}), /loading =/);
     }
-    assert.throws(() => makeConfig({...model,sdkLoading:'defer'}), /异步或同步/);
+    assert.throws(() => makeConfig({...model,sdkLoading:'defer'}), /asynchronous or synchronous/);
   });
   test('manifest rejects changed capabilities, paths, hashes and duplicate platforms', () => {
     validateManifest(manifest, source);
@@ -122,7 +122,7 @@ if (process.argv.includes('--fixtures')) {
       assert.match(config, /\[rum\]/);
       assert.match(config, new RegExp(`server = "${server}"`));
       assert.doesNotMatch(config, /\[\[sites\]\]|publicURL|probePaths|nginxBinary|website/);
-      assert.throws(() => makeCommand(m,manifest,source), /自动发现/);
+      assert.throws(() => makeCommand(m,manifest,source), /site discovery/);
       const current = {...manifest, capabilities:[...manifest.capabilities,'rum-discovery-v1']};
       const command = makeCommand(m,current,source);
       assert.match(command, server === 'iis' ? / -Discover$/ : / --discover'$/);

@@ -20,4 +20,4 @@ JS
 "${compose[@]}" exec -T nginx /opt/rumable/0.1.5/rumable status --state-dir /var/lib/rumable > .local-demo/status.json
 "${compose[@]}" exec -T nginx /opt/rumable/0.1.5/rumable probe --state-dir /var/lib/rumable | tee .local-demo/probe.log
 "${compose[@]}" exec -T nginx /opt/rumable/0.1.5/rumable probe --state-dir /var/lib/rumable --path /checkout/ | tee -a .local-demo/probe.log
-printf '\nDemo ready: http://127.0.0.1:18874/\nLocal intake only. Not connected to a real Guance application.\n'
+printf '\nDemo ready: http://127.0.0.1:18874/\nLocal intake only. No real application ingestion is performed.\n'

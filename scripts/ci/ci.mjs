@@ -23,6 +23,8 @@ export async function runRelease({env = process.env, cwd = root, execute, client
   try {
     const config = validateEnvironment(env, cwd);
     Object.assign(report, config, {tag:env.CI_COMMIT_TAG});
+    report.step = 'check English documentation';
+    run('node', ['scripts/check-docs.mjs']);
     report.step = 'verify pinned SDK';
     const sdk = JSON.parse(fs.readFileSync(path.join(cwd, 'internal/rumable/assets/sdk.json')));
     if (sha256(fs.readFileSync(path.join(cwd, 'internal/rumable/assets/dataflux-rum.js'))) !== sdk.sha256) throw Error('Pinned SDK hash mismatch');

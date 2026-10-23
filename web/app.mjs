@@ -1,24 +1,10 @@
 import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
-import {resolveLocale, readLanguagePreference, saveLanguagePreference, createTranslator, SetupError, errorMessage, translatePage} from './i18n.mjs';
+import {createTranslator, SetupError, errorMessage, translatePage} from './i18n.mjs';
 const form = document.querySelector('#config-form');
 const $ = id => document.getElementById(id);
 let manifest = null, source = '', tab = 'config', config = '', command = '', generation = 0;
-let storage;
-try { storage = window.localStorage; } catch { /* Storage is optional. */ }
-let locale = resolveLocale(readLanguagePreference(storage), [...(navigator.languages || []), navigator.language]), t;
+const t = createTranslator();
 let releaseKey = 'release.initial', releaseValues = {}, releaseError = null, actionKey = '';
-function updateLanguage() {
-  t = createTranslator(locale);
-  document.documentElement.lang = locale;
-  translatePage(document, t);
-  $('language-select').value = locale;
-  render();
-}
-$('language-select').addEventListener('change', event => {
-  locale = event.target.value;
-  saveLanguagePreference(storage, locale);
-  updateLanguage();
-});
 function model() {
   const m = Object.fromEntries(new FormData(form));
   for (const input of form.querySelectorAll('input[type=checkbox]')) m[input.name] = input.checked;
@@ -118,5 +104,7 @@ if (initial) $('manifest-url').value = initial;
 else if (location.protocol === 'https:' && /\/(?:latest|\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)\/setup\/(?:index\.html)?$/.test(location.pathname)) {
   $('manifest-url').value = new URL('../manifest.json', location.href).href;
 }
-updateLanguage();
+document.documentElement.lang = 'en';
+translatePage(document, t);
+render();
 if ($('manifest-url').value) $('load-release').click();

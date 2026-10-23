@@ -1,74 +1,70 @@
-# 平台与版本兼容性
+# Platform and version compatibility
 
-服务端 OTel 使用独立的 [模块/Agent 兼容矩阵](otel.md#支持范围)：Nginx 1.25.3+；IIS 为 IIS 10 / Windows 10或Server 2016+ / PowerShell 5.1，且应用池独占。原有 RUM、Go CLI 和浏览器 SDK 的支持范围不因此改变。
+CLI, server, instrumentation, and browser requirements are separate. Optional server-side OTel needs stricter environments than RUM. See the [OTel support matrix](otel.md#support-scope).
 
-IIS OTel 要求 ASP.NET Core 使用 No Managed Code 池，拒绝应用级及 WAS/W3SVC 全局 OTel 覆盖；Windows ARM64 经 x64 仿真启动管理宿主也不放行 OTel。
+## Compiler and operating system
 
-## 编译器与操作系统是两个独立约束
+Source declares Go 1.20 and uses compatible standard-library APIs. The pinned TOML dependency is v1.6.0. Modern release packages use Go 1.26.x; legacy packages must actually be built with Go 1.20.14. There are no unofficial runtime patches.
 
-源码使用 `go 1.20`，标准库 API 与 TOML 解析依赖均兼容 Go 1.20（固定 `github.com/BurntSushi/toml v1.6.0`，上游最低 Go 1.18）。现代包使用 Go 1.26.x，legacy 包必须真正使用 **Go 1.20.14** 编译；不使用非官方 Go runtime 补丁。
+| Package | Compiler | Operating-system requirements |
+| --- | --- | --- |
+| Windows 386 / amd64 / arm64 modern | Go 1.26.x | Windows 10+ / Server 2016+, matching architecture |
+| Windows 386 / amd64 legacy | Go 1.20.14 | Applicable old x86/x64 Windows, including Windows 7 SP1+ / Server 2008 R2 SP1 and Server 2012 / 2012 R2 |
+| Linux 386 / amd64 / arm64 modern | Go 1.26.x | Kernel 3.2+ with architecture-specific requirements |
+| Linux 386 / amd64 legacy | Go 1.20.14 | Kernel 2.6.32+; CentOS 5's 2.6.18 is unsupported |
 
-| 发布包 | 编译器 | 操作系统要求 |
-|---|---|---|
-| Windows 386 / amd64 / arm64 现代版 | Go 1.26.x | Windows 10+ / Server 2016+，选择对应 CPU / 系统位数 |
-| Windows 386 / amd64 legacy | Go 1.20.14 | Windows 7 SP1+ / Server 2008 R2 SP1、Server 2012 / 2012 R2 等适用的旧 x86/x64 系统 |
-| Linux 386 / amd64 / arm64 现代版 | Go 1.26.x | 内核 3.2+；架构还有自身限制 |
-| Linux 386 / amd64 legacy | Go 1.20.14 | 旧 Linux x86/x64，内核至少 2.6.32；不支持 CentOS 5 的 2.6.18 |
+Only Linux and Windows packages are distributed. CGO_ENABLED=0 removes a host glibc dependency; GOAMD64=v1, GO386=sse2, and GOARM64=v8.0 preserve baseline CPU targets. Kernel, Windows API, and architecture requirements still apply.
 
-提供 Windows / Linux 安装包，不提供 macOS 安装包。所有发布包设置 `CGO_ENABLED=0`，不依赖宿主机 glibc；amd64 使用 `GOAMD64=v1`，386 使用 `GO386=sse2`，ARM64 使用 `GOARM64=v8.0`。这不移除内核、Windows API 或平台最低要求。
+Go 1.20 is unmaintained; legacy artifacts lack later standard-library security fixes. Prefer modern packages. Verify old-system TLS and certificate chains without disabling certificate validation.
 
-Go 1.20 已停止官方维护，legacy 包有标准库安全修复缺失这一明确限制；优先使用现代包，旧包只用于无法升级的环境。旧系统证书链和 TLS 设置也需要单独检查，不关闭证书验证来实现兼容。
+References: [Go minimum requirements](https://go.dev/wiki/MinimumRequirements), [Go 1.21 Windows changes](https://go.dev/doc/go1.21#windows), [Go 1.20 Windows support](https://go.dev/doc/go1.20#windows), and [maintenance policy](https://go.dev/doc/devel/release#policy).
 
-TOML 依赖版本依据：[上游 go.mod](https://github.com/BurntSushi/toml/blob/v1.6.0/go.mod)。
+## Nginx RUM
 
-依据：[Go 最低运行要求](https://go.dev/wiki/MinimumRequirements)、[Go 1.21 Windows 支持调整](https://go.dev/doc/go1.21#windows)、[Go 1.20 Windows 说明](https://go.dev/doc/go1.20#windows)、[Go 维护政策](https://go.dev/doc/devel/release#policy)。
+Nginx needs 1.9.4+ and `--with-http_sub_module`. Version strings alone are insufficient. Automatic installation, discovery, attachment, and attachment rollback run on Linux. Windows/macOS Nginx is outside that automatic scope.
 
-## Nginx
+No njs, Lua, OpenResty, add_header_inherit, or recent-version-only directive is required. A technical minimum does not constitute a production recommendation or remove old-server security issues. Existing compression, cache, filter, and header inheritance must be reviewed.
 
-- 使用 `sub_filter` 变量替换，技术能力最低为 **1.9.4**；`check` 同时验证 `--with-http_sub_module`，不会只看版本字符串。
-- 当前 Nginx 一键安装、站点自动发现、自动挂接与挂接回滚仅支持 Linux；Windows/macOS Nginx 不属于当前支持的自动接入流程。
-- 不依赖 njs、Lua、OpenResty、`add_header_inherit` 或新版本专用指令，能够使用较旧的 Nginx。
-- 技术最低版本不等于生产推荐版本。优先使用仍受维护的发行包；旧版本兼容性测试不解决其自身安全缺陷。
-- 压缩、已有过滤器、请求头继承和缓存配置比版本号更容易影响接入，必须完成首次挂接审查。
+### Nginx 1.9.4 guard
 
-**1.9.4 的自动阻断**：该版本继承 `http` 层 sub_filter 时可能导致 worker 崩溃，此问题在 1.9.5 修复，见[官方变更记录](https://nginx.org/en/CHANGES)。`check`、`enable` 从 `nginx -T` 读取有效配置，按真实挂接上下文递归追踪 include，发现任何 `http` 层 sub_filter 就报告文件、行号并拒绝启用。即使目标 server/location 已覆盖父规则，或 attachmentReviewed=true，仍保守阻止。版本号仍报告 1.9.4 的补丁包也受同一限制，不提供跳过开关。
+Inherited http-level sub_filter can crash workers in 1.9.4. Before attachment, enable, rollback to enabled state, and candidate reload, the tool inspects the effective `nginx -T` include graph. Any http-level sub_filter is rejected, even when a lower context overrides it or attachmentReviewed is true. A patched package still reporting 1.9.4 is subject to the guard.
 
-字面量路径、带空格的引号路径、相对主配置目录的多层 include、`*` / ASCII `?` 掩码和同文件在不同层级重复引用均可检查；注释、引号内容、map 数据中的同名文本不会误判成 http 指令。普通 server/location 层业务 sub_filter 可以继续使用，受管 handler 仍需显式保留业务规则。
+Literal and quoted paths, relative nested includes, simple `*` / ASCII `?` masks, and repeated references in different contexts are supported. Comments, quoted text, and map data are not mistaken for directives.
 
-配置转储缺失或不一致、include 上下文不完整、循环/过深嵌套及不支持的掩码会直接拒绝。为避免 Go 与 POSIX glob 的差异漏检，方括号/字符类掩码、通配目录后接 `..`、涉及非 ASCII 文件名的 `?` 掩码不自动判定；改为显式路径或简单 `*` 掩码后重试。这项范围限定只用于 1.9.4 风险检查，1.9.5+ 不受此版本专用限制。
+Missing/inconsistent dumps, unknown include contexts, cycles, excessive depth, and unsupported masks fail closed. Character-class masks, wildcard directories followed by `..`, and ambiguous non-ASCII `?` matching require explicit paths or simple masks. This version-specific restriction does not apply to 1.9.5+.
 
-普通 rollback 若会恢复启用状态，也先执行该检查；部署候选文件写入后、reload 前再次检查启用目标，包含中断恢复。检查失败不会擅自修改业务配置。停用不受此版本专用检查阻挡，仍须通过 nginx -t 和 HTTP 停用探测。attach 在修改业务配置前也执行同一检查；attachmentReviewed 保留用于其他人工首次挂接条件，不能替代自动检查。
+Disable remains available but still requires native configuration and HTTP verification. Recovery encountering an unsafe enabled candidate retains the journal for review. Move business filters to server/location or upgrade before retrying.
 
-依据：[Nginx sub_filter 模块](https://nginx.org/en/docs/http/ngx_http_sub_module.html)。
+References: [sub_filter module](https://nginx.org/en/docs/http/ngx_http_sub_module.html) and [Nginx changes](https://nginx.org/en/CHANGES).
 
-符合注入条件的 HTML HEAD 使用与 GET 相同的过滤头部清理，不发送正文。方法 map 使用正则项，兼容旧版默认 map_hash_bucket_size。脚本探测同时验证 identity / gzip，旧的 .gz 资源或压缩缓存不能仅凭 identity 校验通过验收。
+HTML HEAD responses receive the same filter-related header cleanup as eligible GETs without a body. Method maps remain compatible with old map bucket defaults. SDK and script probes verify identity/gzip bytes; a passing identity response does not validate stale compressed assets.
 
-## IIS 与 PowerShell
+## IIS and PowerShell
 
-- 技术基线 **IIS 7.5+**，需要 **URL Rewrite 2.x**、Static Content 和匿名静态文件访问。
-- 目标应用必须使用已启动的独占应用池，子应用也需单独分配池。配置变更会回收目标池并等待旧工作进程退出，进程内会话可能丢失；共享池和停止的池会被拒绝，工具不自动分配或启动池。
-- 使用系统 Microsoft.Web.Administration API 和 Windows PowerShell，不依赖 .NET 6/8、PowerShell 7、ASP.NET Core 或 ARR 来注入页面。
-- 需要 **64 位 PowerShell 3.0+**（建议 5.1）。Windows 7 / Server 2008 R2 的默认 PowerShell 2.0 不满足 CLI 与 IIS 桥接脚本的内部 JSON 接口要求，需要运维预先部署适用的 WMF；工具不会自动安装系统组件。
-- TOML 配置文件使用 UTF-8；旧 PowerShell 的 `Out-File` 默认可能生成 UTF-16，请使用 `rumable init` 或显式 UTF-8 写入配置。
-- 动态应用或反代生成的 HTML 必须在进入 URL Rewrite 时未压缩。工具在允许后关闭目标应用的 IIS 静态和动态压缩，并在停用时恢复原局部设置/继承关系；不擅自修改后端应用中间件。
-- 配置被锁定、已有保留路径映射、`rewriteBeforeCache=true`、ACL 或 MIME 条件不满足时，需先由运维解决。
-- 提供 Windows x86 32 位 CLI。它在 64 位 Windows 上经 Sysnative 调用 64 位 PowerShell；真正 32 位 Windows 只能执行版本、配置生成、状态读取与 HTTP 探测，不能管理 IIS。Windows ARM64 管理 IIS 同样需要系统原生的配置 API 和 PowerShell。
-- HTTP 探测接受标准中的历史 JavaScript MIME（如 `application/x-javascript`），避免把旧站点的合法脚本误判成不可执行内容；依据 [MIME Sniffing 标准](https://mimesniff.spec.whatwg.org/#javascript-mime-type)。
+- IIS 7.5+, URL Rewrite 2.x, Static Content, and anonymous static-file access are required for RUM.
+- Each target application, including a child, requires its own started pool. Lifecycle changes recycle that pool and wait for old workers; in-process sessions may be lost. The tool does not allocate/start pools or recycle shared pools.
+- RUM uses Microsoft.Web.Administration and Windows PowerShell. It does not require .NET 6/8, PowerShell 7, ASP.NET Core, or ARR.
+- The manual bridge requires 64-bit Windows PowerShell 3.0+; 5.1 is recommended. One-command Windows installation requires 5.1+. Default PowerShell 2.0 on old Windows is insufficient; deploy appropriate WMF beforehand.
+- TOML must be UTF-8. Older Out-File defaults can produce UTF-16; use init or explicitly choose UTF-8.
+- HTML must reach URL Rewrite uncompressed. With permission, the tool disables both IIS compression attributes in the selected application and restores original values/inheritance on disable. It does not change backend middleware.
+- Locked configuration, reserved mapping conflicts, rewriteBeforeCache=true, invalid ACLs, and MIME/handler issues require operator correction.
+- x86 CLI on 64-bit Windows uses Sysnative for the 64-bit bridge. Native 32-bit Windows only supports limited generation/status/probe commands, not IIS management. Windows ARM64 management also requires native API/PowerShell support.
+- Historical executable JavaScript MIME types such as application/x-javascript are accepted.
 
-依据：[URL Rewrite 2 模块及限制](https://learn.microsoft.com/en-us/iis/extensions/url-rewrite-module/using-url-rewrite-module-20)。
+References: [URL Rewrite 2](https://learn.microsoft.com/en-us/iis/extensions/url-rewrite-module/using-url-rewrite-module-20) and [JavaScript MIME types](https://mimesniff.spec.whatwg.org/#javascript-mime-type).
 
-## 浏览器
+IIS RUM clears old conditional headers for selected HTML navigation GETs and needs two application-level allowedServerVariables permissions. Review inheritance, recovery, and conditional-cache implications in [operations](operations.md#compression-and-caching).
 
-CLI 的操作系统要求与访问者的浏览器要求分别判断。浏览器兼容性以所用 Web SDK 的要求为准，见 [Web 应用接入](https://docs.guance.com/real-user-monitoring/web/app-access/)。
+## Optional OTel
 
-可选 CDN 加载不改变 Nginx/IIS 的最低版本或 CLI 的 Go 基线。浏览器另须能访问 HTTPS CDN，CSP 允许实际脚本地址；开启 integrity 还要求浏览器支持 SRI、跨域 CDN 支持 CORS。
+Nginx requires Linux 1.25.3+ and a matching native module. Automatic dependency installation targets x64/ARM64 through exact-version APT packages or verified offline archives.
 
-## 自动首次挂接
+IIS OTel requires IIS 10, Windows 10/Server 2016+, administrator 64-bit Windows PowerShell 5.1, and a dedicated .NET pool. The pinned automatic Agent is v1.17.0 on x64 Windows with x64/x86 pools. Windows ARM64 is rejected, including from an emulated management host. Old Windows/IIS remains RUM-only.
 
-仅 Linux 执行 `attach` / `rollback --attachment`，沿用 Nginx 1.9.4+ 和 Go 1.20 基线。macOS 可生成配置，Windows/IIS 接入流程保持原样。自动范围、压缩和缓存的持续影响、符号链接/共享 include、确认及外部编辑冲突见[操作手册](operations.md#自动首次挂接linux)。不能安全识别的模块/继承语义使用人工 ATTACH.md，不以自动化承诺支持任意配置。
+ASP.NET Core requires No Managed Code. Conflicting machine, WAS/W3SVC, pool, and application-level instrumentation is rejected. See [installation](otel-installation.md) and the [OTel guide](otel.md).
 
-### 自动依赖安装
+## Browsers and CDN
 
-install-otel 在 Linux 支持 Nginx x64/ARM64 的准确版本 APT 包或校验过的离线包。Windows 安装固定 .NET Agent v1.17.0，仅 IIS 10 的 x64 Windows / x64、x86 池；不放宽旧 Windows/IIS 的 OTel 限制。CLI 的其他架构仍可用于 RUM/配置生成。平台矩阵和离线格式见[安装与卸载](otel-installation.md)。
+Visitor browsers follow the bundled Web SDK's requirements independently of server OS compatibility. Passing a legacy Windows CLI test does not imply support for old browsers.
 
-IIS 对接受 HTML 的受管 GET 清除旧缓存条件请求头，并关闭所选应用的静态和动态压缩；需要 URL Rewrite 的入站规则及两个应用级 allowedServerVariables 权限。启停/回滚范围、继承恢复、API 条件缓存影响见[操作手册](operations.md#压缩与缓存)。
+CDN loading does not change server minimums. Browsers must reach the HTTPS SDK URL, CSP must permit it, and SRI needs browser support plus CDN CORS. Validate replay, Workers, storage, and actual reporting in intended browsers. No broader browser support is inferred from server-side tests.

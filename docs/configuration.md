@@ -1,147 +1,139 @@
-# TOML 配置参考
+# TOML configuration reference
 
-本页用于查字段。首次接入见[一键接入](../USER-GUIDE.md#3-一键接入推荐)，SDK 选择见[配置示例](../USER-GUIDE.md#43-四种接入方式的完整配置示例)，升级与恢复见[日常维护](../USER-GUIDE.md#10-修改配置升级停用回滚和卸载)。
+Use the [user guide](../USER-GUIDE.md) for installation, [SDK loading](../USER-GUIDE.md#4-sdk-loading-and-updates) for delivery choices, and [operations](operations.md) for caching and recovery. Public product documentation uses Rumable; the compatible command and configuration schema remain unchanged.
 
-## 配置格式
+## Configuration formats
 
-完整配置使用 `[[sites]]`，其下的 `[sites.rum]` 保存采集参数、`[sites.sdk]` 保存来源和加载方式。自动发现格式使用顶层 `server`、`[rum]`、可选 `[sdk]`，通过 `setup --discover` 应用，不能直接交给 enable。同步加载需要支持该能力的新包；旧包不识别的新字段会被拒绝。
+Complete configuration uses `[[sites]]`, `[sites.rum]`, and optional `[sites.sdk]` / `[sites.otel]`. Discovery configuration uses top-level `server`, `[rum]`, and optional `[sdk]` and is applied with `setup --discover`, not directly with enable. Unknown fields are rejected; synchronous loading requires a compatible release.
 
-浏览器 RUM 与服务端 OTel 分别使用 `[sites.rum]` / `[sites.otel]`。`rum.enabled` 省略时为 true，显式 false 时不要求浏览器凭据；省略 otel 表保持旧行为。modulePath/agentPath 可省略，配合 install-otel 自动准备；[sites.otel.install] 支持 archive/url、必填 sha256，见[安装配置](otel-installation.md)。服务端参数、采样实际能力、模块要求和两种服务器示例见 [OTel 配置手册](otel.md)。`enable/disable --component rum|otel` 保留另一组件的当前状态；OTel 单组件命令也保留已部署的 SDK、脚本和 CDN 引用，不顺带更新 Web SDK；`enable` 不带组件时按 TOML 应用两者，`disable` 不带组件时全部停用。
+Omitted `rum.enabled` means true. Explicit false removes the requirement for browser credentials. Omitted `otel` preserves RUM-only behavior. `enable/disable --component rum|otel` preserves the other component's deployed settings; an OTel-only operation also preserves its browser SDK and CDN reference. Plain enable applies both TOML component settings; plain disable disables both.
 
-IIS 的 RUM 单组件命令保留已部署的 OTel 凭据；修改 Dataway Token 后使用普通 enable 或 enable --component otel 应用。rollback 使用保存的凭据，仍会检查目标池/Agent 的兼容条件。ASP.NET Core 的 runtime=dotnet 要求 No Managed Code 池，netframework 要求 v4 Integrated；CLI 不自动修改 CLR 设置。
+For IIS, RUM-only commands preserve deployed OTel credentials. Apply server-token rotation with ordinary enable or `enable --component otel`. Rollback restores saved credentials and still checks target compatibility. ASP.NET Core requires `runtime="dotnet"` and a No Managed Code pool; .NET Framework requires `runtime="netframework"` and v4 Integrated. The CLI does not change CLR settings.
 
-配置按 `[[sites]]` 隔离，SDK 参数放在该站点的 `[sites.rum]` 下。`rumable init` 默认生成精简配置，只展示接入和回放开关；`rumable init --full` 与[完整模板](../examples/full.toml)包含全部静态 SDK 参数。`--server nginx|iis` 选择服务器，`--reporting openway|datakit` 选择上报方式，默认 nginx / openway。例如 `rumable init --server nginx --reporting datakit`。所有组合默认关闭回放；IIS 初始配置不预先允许压缩调整。
+`rumable init` produces a minimal configuration. `init --full` and [full.toml](../examples/full.toml) expose all supported static SDK options. `--server nginx|iis` selects the server; `--reporting openway|datakit` selects gateway or direct-collector reporting. Defaults are nginx/openway. Replay and IIS compression consent default to off.
 
-init 默认站点 ID 为 example；可通过 `init --site website` 命名。单个配置站点的 render/check/enable 无需 --site；多个配置站点必须指定。attach/status/disable/rollback/probe 优先从受管状态选择：只有一个受管站点时无需原始 TOML，多个受管站点必须指定 --site。显式 --config、--state-dir、--site 的原用法保留。[Nginx 示例](../examples/nginx.toml)和 [IIS 示例](../examples/iis.toml)也可直接编辑使用；注释字段为可选示例。
+The default new site ID is example; override it with `init --site website`. Render/check/enable can omit `--site` only for a single configured site. State-based commands can omit it only for a single managed site. Keep explicit config, state, and site selectors for automation.
 
-## 服务器目标
+## Server identity
 
-每个站点必须且只能配置一个 `[sites.nginx]` 或 `[sites.iis]`。`id`、`publicURL`、服务器类型及目标命令/参数绑定部署身份，不能原地迁移；迁移使用新 ID。SDK 参数和路径采集范围可修改后重新 enable。
+Each site requires exactly one `[sites.nginx]` or `[sites.iis]` table. The ID, public URL, server type, and actual server target/arguments bind deployment identity. Use a new ID for target migration. Sampling, SDK options, and path ranges can be updated with enable.
 
-IIS RUM 的目标应用必须使用独占应用池，子应用也不能与父应用共用池。启用、更新、停用及回滚会回收这个池并等待旧进程退出，可能影响进程内会话；CLI 不自动分配或回收共享池。已有部署首次使用新激活流程时会记录池归属；后续池名或成员发生外部变化会拒绝覆盖。详见[运行与恢复流程](operations.md)。
+IIS applications, including children, need dedicated started pools. Lifecycle changes can recycle the pool and affect in-process sessions. Saved pool ownership and membership are checked; external changes are not silently adopted.
 
-Nginx 和 IIS 共享以下全部 `[sites.rum]` 参数，包括 OpenWay / DataKit、回放、隐私与 Worker 设置。
+Both server types use the same browser fields below. The current bundled baseline is SDK 3.3.21. Supported fields are non-deprecated public initialization options expressible as static TOML. Callback, plugin, and dynamic runtime APIs are outside that boundary. SDK bytes and metadata are reviewed and committed before release; tag CI uses those pinned bytes.
 
-范围以发布包内的 **SDK 3.3.21** 为准：已开放其公开类型定义中未废弃、能用静态 TOML 表达的初始化参数。依据为官方 NPM 包 [browser-core 3.3.21](https://registry.npmjs.org/@cloudcare/browser-core/-/browser-core-3.3.21.tgz) 中的 `types/index.d.ts`，并核对内嵌 SDK 的校验和默认值。发布准备阶段同步并测试 SDK，将文件与元数据提交后再构建。CI 使用提交中的 SDK，不自动追新；同域方式在站点使用新 CLI 执行 enable/setup 时升级。
+## SDK delivery
 
-## SDK 加载方式
+`[sites.sdk]` is a sibling of `[sites.rum]`. Discovery uses `[sdk]`.
 
-Nginx 和 IIS 共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；自动发现时使用 `[sdk]`。SDK 来源与加载方式独立，四种组合均保留相同的 RUM、回放及采样参数。
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `source` | `"bundled"` | Same-origin bundled SDK; `"cdn"` selects external loading |
+| `loading` | `"async"` | Asynchronous; `"sync"` loads and executes SDK and initialization scripts in order, blocking HTML parsing |
+| `url` | Omitted | CDN only; omission uses the package-recorded source. An explicit URL must be a full HTTPS script URL without credentials, query, or fragment |
+| `integrity` | false | CDN only; enables the package SHA-256 SRI value and anonymous cross-origin mode |
 
-| 参数 | 默认值 | 行为 |
-|---|---|---|
-| `source` | `"bundled"` | `bundled` 使用同域内置 SDK；`cdn` 从外部地址加载 SDK，初始化脚本始终同域 |
-| `loading` | `"async"` | `async` 异步加载；`sync` 按顺序同步执行 SDK 与初始化脚本，会阻塞 HTML 解析 |
-| `url` | 省略 | 仅用于 cdn，省略时采用发布包 sdk.json 的官方来源；显式 URL 必须是无认证、查询或片段的完整 HTTPS 脚本地址 |
-| `integrity` | false | 仅用于 cdn；true 设置对应发布包 SHA-256 的 SRI 与 crossorigin=anonymous，并预检 CORS |
-
-```toml
+~~~toml
 [sites.sdk]
 source = "cdn"
-loading = "async" # 同步使用 "sync"
-url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
+loading = "async"
+# Omit url to retain the package-default source.
+# A custom URL must serve the same SDK bytes as the package.
 integrity = false
-```
+~~~
 
-check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript MIME 和发布包摘要；自建 CDN 必须发布相同字节，不接受其他版本或精简版。CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及所需 Worker，工具不会修改策略。CDN 不可达、摘要不一致或 SRI 缺少允许站点 Origin（或 `*`）的 Access-Control-Allow-Origin 时阻止启用。
+Check, enable, and probe validate CDN identity/gzip content, JavaScript MIME, and the package digest. A custom CDN must serve identical bytes. SRI requires CORS allowing the website origin or `*`. CSP must allow the same-origin initialization script, actual SDK URL, receiver, and required Workers; policies are never rewritten automatically.
 
-官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；默认 `integrity=false`。开启 SRI 前必须确认 CDN 返回允许跨域读取的 CORS 响应头，且内容与安装包摘要一致。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
+A mutable package-default CDN is not an immutable version pin. A successful hash check only describes the bytes observed at probe time. For reproducibility, choose bundled assets or an immutable HTTPS CDN URL with SRI. Workers must match the SDK used by the browser.
 
-部署快照保存实际 URL、SDK 版本和摘要，回滚使用历史引用；工具不能恢复外部 CDN 文件。外部旧内容被覆盖/删除时回滚探测会失败并恢复本次受管配置。停用不依赖 CDN 可达；保留的本地 SDK 副本不会自动作为失败降级，异步模式的下载不阻塞 HTML 解析；同步模式在浏览器完成脚本请求或判定失败之前会阻塞解析。源为 bundled 时填写非空 url 或 integrity=true 会被拒绝，避免配置被静默忽略。
+Snapshots retain the resolved URL, SDK version, digest, and loading mode. Rollback cannot restore deleted or overwritten CDN files. If the old external resource is unavailable, rollback probing can fail and restore the attempted managed change. Disable does not require CDN availability. There is no automatic fallback to the local SDK copy.
 
-### 加载行为与注入边界
+Asynchronous mode uses an async same-origin initialization script that loads the SDK and initializes it on load. Synchronous mode injects SDK then initialization script without async/defer; failures are recorded as load-error or init-error. Both modes use a standard opening `<head>`, external scripts, and ASCII-compatible HTML. Nginx injection targets GET/200 HTML; IIS targets GET/HTML, excluding downloads, assets, and encoded source bodies.
 
-- 异步：HTML 中插入带 async 的同域初始化脚本，它动态加载 SDK，onload 后调用 init。初始化之前的事件可能漏采。
-- 同步：HTML 中顺序插入 SDK、初始化脚本，均为不带 async/defer 的外部普通脚本；下载和执行阻塞后续 HTML 解析。初始化脚本只初始化已加载的 SDK，不再次下载。SDK 加载失败时记录 load-error，初始化抛错记录 init-error。
-- 两种模式都使用标准 `<head>` 后的位置，不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
-- 页面需避免已有 SDK 接入；预检拒绝常见业务 SDK 和其他部署，已有同步标签须与受管快照匹配。双层服务器不应重复注入。
-- nonce-only、strict-dynamic、Trusted Types 等策略需站点专门适配；同域托管不代表上报同域，访问者仍需能连接上报地址。
+Avoid duplicate SDK integrations and double injection by stacked servers. Strict nonce, strict-dynamic, and Trusted Types policies need site-specific integration. Same-origin SDK delivery does not make the reporting endpoint same-origin.
 
-脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#44-sdk-如何更新和回滚)。
+## Validation and defaults
 
-## 参数校验
+Unknown fields, wrong types, invalid enums, NaN/Infinity, invalid URLs, and out-of-range values fail before deployment. Explicit false and zero values are preserved. Defaults below describe tool defaults or the pinned SDK, as indicated.
 
-未填写的参数使用下表默认值；除 Rumable 明确设置的采集默认值外，其余交给该版本 SDK。未知字段、错误类型、非法枚举、NaN/Infinity、无效 URL 和越界数值会在部署前拒绝。布尔值 `false` 和数值 `0` 会保留，不会被默认值覆盖。
+Browser reporting endpoints are HTTP(S) origins with optional trailing slash, no paths, queries, fragments, or credentials; explicit ports must be 1–65535. SDK 3.3.21 concatenates applicationId/clientToken into query parameters, so whitespace, control characters, and `& # + % ;` are rejected. Do not pre-encode those values. Ordinary labels are JSON-escaped.
 
-上报地址必须是完整 HTTP(S) origin，可带末尾 `/`，不能带路径、查询串（包括空 `?`）或片段；显式端口须在 1–65535。固定 SDK 直接拼接查询参数，因此 `applicationId` / `clientToken` 不接受空白、控制字符和 `& # + % ;`，避免令牌或应用 ID 在传输时被改变；不要自行 URL 编码这些值。env/service/version 等普通标签仍按 JSON 正确转义。
+## Application, sampling, and collection
 
-## 应用、采样和采集
+| Field | Type/default | Meaning |
+| --- | --- | --- |
+| `enabled` | Boolean, true | Enable browser RUM |
+| `applicationId` | Required string when enabled | Browser application ID |
+| `site`, `clientToken` | Strings | Browser gateway origin and browser Client Token |
+| `datakitOrigin` | String | Direct collector origin; mutually exclusive with gateway fields |
+| `env`, `service`, `version` | Strings | Environment, service, and business application version |
+| `sessionSampleRate` | Number, 100 | RUM session sampling, 0–100 |
+| `sessionOnErrorSampleRate` | Number, 0 | Error compensation for otherwise unsampled sessions, 0–100 |
+| `sessionReplayEnabled` | Boolean, false | Tool-level replay switch; off forces both replay rates to zero and skips the recording API |
+| `sessionReplaySampleRate` | Number, 100 | Normal replay sampling, 0–100; effective only with replay enabled |
+| `sessionReplayOnErrorSampleRate` | Number, 0 | Error replay sampling, 0–100; can be combined with zero normal replay |
+| `telemetrySampleRate` | Number, SDK default 100 | SDK diagnostic telemetry, independent of business sessions |
+| `trackUserInteractions` | Boolean, true | Automatic user interactions |
+| `actionNameAttribute` | Optional string | HTML attribute supplying action names |
+| `enablePrivacyForActionName` | Boolean, false | Privacy rules for automatic action names; explicit names follow SDK rules |
+| `defaultPrivacyLevel` | allow / mask / mask-user-input; mask | Privacy processing for replay and affected data |
+| `trackViewsManually` | Boolean, false | Requires application `startView()` calls |
+| `enableLongAnimationFrame` | Boolean, false | Browser-dependent Long Animation Frame support |
+| `enableExperimentalFeatures` | String array, empty | Only `"track_websockets"` is accepted by this SDK |
+| `excludedActivityUrls` | URL string array, empty | Exact URL activity matching for loading-time calculation; not a resource collection denylist |
 
-| 参数 | 类型 / 默认值 | 说明 |
-|---|---|---|
-| `applicationId` | 字符串，必填 | 观测云 Web 应用 ID |
-| `site`、`clientToken` | 字符串 | OpenWay 地址与浏览器令牌 |
-| `datakitOrigin` | 字符串 | DataKit origin，与 OpenWay 二选一；HTTPS 页面必须 HTTPS 上报 |
-| `env`、`service`、`version` | 字符串 | 环境、服务和应用版本 |
-| `sessionSampleRate` | 数值，100 | RUM 会话采样，0–100，支持小数 |
-| `sessionOnErrorSampleRate` | 数值，0 | 未采样会话的错误补偿，0–100 |
-| `sessionReplayEnabled` | 布尔，false | Rumable 的回放开关；关闭时传给 SDK 的两项回放采样率均为 0，且不调用录制 API |
-| `sessionReplaySampleRate` | 数值，100 | 普通回放采样，0–100，仅开关开启时生效 |
-| `sessionReplayOnErrorSampleRate` | 数值，0 | 错误触发回放采样，0–100；可与普通回放采样 0 组合，仅录制错误会话 |
-| `telemetrySampleRate` | 数值，SDK 默认 100 | SDK 自身遥测采样，0–100；不决定业务 RUM 会话是否采集 |
-| `trackUserInteractions` | 布尔，true | 自动采集用户操作 |
-| `actionNameAttribute` | 可选字符串 | 从指定 HTML 属性获取操作名称 |
-| `enablePrivacyForActionName` | 布尔，false | 对自动操作名称应用隐私规则；显式名称属性按 SDK 规则处理 |
-| `defaultPrivacyLevel` | `allow` / `mask` / `mask-user-input`，默认 `mask` | DOM 回放与受隐私规则控制的数据脱敏 |
-| `trackViewsManually` | 布尔，false | true 后需要业务调用 `startView()`；工具不代替业务管理 SPA 路由 |
-| `enableLongAnimationFrame` | 布尔，false | SDK 的 Long Animation Frame 模式，取决于浏览器能力 |
-| `enableExperimentalFeatures` | 字符串数组，空 | 此 SDK 支持 `"track_websockets"`；其他实验名称拒绝 |
-| `excludedActivityUrls` | URL 字符串数组，空 | 排除影响页面 loading time 的活动；SDK 使用完整 URL 字符串匹配，不是禁采资源的规则 |
+Replay depends on RUM session sampling. Zero normal and error-compensation session rates cannot be reversed by replay sampling alone. Error replay may buffer before an error; recording status alone is not evidence of upload. Verify the resulting replay at the receiver.
 
-回放仍依赖 SDK 的 RUM 会话采样；常规与错误补偿 RUM 采样都为 0 时，回放采样不能单独恢复采集。错误回放会在浏览器缓冲错误前的记录，`isRecording()` 可能在错误发生前就为 true；应结合错误后上传和服务端回放验证。
+With replay enabled and a positive replay channel, the initialization script requests recording once after init. When remote configuration is enabled, it may request recording even with both local replay rates zero, leaving final sampling to the SDK. Sampling decisions persist for the session; verify changes in a new session.
 
-回放开关开启且任一回放采样率大于 0 时，Rumable 在 SDK init 后调用一次 `startSessionReplayRecording()`。采样结果按会话保持，改变采样率后用新会话验收。远程配置开启时，即使本地两个采样率均为 0，也允许向 SDK 请求录制，由远程最终采样决定。
+## Session and local storage
 
-## 会话与本地存储
+| Field | Type/default | Meaning |
+| --- | --- | --- |
+| `sessionPersistence` | cookie / local-storage; cookie | Session persistence, consistent with other SDKs on the page |
+| `useSecureSessionCookie` | Boolean, false | Requires an HTTPS website |
+| `usePartitionedCrossSiteSessionCookie` | Boolean, false | Requires HTTPS and browser support |
+| `trackSessionAcrossSubdomains` | Boolean, false | Shared cookie session across subdomains |
+| `allowFallbackToLocalStorage` | Boolean, false | Cookie fallback only when persistence is not explicitly selected |
+| `storeContextsToLocal` | Boolean, false | Persist common context |
+| `storeContextsKey` | Optional string | Context key; SDK-generated when omitted |
 
-| 参数 | 类型 / 默认值 | 说明 |
-|---|---|---|
-| `sessionPersistence` | `cookie` / `local-storage`，默认 cookie | 会话存储策略；与同页其他官方 SDK 使用一致设置 |
-| `useSecureSessionCookie` | 布尔，false | Secure Cookie，工具要求目标页面 HTTPS |
-| `usePartitionedCrossSiteSessionCookie` | 布尔，false | 分区跨站 Cookie，工具要求 HTTPS；实际支持取决于浏览器 |
-| `trackSessionAcrossSubdomains` | 布尔，false | 跨子域共享会话 |
-| `allowFallbackToLocalStorage` | 布尔，false | 未显式选择存储策略时，Cookie 不可用可回退到 localStorage |
-| `storeContextsToLocal` | 布尔，false | 持久化公共上下文 |
-| `storeContextsKey` | 可选字符串 | 上下文存储键；省略时 SDK 自动生成 |
+Cookie options affect cookie mode. Local storage is origin-scoped. Remove an explicitly configured sessionPersistence field when using automatic fallback.
 
-Cookie 的安全、分区与跨子域选项只影响 Cookie 模式；localStorage 按浏览器 origin 隔离。模板显式设置了 `sessionPersistence`，需要自动回退时应删除该字段。
+## Transport and Workers
 
-## 上报与 Worker
+| Field | Type/default | Meaning |
+| --- | --- | --- |
+| `compressIntakeRequests` | Boolean, false | Ordinary RUM request compression using a Worker; separate from replay compression |
+| `sendContentTypeByJson` | Boolean, false | JSON Content-Type; receiver must allow corresponding CORS requests |
+| `workerUrl` | Optional URL | Self-hosted replay/transport Worker |
+| `replayCanvasWorkerUrl` | Optional URL | Canvas encoder Worker; does not replace workerUrl |
+| `remoteConfiguration` | Boolean, false | Receiver-supported remote settings may override static SDK settings |
+| `silentMultipleInit` | Boolean, false | SDK duplicate-init diagnostics; does not disable deployment conflict protection |
 
-| 参数 | 类型 / 默认值 | 说明 |
-|---|---|---|
-| `compressIntakeRequests` | 布尔，false | 压缩普通 RUM 请求，需要 Worker；与回放压缩不同 |
-| `sendContentTypeByJson` | 布尔，false | 以 JSON Content-Type 上报，需接收端允许相应 CORS 请求 |
-| `workerUrl` | 可选 URL | 回放与普通上报压缩的自托管 Worker |
-| `replayCanvasWorkerUrl` | 可选 URL | Canvas 编码专用 Worker，不能代替 `workerUrl` |
-| `remoteConfiguration` | 布尔，false | 开启 SDK 远程配置；需观测云支持，远程可覆盖静态 SDK 参数 |
-| `silentMultipleInit` | 布尔，false | SDK 的重复初始化提示策略；不取消 Rumable 的防重和既有 SDK 保护 |
+Workers use root-relative paths such as `/workers/rum.js` or absolute HTTP(S) URLs matching publicURL's origin. Host files matching SDK 3.3.21 yourself. The CLI does not download a new Worker or replace business files. Checks verify active Workers return 200 and JavaScript MIME, not their internal implementation.
 
-Worker URL 必须为根路径 `/workers/rum.js` 或与 `publicURL` 同源的绝对 HTTP(S) URL。文件需由运维托管，版本必须与内嵌 SDK **3.3.21** 匹配；工具不替换业务文件、不下载最新 Worker。`check` / `enable` 和 HTTP `probe` 检查活动的外部 Worker 返回 200 和 JavaScript MIME；这不能证明 Worker 内部代码正确。
+compressIntakeRequests and sendContentTypeByJson cannot both be true: the pinned SDK bypasses ordinary compression in JSON mode. Replay compression is separate.
 
-`compressIntakeRequests` 与 `sendContentTypeByJson` 不能同时为 true：SDK 3.3.21 的 JSON 模式绕过普通请求压缩，工具会在部署前拒绝这一无效组合。回放片段的压缩不受这个互斥关系影响。
+Omitted URLs use embedded Blob Workers. Compression, replay, Canvas, and remote configuration can require Workers. CSP is checked through worker-src, child-src, script-src, then default-src. Blob Workers conservatively require explicit `blob:`. A self-hosted Worker can use the effective same-origin permission. Remote settings may enable compression, so Worker preflight remains necessary even when local compression is off.
 
-不指定地址时使用 SDK 内嵌 Blob Worker。开启普通压缩、任一回放通道或远程配置时，按 `worker-src` → `child-src` → `script-src` → `default-src` 检查有效 CSP。Blob Worker 保守要求显式 `blob:`；自托管 Worker 检查其 URL，通常可由 `'self'` 放行。Canvas 启用时再检查它的独立 Worker。远程配置可能改变压缩设置，因此即使本地关闭压缩也预检 Worker。工具不自动修改 CSP。
+## Trace context and Visitor ID
 
-## Trace 与 Visitor ID
+| Field | Type/default | Meaning |
+| --- | --- | --- |
+| `allowedTracingUrls` | Array, empty | Allowed trace-header destinations; empty disables injection |
+| `traceType` | Enum, SDK default ddtrace | ddtrace, zipkin, zipkin_single_header, w3c_traceparent, w3c_traceparent_64bit, skywalking_v3, jaeger |
+| `tracingSampleRate` | Number, SDK default 100 | Trace sampling, 0–100, independent of RUM sampling |
+| `traceId128Bit` | Boolean, false | Depends on the selected propagation format |
+| `allowTraceHeaderWithoutSession` | Boolean, false | Header injection without a sampled session; does not create RUM data |
+| `visitorId.enabled` | Boolean, false | Anonymous Visitor ID header on matching fetch/XHR |
+| `visitorId.header` | Required lowercase header when enabled | Cannot override authentication, security, browser-reserved, or trace headers |
+| `visitorId.match` | Required nonempty URL array when enabled | SDK same-origin URL-prefix matching |
+| `visitorId.ttlHours` | Positive finite number, SDK default 24 | Browser Visitor ID lifetime; native bridges can manage it separately |
 
-| 参数 | 类型 / 默认值 | 说明 |
-|---|---|---|
-| `allowedTracingUrls` | 数组，空 | 允许注入 Trace Header 的 URL；空数组关闭注入 |
-| `traceType` | 枚举，SDK 默认 ddtrace | `ddtrace`、`zipkin`、`zipkin_single_header`、`w3c_traceparent`、`w3c_traceparent_64bit`、`skywalking_v3`、`jaeger` |
-| `tracingSampleRate` | 数值，SDK 默认 100 | Trace 采样，0–100，不决定 RUM 会话采样 |
-| `traceId128Bit` | 布尔，false | 128 位 Trace ID；效果取决于选定的 Trace 格式 |
-| `allowTraceHeaderWithoutSession` | 布尔，false | 未采样会话也允许注入 Trace Header，不会因此补采 RUM |
-| `visitorId.enabled` | 布尔，false | 对匹配的 Fetch/XHR 添加匿名 Visitor ID Header |
-| `visitorId.header` | 小写 Header 名，启用时必填 | 禁止覆盖认证、安全、浏览器保留与链路 Header |
-| `visitorId.match` | 非空 URL 字符串数组，启用时必填 | SDK 按同源 URL 前缀匹配规则选择请求 |
-| `visitorId.ttlHours` | 正有限数值，SDK 默认 24 | Web Visitor ID 有效小时数；原生桥接场景由 App 管理 |
-
-`allowedTracingUrls` 可以混合字符串和指定 Trace 格式的表：
-
-```toml
+~~~toml
 [sites.rum]
-# 保留应用及上报参数。
+# Retain the existing application and reporting fields.
 allowedTracingUrls = [
   "https://api.example.com/",
   { match = "https://api.example.com/v2/", traceType = "w3c_traceparent" },
@@ -152,33 +144,35 @@ enabled = true
 header = "x-rum-visitor-id"
 match = ["https://api.example.com/"]
 ttlHours = 24
-```
+~~~
 
-URL 匹配项必须为绝对 HTTP(S) 字符串，允许查询串，不允许认证信息和片段；遵循 SDK 的字符串匹配语义。这里不把字符串当作 JavaScript 正则或函数执行。Trace 和 Visitor ID Header 跨域时，需要目标 API 的 CORS 明确允许对应 Header，HTTP 页面探测不能替代该验收。
+URL match strings must be absolute HTTP(S), without credentials or fragments; queries are permitted. Strings follow SDK matching semantics and are not executed as JavaScript functions or regular expressions. Cross-origin trace and Visitor ID headers require explicit API CORS support. HTTP page probes do not verify that browser exchange.
 
-## Canvas 2D 回放
+## Canvas 2D replay
 
-| 参数 | 类型 / SDK 默认值 | 说明 |
-|---|---|---|
-| `replayCanvasEnabled` | 布尔，false | 需要回放开启且会话命中采样 |
-| `replayCanvasMode` | `auto` / `manual`，auto | manual 需要业务调用 `snapshotCanvas()` |
-| `replayCanvasSampling` | 正有限数值或 `"all"`，2 | 数值快照采样或 2D 命令录制；不是帧率 |
-| `replayCanvasQuality` | 0–1 数值，或 low / medium / high，默认 0.4 | 字符串质量预设还会影响默认采样与节奏；显式参数覆盖预设 |
-| `replayCanvasMimeType` | 字符串，image/webp | 支持 image/png、image/jpeg、image/webp |
-| `replayCanvasMaxCanvasSize` | 正有限数值，1280 | 编码前最大边长 |
-| `replayCanvasMaxEncodedBytes` | 正有限数值，40000 | 单张编码图像的字节预算 |
-| `replayCanvasMaxConcurrentEncodes` | 正有限数值，1 | 并发编码预算，SDK 归整为整数 |
-| `replayCanvasFlushImmediately` | 布尔，auto 为 false，manual 为 true | 是否立即将 Canvas 变更刷入回放片段 |
-| `replayCanvasAutoInterval` | 正有限数值，250 | 每个 Canvas 的目标快照间隔，毫秒 |
-| `replayCanvasAutoCooldown` | 正有限数值，默认跟随 interval | 成功后的冷却，毫秒 |
-| `replayCanvasAutoUnchangedBackoff` | 正有限数值，3000 | 未变化状态回退，毫秒 |
-| `replayCanvasAutoFailureBackoff` | 正有限数值，5000 | 编码失败回退，毫秒 |
-| `replayCanvasAutoMaxPerRun` | 正有限数值，2 | 单次自动快照处理的 Canvas 数量预算 |
+| Field | Type/SDK default | Meaning |
+| --- | --- | --- |
+| `replayCanvasEnabled` | Boolean, false | Requires replay and a sampled session |
+| `replayCanvasMode` | auto / manual; auto | Manual requires `snapshotCanvas()` |
+| `replayCanvasSampling` | Positive number or "all"; 2 | Snapshot sampling or 2D command recording, not frames per second |
+| `replayCanvasQuality` | 0–1 or low / medium / high; 0.4 | Presets also influence derived sampling and timing |
+| `replayCanvasMimeType` | image/webp | image/png, image/jpeg, or image/webp |
+| `replayCanvasMaxCanvasSize` | Positive finite number, 1280 | Maximum side before encoding |
+| `replayCanvasMaxEncodedBytes` | Positive finite number, 40000 | Encoded-image byte budget |
+| `replayCanvasMaxConcurrentEncodes` | Positive finite number, 1 | Concurrent encoding budget, normalized to an integer |
+| `replayCanvasFlushImmediately` | Boolean; false for auto, true for manual | Flush Canvas changes immediately |
+| `replayCanvasAutoInterval` | Positive finite number, 250 | Target snapshot interval per canvas, milliseconds |
+| `replayCanvasAutoCooldown` | Positive finite number; follows interval | Cooldown after success, milliseconds |
+| `replayCanvasAutoUnchangedBackoff` | Positive finite number, 3000 | Backoff for unchanged content, milliseconds |
+| `replayCanvasAutoFailureBackoff` | Positive finite number, 5000 | Encoding failure backoff, milliseconds |
+| `replayCanvasAutoMaxPerRun` | Positive finite number, 2 | Canvas budget per automatic run |
 
-质量预设的默认值为：low = 0.25 / 1 / 500ms，medium = 0.4 / 2 / 250ms，high = 0.5 / 4 / 125ms（质量 / 采样 / interval）。模板显式填写预算时，这些填写值会覆盖预设派生值；需要完全跟随预设时删掉对应预算字段。
+Preset quality/sampling/interval values are low = 0.25/1/500 ms, medium = 0.4/2/250 ms, and high = 0.5/4/125 ms. Explicit fields override derived preset values; remove them to follow the preset.
 
-## 需要业务接入的能力
+## Features requiring application code
 
-TOML 不执行 JavaScript。`beforeSend`、`injectTraceHeader`、`generateTraceId`、`shouldMaskNode`、`shouldRecordCanvas`、函数/RegExp URL 匹配器、`plugins` 需要业务提供代码。框架路由插件和额外 WebGL 插件也不由工具加载，Canvas 2D 开关不等于 WebGL 已接入。
+Static TOML cannot supply callbacks such as beforeSend, injectTraceHeader, generateTraceId, shouldMaskNode, or shouldRecordCanvas; function/RegExp URL matchers; or plugins. Framework routing and WebGL plugins are not loaded automatically. Canvas 2D options do not imply WebGL support.
 
-本工具不从静态配置自动调用 `setUser()`、`setGlobalContext()`、业务事件、手动 View 和手动 Canvas 快照等运行时 API；动态值由业务提供，静态部署标识可使用 env/service/version。未开放 SDK 内部未公开字段。废弃别名使用规范字段：`datakitUrl` → `datakitOrigin`，`sampleRate` → `sessionSampleRate`，`trackInteractions` → `trackUserInteractions`，`allowedTracingOrigins` / `allowedDDTracingOrigins` → `allowedTracingUrls`，`useCrossSiteSessionCookie` → `usePartitionedCrossSiteSessionCookie`。
+The tool does not invoke setUser, setGlobalContext, custom business events, manual views, or manual Canvas snapshots with dynamic business values. Use env/service/version for static deployment labels. Private SDK fields are not exposed.
+
+Use canonical names instead of deprecated aliases: datakitUrl → datakitOrigin; sampleRate → sessionSampleRate; trackInteractions → trackUserInteractions; allowedTracingOrigins / allowedDDTracingOrigins → allowedTracingUrls; useCrossSiteSessionCookie → usePartitionedCrossSiteSessionCookie.

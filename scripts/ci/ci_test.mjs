@@ -140,6 +140,7 @@ test('failed upload/readback never exposes manifest and retry completes the part
 test('CI builds the pinned SDK and matching commit, and emits a credential-free report', async t => {
   const f = fixture(t), s = store(), commands = [];
   const report = await runRelease({env, cwd:f.cwd, client:s.client, execute:(...args) => commands.push(args)});
+  assert.deepEqual(commands[0], ['node', ['scripts/check-docs.mjs']]);
   const build = commands.find(([command]) => command === 'go')[1];
   assert(build.includes('--skip-sdk-sync'));
   assert(build.includes(revision));
@@ -151,9 +152,11 @@ test('CI builds the pinned SDK and matching commit, and emits a credential-free 
   assert.equal(report.objects.length, f.load().length + 4);
   assert.deepEqual(report.latest, {status:'verified', version});
   const failed = store();
-  await assert.rejects(runRelease({env, cwd:f.cwd, client:failed.client, execute:() => { throw Error('build failed'); }}), /install release dependencies/);
+  await assert.rejects(runRelease({env, cwd:f.cwd, client:failed.client, execute:command => { if (command === 'npm') throw Error('build failed'); }}), /install release dependencies/);
   assert.equal(failed.puts.length, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.cwd, 'release-report.json'))).status, 'failed');
+  await assert.rejects(runRelease({env, cwd:f.cwd, client:failed.client, execute:() => { throw Error('documentation rejected'); }}), /check English documentation/);
+  assert.equal(failed.puts.length, 0);
 });
 
 test('latest is promoted after immutable verification, pins assets and avoids mutable caching', async t => {
@@ -171,6 +174,9 @@ test('latest is promoted after immutable verification, pins assets and avoids mu
   assert(s.objects.get('rumable/latest/install.ps1').equals(f.files.get('install.ps1')));
   const page = s.objects.get('rumable/latest/setup/index.html').toString();
   assert(page.includes('url=../../0.1.0/setup/index.html'));
+  assert.match(page, /<html lang="en">/);
+  assert.match(page, /Open Rumable/);
+  assert.doesNotMatch(page, /[\u4e00-\u9fff]/u);
   assert.equal(new URL('../../0.1.0/setup/index.html','https://example.com/rumable/latest/setup/index.html').pathname, '/rumable/0.1.0/setup/index.html');
   assert.equal(s.puts.find(p => p.name === 'rumable/latest/setup/index.html').options.headers['Content-Disposition'], 'inline');
   for (const p of s.puts.filter(p => p.name.startsWith('rumable/latest/'))) {

@@ -180,7 +180,7 @@ func run() error {
 		}
 		binaryHash := sha256.Sum256(contents[name])
 		contents["build.json"], _ = json.MarshalIndent(map[string]string{"version": *versionName, "revision": *revision, "channel": channel, "go": strings.TrimPrefix(target.label, "legacy-"), "flavor": flavor, "os": target.os, "arch": target.arch, "binarySHA256": hex.EncodeToString(binaryHash[:])}, "", "  ")
-		contents["README.md"] = []byte(fmt.Sprintf("# Rumable %s\n\n平台：%s/%s；编译器：%s；类型：%s。\n\n先阅读 [面向最终用户的使用指南](USER-GUIDE.md)。本包含可执行文件，无需安装 Go 或 Node.js。\n\n- [版本说明](CHANGELOG.md)\n- [平台兼容范围](docs/compatibility.md)\n- [完整 TOML 参数](docs/configuration.md)\n- [启停与恢复](docs/operations.md)\n- [服务端 OTel 安装与使用](docs/otel.md)\n\n在终端执行 `%s version` 核对版本；Windows PowerShell 使用 `.\\rumable.exe version`。构建来源与二进制摘要见 build.json，SDK 元数据见 sdk.json。\n", *versionName, target.os, target.arch, info.GoVersion, flavor, name))
+		contents["README.md"] = []byte(fmt.Sprintf("# Rumable %s\n\nPlatform: %s/%s; compiler: %s; flavor: %s.\n\nStart with the [user guide](USER-GUIDE.md). This package contains a standalone executable; Go and Node.js are not required. The compatible command remains rumable.\n\n- [Release notes](CHANGELOG.md)\n- [Platform compatibility](docs/compatibility.md)\n- [TOML reference](docs/configuration.md)\n- [Operations and recovery](docs/operations.md)\n- [Optional server-side OTel](docs/otel.md)\n\nRun `%s version`; on Windows PowerShell use `.\\rumable.exe version`. Source revision and binary digest are recorded in build.json; SDK metadata is in sdk.json.\n", *versionName, target.os, target.arch, info.GoVersion, flavor, name))
 		filename := fmt.Sprintf("rumable_%s_%s_%s", *versionName, target.os, target.arch)
 		if flavor == "legacy" {
 			filename += "_legacy"

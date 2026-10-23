@@ -1,4 +1,4 @@
-# 服务端 OTel 独立配置见 otel-nginx.toml / otel-iis.toml 和 docs/otel.md。
+# Configure server-side OTel separately; see otel-nginx.toml, otel-iis.toml, and docs/otel.md.
 schemaVersion = 1
 
 [[sites]]
@@ -13,10 +13,10 @@ binary = "/usr/sbin/nginx"
 attachmentReviewed = false
 
 [sites.sdk]
-source = "bundled" # bundled（网站同域）或 cdn
-loading = "async" # sync 会阻塞 HTML 解析；需要支持同步加载的新版本
-# url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
-integrity = false # 仅 CDN 可开启，跨域时需要 CORS
+source = "bundled" # bundled (same origin) or cdn
+loading = "async" # sync blocks HTML parsing; requires a compatible release
+# Omit url to use the package-recorded source; a custom HTTPS CDN must serve identical bytes.
+integrity = false # CDN only; cross-origin loading requires CORS
 
 [sites.rum]
 applicationId = "REPLACE_APPLICATION_ID"
@@ -58,7 +58,7 @@ sendContentTypeByJson = false
 # workerUrl = "/rum-worker.js" # Host the matching official 3.3.21 worker yourself.
 # replayCanvasWorkerUrl = "/canvas-worker.js"
 remoteConfiguration = false # Remote values may override static SDK settings.
-silentMultipleInit = false # Rumable still never takes over an existing SDK.
+silentMultipleInit = false # Rumable does not take over an existing SDK.
 
 # Trace headers are disabled while the allow list is empty.
 allowedTracingUrls = []
