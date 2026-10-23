@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {validateManifest, makeCommand} from '../web/generator.mjs';
-import {writeSiteVersion, newestVersion} from './github-release.mjs';
+import {writeSiteVersion, newestVersion, releaseDetails} from './github-release.mjs';
 const model = {manualTarget:true,id:'website',applicationId:'app-test',reporting:'openway',endpoint:'https://openway.example.com',clientToken:'token',service:'web',env:'production',version:'1',sessionSampleRate:'100',sessionReplayEnabled:false,trackUserInteractions:true,defaultPrivacyLevel:'mask',sessionPersistence:'cookie',publicURL:'https://www.example.com/',server:'nginx',nginxBinary:'/usr/sbin/nginx',nginxConfig:'/etc/nginx/nginx.conf',includePaths:'/',excludePaths:'/api/',probePaths:'/',iisSite:'Default Web Site',iisApplication:'/'};
 const manifest = {schemaVersion:1,version:'0.1.9',capabilities:['rum-setup-v1','rum-install-v1'],sdk:{version:'3.3.21'},packages:[],installers:{linux:{file:'install.sh',sha256:'a'.repeat(64)},windows:{file:'install.ps1',sha256:'b'.repeat(64)}}};
 
@@ -34,4 +34,18 @@ test('Pages output refuses files that differ from release checksums', t => {
 test('retries of older versions cannot move latest backwards', () => {
   assert.equal(newestVersion(['0.1.9','0.1.10','0.1.8']),'0.1.10');
   assert.equal(newestVersion(['0.9.99','1.0.0']),'1.0.0');
+});
+
+test('draft publication resolves the release ID before using REST', () => {
+  const calls=[];
+  const api='https://api.github.com/repos/beacon-observability/rumable/releases/123';
+  const release=releaseDetails('beacon-observability/rumable','v0.1.9', args => {
+    calls.push(args);
+    if (args[0] === 'release') return Buffer.from(api+'\n');
+    assert.deepEqual(args,['api',api]);
+    return Buffer.from(JSON.stringify({id:123,draft:true,tag_name:'v0.1.9'}));
+  });
+  assert.equal(release.draft,true);
+  assert.equal(calls.length,2);
+  assert.throws(() => releaseDetails('beacon-observability/rumable','v0.1.9', () => Buffer.from('https://api.github.com/repos/other/repo/releases/123')),/Unexpected release API URL/);
 });

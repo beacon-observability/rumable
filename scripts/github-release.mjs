@@ -25,6 +25,14 @@ export function releaseArtifacts(directory, version, revision, repository) {
   return artifacts;
 }
 
+export function releaseDetails(repository, tag, invoke = gh) {
+  // The tag REST endpoint excludes drafts; the CLI can resolve their API ID.
+  const apiURL = invoke(['release','view',tag,'--repo',repository,'--json','apiUrl','--jq','.apiUrl']).toString().trim();
+  const prefix = `https://api.github.com/repos/${repository}/releases/`;
+  if (!apiURL.startsWith(prefix) || !/^[0-9]+$/.test(apiURL.slice(prefix.length))) throw Error('Unexpected release API URL');
+  return JSON.parse(invoke(['api',apiURL]));
+}
+
 function download(repository, tag, names, directory) {
   gh(['release', 'download', tag, '--repo', repository, '--dir', directory, ...names.flatMap(name => ['--pattern', name])]);
 }
@@ -77,8 +85,7 @@ async function run() {
   }
   if (command === 'publish') {
     if (!extra || !fs.statSync(extra).isFile()) throw Error('Missing release notes file');
-    const result = execFileSync('gh',['api',`repos/${repository}/releases/tags/${tag}`],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
-    const release = JSON.parse(result);
+    const release = releaseDetails(repository,tag);
     if (release.target_commitish !== revision) throw Error('Release points to a different commit');
     if (release.assets.some(asset => !assets.some(a => a.name === asset.name))) throw Error('Unexpected existing release asset');
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(),'rumable-verify-'));
