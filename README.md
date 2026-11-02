@@ -1,6 +1,6 @@
 # Rumable
 
-Part of Beacon Observability. [Download the latest release](https://github.com/beacon-observability/rumable/releases/latest) or open the [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
+Part of Beacon Observability. [Download the latest release](https://github.com/beacon-observability/rumable/releases/latest) or open the [configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
 
 Add browser real user monitoring (RUM) to websites through Nginx or IIS without changing application source code. Rumable rewrites HTML responses to load and initialize the bundled Web SDK. Browsers send events directly to the configured receiver; the CLI exits after deployment.
 
@@ -35,7 +35,7 @@ Both servers support all four source/loading combinations. Asynchronous loading 
 
 ## Install and verify
 
-1. Open the [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
+1. Open the [configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html).
 2. Enter application details, choose the server and SDK delivery, and load the matching release manifest.
 3. Save the generated TOML and run the generated command on the actual Web server.
 4. Check deployment status, open the website, inspect browser requests, and confirm stored events in the receiving application.

@@ -4,7 +4,7 @@ See the [user guide](../USER-GUIDE.md#3-one-command-setup) for operator steps. T
 
 ## Page and release entry points
 
-The page lives in web/ and needs no build dependencies. Public copy is English. It can be served as static files or its generator module can be integrated into an existing console. Serve it over HTTP(S), not file://.
+The page lives in web/ and needs no build dependencies. The interface supports English, Simplified Chinese, Traditional Chinese, Indonesian, Japanese, and Korean. On first visit it selects a supported browser language, falling back to English. The header language selector remembers an explicit choice in local storage when available. Switching languages refreshes static text and dynamic feedback without changing form values, generated TOML, or setup commands. Translation keys and catalogs live in `web/i18n.mjs`; missing translations fall back to English. It can be served as static files or its generator module can be integrated into an existing console. Serve it over HTTP(S), not file://.
 
 Use the actual published release base supplied by the operator. Relative paths are:
 

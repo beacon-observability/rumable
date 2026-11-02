@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
-import {createTranslator, messages, SetupError, errorMessage, translatePage} from './i18n.mjs';
+import {createTranslator, messages, SetupError, errorMessage, translatePage, locales, resolveLocale, readLanguagePreference, saveLanguagePreference, languageStorageKey, catalogs} from './i18n.mjs';
 import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
 
 test('setup HTML and catalog provide complete English copy', () => {
   const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const generator = fs.readFileSync(new URL('./generator.mjs', import.meta.url), 'utf8');
   assert.match(html, /<html lang="en">/);
-  assert.doesNotMatch(html, /language-select|[\u4e00-\u9fff]/u);
+  assert.match(html, /for="language-select"/);
+  assert.match(html, /<select id="language-select">/);
   const keys = [...html.matchAll(/data-i18n(?:-placeholder|-aria-label)?="([^"]+)"/g), ...generator.matchAll(/new SetupError\('([^']+)'/g)].map(m => m[1]);
   for (const key of keys) assert.ok(messages[key], 'Missing English copy: ' + key);
   for (const [key, text] of Object.entries(messages)) {
@@ -66,4 +67,68 @@ test('English errors preserve configuration, commands, and operator Unicode valu
   assert.ok(config.includes('我的商店'));
   assert.doesNotMatch(config, /^url =/m);
   assert.equal(errorMessage(Error('browser-specific detail'), t, 'error.network'), 'The network request failed or was blocked by the browser');
+});
+
+
+test('every supported locale has complete copy and matching interpolation parameters', () => {
+  assert.deepEqual(Object.keys(locales), ['en', 'zh-CN', 'zh-TW', 'id', 'ja', 'ko']);
+  const parameters = text => [...text.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort();
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    assert.deepEqual(Object.keys(catalog).sort(), Object.keys(messages).sort(), locale);
+    for (const [key, text] of Object.entries(catalog)) {
+      assert.equal(typeof text, 'string', `${locale}: ${key}`);
+      assert.ok(text.trim(), `${locale}: ${key}`);
+      assert.deepEqual(parameters(text), parameters(messages[key]), `${locale}: ${key}`);
+      assert.equal(createTranslator(locale)(key), text, `${locale}: ${key}`);
+    }
+  }
+});
+
+test('locale negotiation follows explicit preference, browser order, scripts and regions', () => {
+  for (const [preference, languages, expected] of [
+    ['id', ['ja'], 'id'], ['en', ['zh-CN'], 'en'],
+    [null, ['fr-FR', 'ja-JP', 'ko-KR'], 'ja'],
+    [null, ['ko-KR'], 'ko'], [null, ['id-ID'], 'id'],
+    [null, ['zh'], 'zh-CN'], [null, ['ZH-cn'], 'zh-CN'],
+    [null, ['zh-SG'], 'zh-CN'], [null, ['zh-TW'], 'zh-TW'],
+    [null, ['zh-HK'], 'zh-TW'], [null, ['zh-MO'], 'zh-TW'],
+    [null, ['zh-Hant-CN'], 'zh-TW'], [null, ['zh-Hans-HK'], 'zh-CN'],
+    ['invalid', ['en-GB', 'id'], 'en'], [null, ['fr', null], 'en'],
+  ]) assert.equal(resolveLocale(preference, languages), expected);
+});
+
+test('explicit preferences survive reload and storage restrictions never break switching', () => {
+  const values = new Map();
+  const storage = () => ({getItem: key => values.get(key), setItem: (key, value) => values.set(key, value)});
+  for (const locale of Object.keys(locales)) {
+    saveLanguagePreference(storage, locale);
+    assert.equal(values.get(languageStorageKey), locale);
+    assert.equal(resolveLocale(readLanguagePreference(storage), ['fr']), locale);
+  }
+  values.set(languageStorageKey, 'invalid');
+  assert.equal(readLanguagePreference(storage), null);
+  for (const blocked of [() => { throw Error('blocked getter'); }, () => ({
+    getItem() { throw Error('blocked read'); }, setItem() { throw Error('quota'); },
+  }), () => null]) {
+    assert.equal(readLanguagePreference(blocked), null);
+    assert.doesNotThrow(() => saveLanguagePreference(blocked, 'ja'));
+  }
+});
+
+test('translations fall back to English and localize nested errors', () => {
+  assert.equal(createTranslator('unsupported')('page.title'), messages['page.title']);
+  assert.equal(createTranslator('ja')('unknown.key'), 'unknown.key');
+  const original = catalogs.ja['error.network'];
+  try {
+    delete catalogs.ja['error.network'];
+    assert.equal(createTranslator('ja')('error.network'), messages['error.network']);
+  } finally { catalogs.ja['error.network'] = original; }
+  for (const locale of Object.keys(locales)) {
+    const t = createTranslator(locale);
+    const error = new SetupError('error.urlHTTPS', {label:{key:'field.sdkURL'}});
+    assert.ok(errorMessage(error, t).includes(t('field.sdkURL')));
+    assert.ok(!errorMessage(error, t).includes('{label}'));
+    assert.equal(errorMessage(Error('network detail'), t, 'error.network'), t('error.network'));
+    assert.equal(t('release.loaded', {version:'1.2.3', sdk:'3.3.21'}), 'Rumable 1.2.3 · Web SDK 3.3.21');
+  }
 });

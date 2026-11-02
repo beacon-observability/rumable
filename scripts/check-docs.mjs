@@ -36,7 +36,8 @@ for (const name of files) {
   const text = fs.readFileSync(path.join(root, name), 'utf8');
   for (const [offset, line] of text.split('\n').entries()) {
     if (forbidden.test(line)) errors.push(name + ':' + (offset + 1) + ': prohibited product wording or URL');
-    if (han.test(line)) errors.push(name + ':' + (offset + 1) + ': public documentation must be English');
+    // The setup translation catalog intentionally contains localized UI copy.
+    if (name !== 'web/i18n.mjs' && han.test(line)) errors.push(name + ':' + (offset + 1) + ': public documentation must be English');
   }
   if (!name.endsWith('.md')) continue;
   for (const match of withoutFences(text).matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {

@@ -2,7 +2,7 @@
 
 Follow this sequence: choose an environment, prepare application parameters, install the integration, and verify events. Normal installation does not require Git, Go, Node.js, or a database. The executable remains `rumable` for deployment compatibility.
 
-Download packages from [GitHub Releases](https://github.com/beacon-observability/rumable/releases/latest) and use the [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html). Example application domains and `REPLACE_...` configuration values below are placeholders.
+Download packages from [GitHub Releases](https://github.com/beacon-observability/rumable/releases/latest) and use the [configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html). Example application domains and `REPLACE_...` configuration values below are placeholders.
 
 ## Contents
 
@@ -87,7 +87,7 @@ State must remain outside the website root. Do not delete it to reinstall. Conti
 
 ## 3. One-command setup
 
-Open the release's `setup/index.html` over HTTP(S), fill in the application details, load its manifest, save the TOML, and execute the generated command on the Web server. The configuration page is in English.
+Open the release's `setup/index.html` over HTTP(S), fill in the application details, load its manifest, save the TOML, and execute the generated command on the Web server. The configuration page supports English, Simplified Chinese, Traditional Chinese, Indonesian, Japanese, and Korean. Use the language selector in the header to switch; your selection is remembered.
 
 1. Choose browser gateway or direct collector and enter the required parameters.
 2. Set service, environment, and application version. For first verification, use 100% session sampling with replay disabled.
