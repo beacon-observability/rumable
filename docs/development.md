@@ -1,6 +1,6 @@
 # Development, build, and release validation
 
-Rumable public documentation and setup-page copy are English. Product prose and documentation links use neutral receiver terminology. Runtime SDK bytes, machine-readable source metadata, configuration field names, and third-party license notices retain their upstream identities.
+Rumable public documentation is English. The setup page supports English, Simplified Chinese, Traditional Chinese, Indonesian, Japanese, and Korean; its localized catalog and language names live in `web/i18n.mjs`. Product prose and documentation links use neutral receiver terminology. Keep catalog keys and interpolation parameters consistent across locales. Runtime SDK bytes, machine-readable source metadata, configuration field names, and third-party license notices retain their upstream identities.
 
 The compatible binary, paths, and markers remain rumable. Documentation branding does not change data transport, component behavior, or the source version.
 

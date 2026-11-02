@@ -1,9 +1,31 @@
 import {makeConfig, makeCommand, validateManifest} from './generator.mjs';
-import {createTranslator, SetupError, errorMessage, translatePage} from './i18n.mjs';
+import {createTranslator, SetupError, errorMessage, translatePage, locales, resolveLocale, readLanguagePreference, saveLanguagePreference} from './i18n.mjs';
 const form = document.querySelector('#config-form');
 const $ = id => document.getElementById(id);
 let manifest = null, source = '', tab = 'config', config = '', command = '', generation = 0;
-const t = createTranslator();
+const storage = () => window.localStorage;
+let locale = resolveLocale(readLanguagePreference(storage), navigator.languages?.length ? navigator.languages : [navigator.language]);
+let t = createTranslator(locale);
+const languageSelect = $('language-select');
+for (const [value, label] of Object.entries(locales)) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  option.lang = value;
+  languageSelect.append(option);
+}
+function updateLanguage() {
+  t = createTranslator(locale);
+  languageSelect.value = locale;
+  document.documentElement.lang = locale;
+  translatePage(document, t);
+  render();
+}
+languageSelect.addEventListener('change', () => {
+  locale = languageSelect.value;
+  saveLanguagePreference(storage, locale);
+  updateLanguage();
+});
 let releaseKey = 'release.initial', releaseValues = {}, releaseError = null, actionKey = '';
 function model() {
   const m = Object.fromEntries(new FormData(form));
@@ -104,7 +126,5 @@ if (initial) $('manifest-url').value = initial;
 else if (location.protocol === 'https:' && /\/(?:latest|\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)\/setup\/(?:index\.html)?$/.test(location.pathname)) {
   $('manifest-url').value = new URL('../manifest.json', location.href).href;
 }
-document.documentElement.lang = 'en';
-translatePage(document, t);
-render();
+updateLanguage();
 if ($('manifest-url').value) $('load-release').click();
