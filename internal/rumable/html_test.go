@@ -17,8 +17,16 @@ func TestHTMLInjectionAnchor(t *testing.T) {
 		{"fake comment first", `<!-- <head> --><html><head></head></html>`, false},
 		{"fake attribute first", `<html title="<head>"><head></head></html>`, false},
 		{"missing head", `<html><body><script>const x="<head>";</script></body></html>`, false},
-		{"attributed head", `<html><head lang="en"><script>const x="<head>";</script></head></html>`, false},
-		{"space before close", `<html><head ></head></html>`, false},
+		{"attributed head", `<html><head lang="en"><script>const x="<head>";</script></head></html>`, true},
+		{"space before close", `<html><head ></head></html>`, true},
+		{"quoted greater-than", `<html><head data-value='a>b' title="fixture"></head></html>`, true},
+		{"multiline", "<html><head\n data-fixture='yes'\t></head></html>", true},
+		{"attributed comment first", `<!-- <HEAD lang="EN"> --><html><head lang="en"></head></html>`, false},
+		{"attributed attribute first", `<html title='<head lang="en">'><head lang="en"></head></html>`, false},
+		{"different comment", `<!-- <head> --><html><head lang="en"></head></html>`, true},
+		{"self closing", `<html><head/></html>`, false},
+		{"nginx variable", `<html><head data-value="$host"></head></html>`, false},
+		{"oversized", `<html><head data-value="` + strings.Repeat("x", 1024) + `"></head></html>`, false},
 		{"script before head", `<script>const x=1;</script><head></head>`, false},
 		{"template head", `<template><head></head></template>`, false},
 		{"text before head", `not a document<head></head>`, false},
@@ -94,6 +102,38 @@ func TestHTMLAttributesAndPolicies(t *testing.T) {
 		p.Body = []byte(`<html><head><!--` + content + `--><script>const example=` + "`" + content + "`" + `;</script></head></html>`)
 		if err := checkCSP(s, p); err != nil {
 			t.Fatal("parsed base/CSP from inert text", err)
+		}
+	}
+}
+
+func TestHeadAnchorIISBoundary(t *testing.T) {
+	s := testSite()
+	s.Nginx = nil
+	s.IIS = &IIS{}
+	p := Page{Header: http.Header{"Content-Type": {"text/html"}}, Body: []byte(`<html><head lang="en"></head></html>`)}
+	if err := checkPage(s, p); err == nil || !strings.Contains(err.Error(), "IIS requires") {
+		t.Fatalf("IIS boundary: %v", err)
+	}
+}
+
+func TestHeadAnchorPreservation(t *testing.T) {
+	s := testSite()
+	anchors := map[string]string{"/": `<head lang="en">`}
+	n, _, err := renderDeploymentAnchors(t.TempDir(), s, true, nil, false, nil, anchors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchors["/"] = "<head>"
+	if n.HeadAnchors["/"] != `<head lang="en">` {
+		t.Fatal("snapshot aliases input")
+	}
+	for _, mode := range []struct{ enabled, preserve bool }{{false, false}, {true, true}} {
+		next, _, err := renderDeploymentAnchors(t.TempDir(), s, mode.enabled, &n, mode.preserve, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next.HeadAnchors["/"] != n.HeadAnchors["/"] {
+			t.Fatal("disable/OTel lost anchors")
 		}
 	}
 }

@@ -33,7 +33,7 @@ Nginx 和 IIS 共享站点级 `[sites.sdk]`，与 `[sites.rum]` 同级；自动�
 | `source` | `"bundled"` | `bundled` 使用同域内置 SDK；`cdn` 从外部地址加载 SDK，初始化脚本始终同域 |
 | `loading` | `"async"` | `async` 异步加载；`sync` 按顺序同步执行 SDK 与初始化脚本，会阻塞 HTML 解析 |
 | `url` | 省略 | 仅用于 cdn，省略时采用发布包 sdk.json 的官方来源；显式 URL 必须是无认证、查询或片段的完整 HTTPS 脚本地址 |
-| `integrity` | false | 仅用于 cdn；true 设置对应发布包 SHA-256 的 SRI 与 crossorigin=anonymous，并预检 CORS |
+| `integrity` | false | 仅用于 cdn；true 设置本次启用解析所得 SHA-256 的 SRI 与 crossorigin=anonymous，并预检 CORS |
 
 ```toml
 [sites.sdk]
@@ -43,9 +43,13 @@ url = "https://static.guance.com/browser-sdk/v3/dataflux-rum.js"
 integrity = false
 ```
 
-check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript MIME 和发布包摘要；自建 CDN 必须发布相同字节，不接受其他版本或精简版。CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及所需 Worker，工具不会修改策略。CDN 不可达、摘要不一致或 SRI 缺少允许站点 Origin（或 `*`）的 Access-Control-Allow-Origin 时阻止启用。
+check/enable 读取配置地址的当前文件，检查稳定 v3 版本及 df_web_rum_sdk 特征标记、JavaScript MIME、identity/gzip 字节一致性和可选 CORS；不要求与安装包内置 SDK 同版本。配置者须选择可信的 HTTPS CDN 来源：这些格式检查不证明文件来自官方、功能完整或与当前配置兼容，升级后仍需验证实际采集和回放。
 
-官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；默认 `integrity=false`。开启 SRI 前必须确认 CDN 返回允许跨域读取的 CORS 响应头，且内容与安装包摘要一致。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
+首次摘要从本次下载内容计算，用于保证本次部署、本地保留副本和可选 SRI 的字节一致性，不是独立的来源认证。enable 将实际版本、SHA-256 和本地副本写入快照；部署后 probe 和回滚仍校验保存的摘要，不会静默接受 CDN 内容变化。缺少所需标记、其他主版本或预发布版本会被拒绝。
+
+CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及所需 Worker，工具不会修改策略。CDN 不可达、摘要不一致或 SRI 缺少允许站点 Origin（或 `*`）的 Access-Control-Allow-Origin 时阻止启用。
+
+官方 [CDN v3 地址](https://docs.guance.com/real-user-monitoring/web/app-access/) 是可变地址；默认 `integrity=false`。开启 SRI 前必须确认 CDN 返回允许跨域读取的 CORS 响应头，且内容与本次启用保存的摘要一致。该模式的摘要校验只说明探测时内容匹配，不能固定后续浏览器收到的内容；CDN 更新可能让已启用页面先于工具升级。需要固定版本时使用不可变 CDN URL + integrity=true，或使用默认 bundled。外置 Worker 仍须匹配实际 SDK，切换版本后用新会话验证回放。
 
 部署快照保存实际 URL、SDK 版本和摘要，回滚使用历史引用；工具不能恢复外部 CDN 文件。外部旧内容被覆盖/删除时回滚探测会失败并恢复本次受管配置。停用不依赖 CDN 可达；保留的本地 SDK 副本不会自动作为失败降级，异步模式的下载不阻塞 HTML 解析；同步模式在浏览器完成脚本请求或判定失败之前会阻塞解析。源为 bundled 时填写非空 url 或 integrity=true 会被拒绝，避免配置被静默忽略。
 
@@ -53,11 +57,17 @@ check/enable 及部署后 probe 检查 CDN 的 identity/gzip 内容、JavaScript
 
 - 异步：HTML 中插入带 async 的同域初始化脚本，它动态加载 SDK，onload 后调用 init。初始化之前的事件可能漏采。
 - 同步：HTML 中顺序插入 SDK、初始化脚本，均为不带 async/defer 的外部普通脚本；下载和执行阻塞后续 HTML 解析。初始化脚本只初始化已加载的 SDK，不再次下载。SDK 加载失败时记录 load-error，初始化抛错记录 init-error。
-- 两种模式都使用标准 `<head>` 后的位置，不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
+- 两种模式都使用文档 `<head>` 起始标签后的位置（Nginx 支持已探测路径的固定完整标签，IIS 仍要求纯 `<head>`），不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200 并跳过带 Range 的请求，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
 - 页面需避免已有 SDK 接入；预检拒绝常见业务 SDK 和其他部署，已有同步标签须与受管快照匹配。双层服务器不应重复注入。
 - nonce-only、strict-dynamic、Trusted Types 等策略需站点专门适配；同域托管不代表上报同域，访问者仍需能连接上报地址。
 
 脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#44-sdk-如何更新和回滚)。
+
+## Nginx head 锚点
+
+无需新增 TOML 开关：`enable` 为每个 `probePaths` 路径探测并保存完整 head 起始标签。带属性/空白的每个页面路径必须列入 `probePaths`；未探测路径保持纯 `<head>` 匹配。按原始请求路径匹配并忽略 query，同一路径按 query/Cookie/用户变化的标签不支持。内部 index/try_files 重写不会改变原始路径的选择。
+
+保存标签最多 1024 字节，不允许 `$` 或 NUL；必须是真实文档开头，且前面没有同样的标签字面量。属性、引号、空白、顺序变化后重新启用；`probe` 报出可观察到的锚点变化。Nginx 的匹配不区分 ASCII 大小写，输出使用保存值，因此仅大小写变化可能被替换掩盖，不能保证原样保留或由 probe 检出。未探测页面及后续动态响应不属于验证保证；详情见 USER-GUIDE.md 的固定 head 边界。
 
 ## 参数校验
 

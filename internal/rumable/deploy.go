@@ -103,6 +103,14 @@ func compatibleTarget(a, b Site) bool {
 }
 
 func preflight(root string, s Site) error {
+	return preflightSDK(root, s, nil)
+}
+
+func preflightSDK(root string, s Site, resolved *sdkBundle) error {
+	return preflightAnchors(root, s, resolved, nil)
+}
+
+func preflightAnchors(root string, s Site, resolved *sdkBundle, anchors map[string]string) error {
 	if s.OTel != nil && s.OTel.Enabled {
 		if err := checkManagedDependency(root, s); err != nil {
 			return err
@@ -128,11 +136,14 @@ func preflight(root string, s Site) error {
 		return nil
 	}
 	if s.SDK.Source == "cdn" {
-		_, info, err := sdk()
-		if err != nil {
-			return err
+		if resolved == nil {
+			var err error
+			resolved, err = resolveCDNSDK(s)
+			if err != nil {
+				return err
+			}
 		}
-		if err = probeCDNSDK(s, info, sdkLocation(s, info)); err != nil {
+		if err := probeCDNSDK(s, resolved.info, resolved.info.Source); err != nil {
 			return err
 		}
 	}
@@ -147,6 +158,13 @@ func preflight(root string, s Site) error {
 		}
 		if err = checkPage(s, p, managed...); err != nil {
 			return err
+		}
+		if anchors != nil && s.Nginx != nil {
+			doc, err := inspectHTML(p.Body)
+			if err != nil {
+				return err
+			}
+			anchors[path] = doc.headTag
 		}
 	}
 	return probeWorkers(s)
@@ -183,8 +201,17 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		off := false
 		checking.RUM.Enabled = &off
 	}
+	var resolved *sdkBundle
+	anchors := map[string]string{}
 	if enabled {
-		if err := preflight(root, checking); err != nil {
+		if checking.RUM.isEnabled() && checking.SDK.Source == "cdn" {
+			var err error
+			resolved, err = resolveCDNSDK(checking)
+			if err != nil {
+				return err
+			}
+		}
+		if err := preflightAnchors(root, checking, resolved, anchors); err != nil {
 			return err
 		}
 	} else if err := nativeCheck(root, s, false); err != nil {
@@ -212,7 +239,10 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 	if err := adoptIISDynamicCompression(root, &st); err != nil {
 		return err
 	}
-	n, public, err := renderDeployment(root, s, enabled, &st.Current, component == "otel")
+	// Disable must stay offline and retain the deployed CDN metadata/assets,
+	// rather than silently replacing them with this CLI's bundled SDK.
+	preserveBrowser := component == "otel" || !enabled && s.SDK.Source == "cdn" && s.SDK == st.Current.Site.SDK
+	n, public, err := renderDeploymentAnchors(root, s, enabled, &st.Current, preserveBrowser, resolved, anchors)
 	if err != nil {
 		return err
 	}

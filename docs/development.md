@@ -13,6 +13,10 @@ go test ./...
 go vet ./...
 go build -o rumable ./cmd/rumable
 
+# 可选：本机原生 Nginx（含 sub_filter 和 PCRE），临时 Unix socket，不改现有服务。
+RUMABLE_TEST_NGINX=/absolute/path/to/nginx go test ./internal/rumable \
+  -run 'TestNginxHeadAnchors|TestNginxRangeResponses|TestCDNEnableUpgradeRollback' -count=3 -v
+
 # 已有 OrbStack Docker、Go、curl；不安装浏览器测试框架。
 scripts/smoke-nginx.sh
 NGINX_IMAGE=nginx:1.14-alpine scripts/smoke-nginx.sh
@@ -29,10 +33,10 @@ NGINX_IMAGE=rumable-nginx:1.9.4 scripts/smoke-nginx.sh
 # 同份源码，两个真实编译器；仅设置 go.mod 不会让新 Go 支持旧 Windows。
 # 默认先同步官方最新稳定 v3 SDK，再运行两套编译器的测试、vet 和打包。
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.5
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.9
 ```
 
-发布目录默认为 `dist/0.1.5/`，包括 10 个 Windows / Linux 包、两个安装器、配置页与版本元数据，共 19 个公开文件。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包、安装器、配置页及元数据。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
+发布目录默认为 `dist/0.1.9/`，包括 10 个 Windows / Linux 包、两个安装器、配置页与版本元数据，共 20 个公开文件。每包携带二进制、示例、手册、SDK 元数据和许可证；目录中的 `SHA256SUMS` 校验压缩包、安装器、配置页及元数据。`build.json` 记录源码提交、架构、编译器与二进制摘要。IIS 及旧 Windows 的真实运行验证需在对应 Windows 主机进行，交叉编译不代表运行验收。
 
 可单独执行 `go run scripts/sync-sdk.go` 同步并审查 SDK、版本、来源和 SHA-256；CDN 与官方 NPM 稳定版不一致、版本不是稳定 v3 或许可变更时中止。离线重建可显式使用 `release.go --skip-sdk-sync`，其含义是沿用已校验文件，不检查最新版本。站点不会自动更新；分发新二进制后执行 `enable` 升级，默认同域方式保留旧资源供缓存页面和回滚使用。
 

@@ -132,6 +132,9 @@ func checkPage(s Site, p Page, managed ...Snapshot) error {
 	if err = doc.checkAnchor(p.Body); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
 	}
+	if s.IIS != nil && !strings.EqualFold(doc.headTag, "<head>") {
+		return errors.New("IIS requires a plain opening <head> injection anchor")
+	}
 	if err := checkCSP(s, p); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
 	}
@@ -371,6 +374,22 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 		}
 		return r, nil
 	}
+	if expected != nil && expected.Site.Nginx != nil && len(expected.HeadAnchors) > 0 {
+		u, err := url.Parse(p.URL)
+		if err != nil {
+			return r, err
+		}
+		anchor := expected.HeadAnchors[u.Path]
+		if anchor == "" {
+			anchor = "<head>"
+		}
+		if doc.headTag != anchor {
+			return r, errors.New("head injection anchor changed or was not probed; add the path to probePaths and re-enable to refresh the saved anchor")
+		}
+		if err := doc.checkAnchor(p.Body); err != nil {
+			return r, err
+		}
+	}
 	if count != 1 || total != 1 {
 		return r, fmt.Errorf("expected one injection tag for this deployment and no competing tags, found %d own / %d total", count, total)
 	}
@@ -389,7 +408,11 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 			return r, err
 		}
 		if s.SDK.Source == "cdn" {
-			n.SDKURL = sdkLocation(s, n.SDK)
+			resolved, err := resolveCDNSDK(s)
+			if err != nil {
+				return r, err
+			}
+			n.SDK, n.SDKURL = resolved.info, resolved.info.Source
 		}
 	}
 	if n.Site.SDK.Loading == "sync" {
@@ -448,11 +471,11 @@ func probeScripts(s Site, src string, expected *Snapshot) error {
 			return fmt.Errorf("SDK: %w", err)
 		}
 	} else if s.SDK.Source == "cdn" {
-		_, info, err := sdk()
+		resolved, err := resolveCDNSDK(s)
 		if err != nil {
 			return err
 		}
-		return probeCDNSDK(s, info, sdkLocation(s, info))
+		return probeCDNSDK(s, resolved.info, resolved.info.Source)
 	}
 	return nil
 }
