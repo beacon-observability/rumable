@@ -14,6 +14,12 @@ export function newestVersion(versions) {
     return 0;
   }).at(-1);
 }
+export function publicationPolicy(version, releases) {
+  if (!/^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(version)) throw Error('Expected a stable or RC version');
+  const prerelease = version.includes('-');
+  const stable = releases.filter(r => !r.isDraft && !r.isPrerelease && /^v\d+\.\d+\.\d+$/.test(r.tagName)).map(r => r.tagName.slice(1));
+  return {prerelease, latest: !prerelease && newestVersion([...stable, version]) === version};
+}
 function publishedReleases(repository) {
   return JSON.parse(gh(['release','list','--repo',repository,'--limit','1000','--json','tagName,isDraft,isPrerelease']));
 }
@@ -58,6 +64,7 @@ async function run() {
   const tag = `v${version}`;
   if (command === 'validate') { console.log(`Verified ${artifacts.length} release files for ${tag} (${revision})`); return; }
   if (command === 'site') {
+    if (version.includes('-')) throw Error('Prereleases must not update stable Pages');
     if (!extra) throw Error('Missing site output directory');
     // Rebuild older published pages from their tagged sources and checksum files.
     // Releases retain the archives; Pages contains only configuration UI/metadata.
@@ -98,9 +105,8 @@ async function run() {
       const check = path.join(temporary,'complete'); fs.mkdirSync(check);
       download(repository,tag,assets.map(a => a.name),check); verifyFiles(check,assets);
       if (release.draft) {
-        const stable = publishedReleases(repository).filter(r => !r.isDraft && !r.isPrerelease && /^v\d+\.\d+\.\d+$/.test(r.tagName)).map(r => r.tagName.slice(1));
-        const latest = newestVersion([...stable,version]) === version;
-        gh(['release','edit',tag,'--repo',repository,'--draft=false',`--latest=${latest}`,'--title',tag,'--notes-file',extra]);
+        const {prerelease, latest} = publicationPolicy(version, publishedReleases(repository));
+        gh(['release','edit',tag,'--repo',repository,'--draft=false',`--prerelease=${prerelease}`,`--latest=${latest}`,'--title',tag,'--notes-file',extra]);
       }
       console.log(`Published and verified ${assets.length} assets: https://github.com/${repository}/releases/tag/${tag}`);
     } finally { fs.rmSync(temporary,{recursive:true,force:true}); }

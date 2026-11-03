@@ -53,7 +53,7 @@ Modern and legacy packages use two actual compilers:
 
 ~~~sh
 go run scripts/release.go --go /path/to/go1.26.x/bin/go \
-  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.9 --skip-sdk-sync \
+  --legacy-go /path/to/go1.20.14/bin/go --version 0.1.10 --skip-sdk-sync \
   --github-repository beacon-observability/rumable
 ~~~
 

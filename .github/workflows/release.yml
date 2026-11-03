@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           version=$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/rumable/config.go)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             [[ "$GITHUB_REF_NAME" == "v$version" ]]
           fi
@@ -82,6 +82,9 @@ jobs:
             $reported = & (Join-Path $out 'rumable.exe') version | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $reported.version -ne $env:VERSION) { throw 'Package version mismatch' }
           }
+      - name: OTel environment regression on Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-otel-environment.ps1
       - name: PowerShell installer and IIS contracts
         shell: pwsh
         run: ./scripts/test-powershell.ps1
@@ -110,14 +113,19 @@ jobs:
           REVISION: ${{ needs.build.outputs.revision }}
         run: |
           node scripts/github-release.mjs validate dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
-          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --title "v$VERSION" --notes-file "docs/releases/$VERSION.md"
+          prerelease=false; [[ "$VERSION" != *-* ]] || prerelease=true
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$REVISION" --verify-tag --draft --prerelease="$prerelease" --latest=false --title "v$VERSION" --notes-file "docs/releases/$VERSION.md"
           node scripts/github-release.mjs publish dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" "docs/releases/$VERSION.md"
           node scripts/github-release.mjs verify-public dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY"
-          node scripts/github-release.mjs site dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" site
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+          if [[ "$VERSION" != *-* ]]; then
+            node scripts/github-release.mjs site dist "$VERSION" "$REVISION" "$GITHUB_REPOSITORY" site
+          fi
+      - if: ${{ !contains(needs.build.outputs.version, '-') }}
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site
   pages:
+    if: ${{ !contains(github.ref_name, '-') }}
     needs: publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15

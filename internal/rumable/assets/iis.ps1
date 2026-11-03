@@ -171,7 +171,7 @@ try {
         }
         if ((@($expected.otel.applications) | ConvertTo-Json -Compress) -cne (@($actual.otel.applications) | ConvertTo-Json -Compress)) { throw 'IIS OTel pool membership changed before commit.' }
         $values = $expected.otel.environment
-        if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties.Name) }
+        if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties | ForEach-Object { $_.Name }) }
         if ($names.Count -ne $actual.otel.environment.Count) { throw 'IIS OTel environment changed before commit.' }
         foreach ($key in $names) {
             if (-not $actual.otel.environment.ContainsKey($key) -or $values.$key -cne $actual.otel.environment.$key) { throw 'IIS OTel environment changed before commit.' }

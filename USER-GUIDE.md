@@ -160,7 +160,7 @@ The page command cannot pass an attachment `--target` selection. If multiple Ngi
 Record the printed site ID, URL, executable path, state root, and backup location. The installer does not automatically add the CLI to PATH.
 
 ~~~sh
-rumable=/opt/rumable/0.1.9/rumable
+rumable=/opt/rumable/0.1.10/rumable
 sudo "$rumable" status --state-dir /var/lib/rumable --site REPLACE_SITE_ID
 sudo "$rumable" probe --state-dir /var/lib/rumable --site REPLACE_SITE_ID
 ~~~
@@ -263,7 +263,7 @@ Keep original site IDs, target definitions, state, and old assets. Content-hashe
 
 ## 5. Download and verify the CLI
 
-Download from [GitHub Releases](https://github.com/beacon-observability/rumable/releases/latest). The fixed 0.1.9 download base is `https://github.com/beacon-observability/rumable/releases/download/v0.1.9/`. Assets include the manifest, SHA256SUMS, installers, and platform archives. The [Pages manifest](https://beacon-observability.github.io/rumable/latest/manifest.json) resolves downloads through an absolute, version-pinned `artifactBase`. See [GitHub releases](docs/github-release.md) for download commands and publication details.
+Download from [GitHub Releases](https://github.com/beacon-observability/rumable/releases/latest). The fixed 0.1.10 download base is `https://github.com/beacon-observability/rumable/releases/download/v0.1.10/`. Assets include the manifest, SHA256SUMS, installers, and platform archives. The [Pages manifest](https://beacon-observability.github.io/rumable/latest/manifest.json) resolves downloads through an absolute, version-pinned `artifactBase`. See [GitHub releases](docs/github-release.md) for download commands and publication details.
 
 | OS | Architectures | Flavor |
 | --- | --- | --- |
@@ -288,7 +288,7 @@ On Windows PowerShell 5.1:
 $archive = 'C:\Downloads\REPLACE_PACKAGE.zip'
 (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
 # Compare the result with the trusted release checksum before extracting.
-$install = 'C:\Rumable\0.1.9'
+$install = 'C:\Rumable\0.1.10'
 if (Test-Path -LiteralPath $install) { throw 'Installation directory already exists' }
 Expand-Archive -LiteralPath $archive -DestinationPath $install
 & (Join-Path $install 'rumable.exe') version
@@ -303,7 +303,7 @@ Run in the real server namespace with appropriate permissions. Use stable absolu
 
 ~~~sh
 sudo -i
-rumable=/opt/rumable/0.1.9/rumable
+rumable=/opt/rumable/0.1.10/rumable
 config=/etc/rumable/website.toml
 state=/var/lib/rumable
 site_id=website
@@ -341,7 +341,7 @@ Record the IIS site name, application path, pool, and anonymous file identity. A
 Use administrator native 64-bit Windows PowerShell and the actual installed CLI:
 
 ~~~powershell
-$rumable = 'C:\Rumable\0.1.9\rumable.exe'
+$rumable = 'C:\Rumable\0.1.10\rumable.exe'
 $config = 'C:\ProgramData\RumableConfig\website.toml'
 $state = Join-Path $env:ProgramData 'Rumable'
 New-Item -ItemType Directory -Force (Split-Path $config) | Out-Null

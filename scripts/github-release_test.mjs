@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {validateManifest, makeCommand} from '../web/generator.mjs';
-import {writeSiteVersion, newestVersion, releaseDetails} from './github-release.mjs';
+import {writeSiteVersion, newestVersion, releaseDetails, publicationPolicy} from './github-release.mjs';
 const model = {manualTarget:true,id:'website',applicationId:'app-test',reporting:'openway',endpoint:'https://openway.example.com',clientToken:'token',service:'web',env:'production',version:'1',sessionSampleRate:'100',sessionReplayEnabled:false,trackUserInteractions:true,defaultPrivacyLevel:'mask',sessionPersistence:'cookie',publicURL:'https://www.example.com/',server:'nginx',nginxBinary:'/usr/sbin/nginx',nginxConfig:'/etc/nginx/nginx.conf',includePaths:'/',excludePaths:'/api/',probePaths:'/',iisSite:'Default Web Site',iisApplication:'/'};
 const manifest = {schemaVersion:1,version:'0.1.9',capabilities:['rum-setup-v1','rum-install-v1'],sdk:{version:'3.3.21'},packages:[],installers:{linux:{file:'install.sh',sha256:'a'.repeat(64)},windows:{file:'install.ps1',sha256:'b'.repeat(64)}}};
 
@@ -48,4 +48,18 @@ test('draft publication resolves the release ID before using REST', () => {
   assert.equal(release.draft,true);
   assert.equal(calls.length,2);
   assert.throws(() => releaseDetails('beacon-observability/rumable','v0.1.9', () => Buffer.from('https://api.github.com/repos/other/repo/releases/123')),/Unexpected release API URL/);
+});
+
+
+test('RC publication stays a prerelease and never replaces stable latest', () => {
+  const releases = [{tagName:'v0.1.9', isDraft:false, isPrerelease:false}];
+  assert.deepEqual(publicationPolicy('0.1.10-rc.1', releases), {prerelease:true, latest:false});
+  assert.deepEqual(publicationPolicy('0.1.10-rc.1', []), {prerelease:true, latest:false});
+  assert.deepEqual(publicationPolicy('0.1.10', releases), {prerelease:false, latest:true});
+  assert.deepEqual(publicationPolicy('0.1.8', releases), {prerelease:false, latest:false});
+  assert.deepEqual(publicationPolicy('0.1.10', [...releases,
+    {tagName:'v1.0.0', isDraft:true, isPrerelease:false},
+    {tagName:'v2.0.0-rc.1', isDraft:false, isPrerelease:true}
+  ]), {prerelease:false, latest:true});
+  for (const version of ['0.1.10-rc.0','0.1.10-beta.1','../rc.1']) assert.throws(() => publicationPolicy(version, releases));
 });
