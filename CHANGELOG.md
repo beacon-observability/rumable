@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10-rc.1 · 2026-11-03
+
+- Fix empty IIS OTel environment snapshots blocking enable and rollback on Windows PowerShell 5.1 ([#4](https://github.com/beacon-observability/rumable/issues/4)).
+- Add empty/nonempty environment restoration and drift regression checks on Windows PowerShell 5.1 and PowerShell 7.
+- Include the multilingual browser setup interface added since v0.1.9.
+- Publish RC packages as GitHub prereleases without changing stable latest downloads or Pages.
+- See the [RC release notes](docs/releases/0.1.10-rc.1.md).
+
 ## 0.1.9 · 2026-10-23
 
 - Join Beacon Observability while keeping Rumable naming, command, configuration, SDK, and collection behavior.

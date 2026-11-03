@@ -46,6 +46,19 @@ The helper checks the clean committed version, intended GitHub remote, and exist
 
 ## Publication and retry
 
+### Release candidates
+
+RC versions use `<next-version>-rc.<number>`, starting at `rc.1`. Prepare the matching source version, builder default, release notes, changelog, and support-file entry on a pushed PR branch. RC notes and download URLs are version-pinned; current stable download examples remain unchanged. Run CI and the manual Release workflow against that branch before tagging its exact verified commit. RC tags may point to the PR branch without merging it into main:
+
+```sh
+git tag -a v0.1.10-rc.1 -m 'Rumable 0.1.10-rc.1' VERIFIED_COMMIT
+git -c push.followTags=false push origin refs/tags/v0.1.10-rc.1
+```
+
+The tag workflow performs the same build, package, and Linux/Windows checks, then publishes a GitHub prerelease with `latest=false`. RC publication skips Pages deployment and preserves stable latest aliases. The `release-github.sh` helper continues to require main for stable releases. Never move a published RC tag; increment the RC number for any source correction.
+
+### Stable publication
+
 The workflow builds ten Linux/Windows archives using isolated Go 1.26.4 and Go 1.20.14 compilers, tests both compilers, checks source revision and artifact hashes, exercises the packaged Linux executable with Nginx, and checks Windows AMD64 modern/legacy executables on Windows Server 2022. PowerShell regression tests cover installation and IIS contracts; they do not replace native IIS acceptance or prove all older Windows versions.
 
 Publication starts after build and Windows checks pass. It creates a draft, uploads the fifteen root assets, downloads them again, verifies every digest, publishes the release, and verifies anonymous HTTPS downloads. Setup pages deploy separately with the official Pages Actions. Older published stable pages are rebuilt from their tagged sources and checked against their published checksums before redeployment.
