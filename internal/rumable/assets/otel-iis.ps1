@@ -78,7 +78,7 @@ function Assert-OTelPool([switch]$SavedCredentials) {
 }
 
 function Same-OTelEnvironment($expected, $actual) {
-    if ($expected -is [Collections.IDictionary]) { $names = @($expected.Keys) } else { $names = @($expected.PSObject.Properties.Name) }
+    if ($expected -is [Collections.IDictionary]) { $names = @($expected.Keys) } else { $names = @($expected.PSObject.Properties | ForEach-Object { $_.Name }) }
     if ($names.Count -ne $actual.Count) { return $false }
     foreach ($key in $names) {
         if (-not $actual.ContainsKey($key) -or $expected.$key -cne $actual.$key) { return $false }
@@ -88,7 +88,7 @@ function Same-OTelEnvironment($expected, $actual) {
 
 function Set-OTelEnvironment($values) {
     if (Same-OTelEnvironment $values (Read-OTelSnapshot).environment) { return }
-    if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties.Name) }
+    if ($values -is [Collections.IDictionary]) { $names = @($values.Keys) } else { $names = @($values.PSObject.Properties | ForEach-Object { $_.Name }) }
     foreach ($key in $names) {
         if ($otelKeys -notcontains $key) { throw 'Invalid OTel environment key in snapshot.' }
     }
