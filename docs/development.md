@@ -74,3 +74,5 @@ KEEP=1 CDN=1 SYNC=1 bash scripts/smoke-attach.sh
 ~~~
 
 The /loading fixture records SDK state at the first business script; synchronous mode expects initialization beforehand. Inspect browser execution separately, then clean up the printed test resources. IIS script contracts can be exercised with scripts/test-powershell.ps1; final native acceptance remains independent.
+
+Hosted Linux CI and publication jobs use `ubuntu-latest`; Go and Node versions remain explicitly pinned in the workflows. Release builds still run both compiler suites, packaged Nginx integration, and Windows executable/PowerShell checks before publication.
