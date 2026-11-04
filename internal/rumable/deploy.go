@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -107,10 +108,6 @@ func preflight(root string, s Site) error {
 }
 
 func preflightSDK(root string, s Site, resolved *sdkBundle) error {
-	return preflightAnchors(root, s, resolved, nil)
-}
-
-func preflightAnchors(root string, s Site, resolved *sdkBundle, anchors map[string]string) error {
 	if s.OTel != nil && s.OTel.Enabled {
 		if err := checkManagedDependency(root, s); err != nil {
 			return err
@@ -147,11 +144,25 @@ func preflightAnchors(root string, s Site, resolved *sdkBundle, anchors map[stri
 			return err
 		}
 	}
+	paths := append([]string{}, s.ProbePaths...)
 	var managed []Snapshot
 	if st, err := loadState(root, s.ID); err == nil {
 		managed = append(managed, st.Current)
+		// A probe list edit must not silently drop a legacy attributed page.
+		known := map[string]bool{}
+		for _, path := range paths {
+			known[path] = true
+		}
+		var legacy []string
+		for path, anchor := range st.Current.HeadAnchors {
+			if !strings.EqualFold(anchor, "<head>") && s.matches(path) && !known[path] {
+				legacy = append(legacy, path)
+			}
+		}
+		sort.Strings(legacy)
+		paths = append(paths, legacy...)
 	}
-	for _, path := range s.ProbePaths {
+	for _, path := range paths {
 		p, err := preflightPage(s, path)
 		if err != nil {
 			return err
@@ -159,13 +170,7 @@ func preflightAnchors(root string, s Site, resolved *sdkBundle, anchors map[stri
 		if err = checkPage(s, p, managed...); err != nil {
 			return err
 		}
-		if anchors != nil && s.Nginx != nil {
-			doc, err := inspectHTML(p.Body)
-			if err != nil {
-				return err
-			}
-			anchors[path] = doc.headTag
-		}
+
 	}
 	return probeWorkers(s)
 }
@@ -202,7 +207,6 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		checking.RUM.Enabled = &off
 	}
 	var resolved *sdkBundle
-	anchors := map[string]string{}
 	if enabled {
 		if checking.RUM.isEnabled() && checking.SDK.Source == "cdn" {
 			var err error
@@ -211,7 +215,7 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 				return err
 			}
 		}
-		if err := preflightAnchors(root, checking, resolved, anchors); err != nil {
+		if err := preflightSDK(root, checking, resolved); err != nil {
 			return err
 		}
 	} else if err := nativeCheck(root, s, false); err != nil {
@@ -242,7 +246,7 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 	// Disable must stay offline and retain the deployed CDN metadata/assets,
 	// rather than silently replacing them with this CLI's bundled SDK.
 	preserveBrowser := component == "otel" || !enabled && s.SDK.Source == "cdn" && s.SDK == st.Current.Site.SDK
-	n, public, err := renderDeploymentAnchors(root, s, enabled, &st.Current, preserveBrowser, resolved, anchors)
+	n, public, err := renderDeploymentSDK(root, s, enabled, &st.Current, preserveBrowser, resolved)
 	if err != nil {
 		return err
 	}

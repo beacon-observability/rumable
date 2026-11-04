@@ -18,6 +18,7 @@ type Snapshot struct {
 	// Never serialized, adopted by enable, or retained in successful history.
 	legacyIISRecovery bool
 
+	// Legacy 0.1.9 snapshot data; never learned by new RUM enables.
 	HeadAnchors   map[string]string `json:"headAnchors,omitempty"`
 	Uninstall     bool              `json:"uninstall,omitempty"`
 	Enabled       bool              `json:"enabled"`
@@ -43,14 +44,12 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 }
 
 func renderDeploymentSDK(root string, s Site, enabled bool, previous *Snapshot, preserveBrowser bool, resolved *sdkBundle) (Snapshot, map[string][]byte, error) {
-	return renderDeploymentAnchors(root, s, enabled, previous, preserveBrowser, resolved, nil)
-}
-
-func renderDeploymentAnchors(root string, s Site, enabled bool, previous *Snapshot, preserveBrowser bool, resolved *sdkBundle, anchors map[string]string) (Snapshot, map[string][]byte, error) {
 	s = resolveOTelPaths(root, s)
 	active := enabled
 	enabled = enabled && s.RUM.isEnabled()
 	n := Snapshot{Enabled: enabled, Site: s, Files: map[string][]byte{}, Assets: map[string]string{}}
+	// Only historical disable/OTel operations retain 0.1.9 path anchors.
+	var anchors map[string]string
 	if previous != nil && (preserveBrowser || !enabled) {
 		anchors = previous.HeadAnchors
 	}
@@ -234,12 +233,11 @@ Add the following includes once, in the actual serving configuration:
 
 Do not create a competing location or replace existing proxy_pass/root/try_files.
 Review every HTML handler selected by includePaths and every probePaths entry.
-Enable saves the complete head opening tag separately for each probe path.
-List every attributed-head page in probePaths; unprobed paths retain the plain
-<head> match. Query-dependent head attributes are unsupported. Re-enable after
-changing tag attributes, quoting or whitespace; probe reports observable drift.
-sub_filter is case-insensitive: case-only changes may be replaced by saved values
-and cannot be reliably detected. IIS retains its plain-head requirement.
+New enables match only plain <head>, case-insensitively; attributes and extra
+whitespace inside the tag are unsupported. probePaths only selects verification
+pages, while includePaths/excludePaths control injection. Never add paths to
+probePaths to enable a different tag format. Legacy 0.1.9 snapshots remain
+readable for disable, OTel-only operations and rollback.
 
 For proxy handlers, merge these into the existing proxy_set_header list at the
 same effective level; keep ALL existing Host/auth/custom headers. Adding a new

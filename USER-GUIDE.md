@@ -67,7 +67,7 @@ HTTPS 网站需要 HTTPS 上报地址。地址必须从访问者的浏览器可�
 
 - 网站已运行。执行 CLI 的服务器能够通过网站地址访问目标实例，DNS、端口和 TLS 证书正常。负载均衡/CDN 后的网站还需保证验收请求确实到达本次修改的实例，不能命中其他节点或旧 HTML 缓存。
 - 至少准备一个无需登录、直接返回 **HTTP 200、text/html、完整 HTML** 的验收页面。CLI 不跟随 301/302、不携带登录 Cookie。首页跳转时改用实际页面路径。
-- 页面开头有真实文档 `<head>`。Nginx 支持 `probePaths` 中已探测页面的固定属性/空白写法（如 `<head lang="en">`、`<head >`）；IIS 仍要求纯 `<head>`。匹配标签前不能有同样的标签文本出现在注释或属性中。带属性的页面路径必须列入 `probePaths`，未探测路径仍按纯 `<head>` 匹配。
+- 页面开头须有真实文档的普通 `<head>`。Nginx 大小写不敏感；属性、标签内额外空格/换行/Tab 均不受支持。标签前不能有相同伪标签。`probePaths` 仅用于检查，不控制注入范围。
 - 每种页面模板及实际 HTML handler 至少有一个验收路径。只验证首页不能证明其他模板都可注入。
 - 站点尚未通过其他方式接入同一 SDK。工具能识别常见已有接入，但不能识别所有藏在业务 bundle 中的动态初始化；需要同时检查业务现状。
 - CSP 允许初始化脚本、SDK、上报地址以及所需 Worker；工具不会自动放宽 CSP。
@@ -213,7 +213,7 @@ RUM 接入成功应看到 `rumEnabled=true`、`drift=""`、`pendingTransaction=f
 
 ### 4.1 SDK 如何注入
 
-Rumable 通过 Nginx 的 HTML 替换或 IIS 的出站重写，在网站响应的 `<head>` 起始标签后加入脚本；Nginx 可按探测路径保存固定的完整标签，IIS 仍要求纯 `<head>`。业务源代码无需修改。CLI 执行完即退出；SDK 在访问者浏览器运行，直接向配置的 OpenWay / DataKit 上报。
+Rumable 通过 Nginx 的 HTML 替换或 IIS 的出站重写，在网站响应的 `<head>` 起始标签后加入脚本；Nginx 大小写不敏感，Nginx/IIS 均要求普通 `<head>`。业务源代码无需修改。CLI 执行完即退出；SDK 在访问者浏览器运行，直接向配置的 OpenWay / DataKit 上报。
 
 SDK 来源和加载方式是两个独立选项：
 
@@ -226,13 +226,15 @@ SDK 来源和加载方式是两个独立选项：
 
 同域资源位于网站的 `__rumable__/<站点ID>/` 下，以 `sdk.<摘要>.js`、`init.<摘要>.js` 命名。SDK 来源不改变数据上报地址；同域托管也不等于同域上报。
 
-#### Nginx 固定 head 标签的支持边界
+#### Nginx 普通 head 支持边界
 
-`enable` 从 `probePaths` 各路径的预检响应取得完整 head 起始标签，保存到本次部署快照。配置按原始请求路径选择一条匹配规则，不受常规 index/try_files 内部重写影响，忽略 query；因此同一路径随 query、Cookie、语言或用户变化的 head 属性不属于支持范围。带属性的其他路径也必须分别加入 `probePaths`；不会根据一个样本自动覆盖全站。
+新启用/更新统一匹配 `<head>`，支持 `<HEAD>`、`<Head>` 等大小写组合；不支持带属性或标签内额外空格、换行、Tab。无需安装新模块或增加命令参数。
 
-属性、空格、引号或属性顺序变化后需要重新启用；head 内部 title/meta/script 的内容变化不影响匹配。手动运行 `probe` 可发现已探测路径的不匹配，但 CLI 不常驻监控。路径匹配使用预检 URL 的编码形式，其他等价编码形式不能保证匹配。
+`includePaths`、`excludePaths` 控制注入范围，`probePaths` 只检查选定页面。未列入检查路径的普通 head 页面仍可注入；添加检查路径不能让属性 head 获得支持。固定字符串匹配不能区分正文中的同名伪标签，预检会拒绝真实 head 之前的同名注释/属性文本。应覆盖主要页面模板；首页通过不代表全站或后续模板变化已验证。
 
-标签最长 1024 字节，不支持 `$` 或 NUL。Nginx `sub_filter` 原生不区分 ASCII 大小写，替换时使用保存的完整标签；若实际标签只改变大小写，可能仍匹配并恢复成保存值，不能保证保留这种动态属性值，也不能保证 probe 发现被替换掩盖的大小写变化。部署后新增的同名标签文本仍需重新审查。IIS 行为不变，不需要安装 njs/Lua。
+已有 0.1.9 部署不会因替换 CLI 自动变化。更新 RUM 时检查旧快照中仍在新范围内的属性路径，不兼容就保留部署，页面调整为普通 head 后再更新。禁用、仅调整 OTel 和回滚继续兼容旧规则。IIS 支持范围保持不变。
+
+详见 [Nginx 普通 head 注入](docs/nginx-plain-head.md)。
 
 ### 4.2 选择异步或同步
 
@@ -1033,7 +1035,7 @@ Linux 若只想恢复首次自动挂接但保留站点状态，可在 disable �
 | unknown configuration key: server/rum | 把发现配置当作完整配置使用了；使用 setup --discover 或生成 [[sites]] 配置 |
 | expected HTTP 200，实际 301/302/401/403 | 使用直接返回完整 HTML 的验收路径；检查匿名访问、绑定、DNS、TLS 与命中实例 |
 | `no safe literal <head>` | 检查真实文档 head、完整标签及标签前同样的注释/属性文本；不能改用 `</head>` 随意绕过 |
-| `head injection anchor changed or was not probed` | 将该路径加入 `probePaths`，确认模板稳定后重新 `enable`；这不是自动监控或自动修复 |
+| `legacy head injection anchor changed` | 恢复旧快照的标签，或将页面调整为普通 `<head>` 后重新启用；增加检查路径不会创建标签规则 |
 | IIS 资源返回 401/403/404 | 检查实际匿名身份的 ACL、公共目录、StaticFile、JavaScript MIME、路由例外 |
 | requires a dedicated application pool / pool is not Started | 确认仅目标应用使用该池且池已启动；共享池需先由运维调整，工具不会自动分配或启动池 |
 | Old application pool worker did not exit | 检查目标池的长请求和回收状态，不强杀进程；保留事务，条件恢复后使用原 state-dir/site 执行 rollback |

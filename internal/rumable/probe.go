@@ -132,8 +132,8 @@ func checkPage(s Site, p Page, managed ...Snapshot) error {
 	if err = doc.checkAnchor(p.Body); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
 	}
-	if s.IIS != nil && !strings.EqualFold(doc.headTag, "<head>") {
-		return errors.New("IIS requires a plain opening <head> injection anchor")
+	if !strings.EqualFold(doc.headTag, "<head>") {
+		return fmt.Errorf("%s: %s requires a plain opening <head> (case-insensitive, without attributes or whitespace); probePaths only selects verification pages", p.URL, strings.ToUpper(s.platform()))
 	}
 	if err := checkCSP(s, p); err != nil {
 		return fmt.Errorf("%s: %w", p.URL, err)
@@ -384,7 +384,15 @@ func inspectInjection(s Site, p Page, expected *Snapshot) (ProbeResult, error) {
 			anchor = "<head>"
 		}
 		if doc.headTag != anchor {
-			return r, errors.New("head injection anchor changed or was not probed; add the path to probePaths and re-enable to refresh the saved anchor")
+			return r, errors.New("legacy head injection anchor changed; restore the saved tag or use a plain <head> and re-enable; probePaths does not create injection rules")
+		}
+		if err := doc.checkAnchor(p.Body); err != nil {
+			return r, err
+		}
+	}
+	if expected != nil && expected.Site.Nginx != nil && len(expected.HeadAnchors) == 0 {
+		if !strings.EqualFold(doc.headTag, "<head>") {
+			return r, errors.New("Nginx requires a plain opening <head> without attributes or whitespace; probePaths does not create injection rules")
 		}
 		if err := doc.checkAnchor(p.Body); err != nil {
 			return r, err

@@ -118,22 +118,24 @@ func TestHeadAnchorIISBoundary(t *testing.T) {
 
 func TestHeadAnchorPreservation(t *testing.T) {
 	s := testSite()
-	anchors := map[string]string{"/": `<head lang="en">`}
-	n, _, err := renderDeploymentAnchors(t.TempDir(), s, true, nil, false, nil, anchors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	anchors["/"] = "<head>"
-	if n.HeadAnchors["/"] != `<head lang="en">` {
-		t.Fatal("snapshot aliases input")
-	}
+	n, _ := legacyHeadSnapshot(t, t.TempDir(), s, map[string]string{"/": `<head lang="en">`})
 	for _, mode := range []struct{ enabled, preserve bool }{{false, false}, {true, true}} {
-		next, _, err := renderDeploymentAnchors(t.TempDir(), s, mode.enabled, &n, mode.preserve, nil, nil)
+		next, _, err := renderDeploymentSDK(t.TempDir(), s, mode.enabled, &n, mode.preserve, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if next.HeadAnchors["/"] != n.HeadAnchors["/"] {
 			t.Fatal("disable/OTel lost anchors")
+		}
+	}
+}
+
+func TestPlainHeadPreflight(t *testing.T) {
+	for _, head := range []string{"<head>", "<HEAD>", "<HeAd>", "<head >", "<head\n>", "<head\t>", `<head data-check="yes">`, `<head lang="en">`} {
+		p := Page{URL: "http://site.invalid/", Header: http.Header{"Content-Type": {"text/html"}}, Body: []byte("<html>" + head + "</head></html>")}
+		err := checkPage(testSite(), p)
+		if (err == nil) != strings.EqualFold(head, "<head>") {
+			t.Fatalf("%s: %v", head, err)
 		}
 	}
 }

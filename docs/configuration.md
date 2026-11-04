@@ -57,17 +57,17 @@ CSP 必须允许同域初始化脚本、实际 CDN 脚本 URL、上报目标及�
 
 - 异步：HTML 中插入带 async 的同域初始化脚本，它动态加载 SDK，onload 后调用 init。初始化之前的事件可能漏采。
 - 同步：HTML 中顺序插入 SDK、初始化脚本，均为不带 async/defer 的外部普通脚本；下载和执行阻塞后续 HTML 解析。初始化脚本只初始化已加载的 SDK，不再次下载。SDK 加载失败时记录 load-error，初始化抛错记录 init-error。
-- 两种模式都使用文档 `<head>` 起始标签后的位置（Nginx 支持已探测路径的固定完整标签，IIS 仍要求纯 `<head>`），不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200 并跳过带 Range 的请求，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
+- 两种模式都使用文档 `<head>` 起始标签后的位置（Nginx 大小写不敏感，Nginx/IIS 均要求无属性、无额外空白的普通 `<head>`），不注入内联代码，不修改 CSP。仅改写 HTML，支持 UTF-8 等 ASCII 兼容编码；Nginx 限定 GET / HTTP 200 并跳过带 Range 的请求，IIS 限定 GET / HTML，跳过资源路径、下载及已压缩源响应。
 - 页面需避免已有 SDK 接入；预检拒绝常见业务 SDK 和其他部署，已有同步标签须与受管快照匹配。双层服务器不应重复注入。
 - nonce-only、strict-dynamic、Trusted Types 等策略需站点专门适配；同域托管不代表上报同域，访问者仍需能连接上报地址。
 
 脚本加载语义参见 [MDN script 元素](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script)。SDK 更新流程、可变 CDN 的摘要差异与回滚限制见[使用指南](../USER-GUIDE.md#44-sdk-如何更新和回滚)。
 
-## Nginx head 锚点
+## Nginx 普通 head
 
-无需新增 TOML 开关：`enable` 为每个 `probePaths` 路径探测并保存完整 head 起始标签。带属性/空白的每个页面路径必须列入 `probePaths`；未探测路径保持纯 `<head>` 匹配。按原始请求路径匹配并忽略 query，同一路径按 query/Cookie/用户变化的标签不支持。内部 index/try_files 重写不会改变原始路径的选择。
+新启用只匹配 `<head>`，大小写不敏感。属性、标签内额外空格/换行/Tab 不受支持。`probePaths` 只用于验收，不再保存逐路径标签；范围由 `includePaths`、`excludePaths` 决定。不增加模块或安装参数。
 
-保存标签最多 1024 字节，不允许 `$` 或 NUL；必须是真实文档开头，且前面没有同样的标签字面量。属性、引号、空白、顺序变化后重新启用；`probe` 报出可观察到的锚点变化。Nginx 的匹配不区分 ASCII 大小写，输出使用保存值，因此仅大小写变化可能被替换掩盖，不能保证原样保留或由 probe 检出。未探测页面及后续动态响应不属于验证保证；详情见 USER-GUIDE.md 的固定 head 边界。
+旧 0.1.9 快照继续支持禁用、仅调整 OTel 和回滚；更新 RUM 前额外检查旧属性路径，模板不兼容则停止并保留部署。调整为普通 head 后可迁移。详见 [普通 head 边界](nginx-plain-head.md)。
 
 ## 参数校验
 

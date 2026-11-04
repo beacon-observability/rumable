@@ -14,164 +14,224 @@ import (
 	"time"
 )
 
-// Real Nginx is required: map escaping, internal redirects and sub_filter's
-// case-insensitive matching cannot be verified by a Go string replacement.
-func TestNginxHeadAnchors(t *testing.T) {
+// Seed the 0.1.9 snapshot format using its historical rendering branch. New
+// enables cannot supply anchors; only snapshot preservation can render them.
+func legacyHeadSnapshot(t *testing.T, root string, s Site, anchors map[string]string) (Snapshot, map[string][]byte) {
+	t.Helper()
+	n, assets, err := render(root, s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.HeadAnchors = anchors
+	n, _, err = renderDeploymentSDK(root, s, true, &n, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n, assets
+}
+
+type headFixture struct {
+	root string
+	s    Site
+	st   State
+}
+
+func newHeadFixture(t *testing.T, loading string, legacy bool) *headFixture {
+	t.Helper()
 	binary := os.Getenv("RUMABLE_TEST_NGINX")
 	if binary == "" {
-		t.Skip("set RUMABLE_TEST_NGINX for native head injection verification")
+		t.Skip("set RUMABLE_TEST_NGINX for native verification")
 	}
 	root, err := os.MkdirTemp("", "head-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(root)
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	t.Cleanup(func() { os.RemoveAll(root) })
+	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", root+"/site.sock")
 	}}
-	oldClient := httpClient
-	httpClient = &http.Client{Transport: transport, Timeout: 5 * time.Second}
-	defer func() { httpClient = oldClient; transport.CloseIdleConnections() }()
+	old := httpClient
+	httpClient = &http.Client{Transport: tr, Timeout: 5 * time.Second}
+	t.Cleanup(func() { httpClient = old; tr.CloseIdleConnections() })
 	s := testSite()
+	s.SDK.Loading = loading
 	s.PublicURL = "http://site.invalid/"
-	s.SDK.Loading = "sync"
-	s.ProbePaths = []string{"/", "/en", "/space", "/quoted", "/multiline"}
-	s.Exclude = append(s.Exclude, "/excluded")
-	conf := filepath.Join(root, "nginx.conf")
-	s.Nginx = &Nginx{Binary: binary, Args: []string{"-p", root + "/", "-c", conf}, Reviewed: true}
-	heads := map[string]string{
-		"/":          `<head lang="en">`,
-		"/en":        `<HeAd data-fixture="CaseSensitive">`,
-		"/space":     `<head >`,
-		"/quoted":    `<head title='a>b' data-fixture="a\b &amp; c">`,
-		"/multiline": "<head\n data-fixture=\"yes\"\t>",
-		"/unprobed":  "<head>",
-		"/excluded":  "<head>",
-	}
-	bodies := map[string]string{}
-	writePage := func(path, head string) {
-		t.Helper()
-		// Other anchor variants in inert text must never trigger a second injection.
-		body := "<!doctype html><html>" + head + `<script>window.fixture='<head ><head lang="en">';</script><title>fixture</title></head><body><header>fixture</header></body></html>`
-		bodies[path] = body
-		name := strings.TrimPrefix(path, "/")
-		if name == "" {
-			name = "index"
-		}
-		if err := os.WriteFile(filepath.Join(root, name+".html"), []byte(body), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for path, head := range heads {
-		writePage(path, head)
-	}
+	s.ProbePaths = []string{"/"}
+	s.Exclude = []string{"/excluded"}
+	s.Nginx = &Nginx{Binary: binary, Args: []string{"-p", root + "/", "-c", root + "/nginx.conf"}, Reviewed: true}
 	st, err := prepare(root, s)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := &headFixture{root, s, st}
+	f.write(t, "index", "<head>")
+	f.write(t, "second", "<HEAD>")
+	f.write(t, "attr", `<head data-check="yes">`)
+	if legacy {
+		legacySite := s
+		legacySite.ProbePaths = []string{"/", "/attr"}
+		n, assets := legacyHeadSnapshot(t, root, legacySite, map[string]string{"/": "<head>", "/attr": `<head data-check="yes">`})
+		if err = deployAssets(root, s, assets); err != nil {
+			t.Fatal(err)
+		}
+		for name, b := range n.Files {
+			if err = atomicWrite(filepath.Join(siteDir(root, s), name), b, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.st.Current = n
+		if err = saveState(root, f.st); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := siteDir(root, s)
 	config := fmt.Sprintf("pid %s/nginx.pid; error_log %s/error.log; events {} http { access_log off; default_type text/html; include %s/http.conf; server { listen unix:%s/site.sock; include %s/server.conf; location / { root %s; index index.html; try_files $uri $uri.html /index.html; include %s/location.conf; } } }", root, root, dir, root, dir, root, dir)
-	if err := os.WriteFile(conf, []byte(config), 0644); err != nil {
+	if err = os.WriteFile(root+"/nginx.conf", []byte(config), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := exec.Command(binary, s.Nginx.Args...).CombinedOutput(); err != nil {
 		t.Fatalf("start: %v %s", err, out)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if out, err := exec.Command(binary, append(s.Nginx.Args, "-s", "quit")...).CombinedOutput(); err != nil {
-			t.Errorf("cleanup: %v %s", err, out)
+			t.Errorf("quit: %v %s", err, out)
 		}
-	}()
-	read := func() State {
-		t.Helper()
-		got, err := loadState(root, s.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got
+	})
+	return f
+}
+func (f *headFixture) write(t *testing.T, name, head string) string {
+	t.Helper()
+	body := "<!doctype html><html>" + head + `<title>fixture</title></head><body>fixture</body></html>`
+	if err := os.WriteFile(f.root+"/"+name+".html", []byte(body), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if err := apply(root, st, s, true, "all", io.Discard); err != nil {
-		t.Fatal("enable:", err)
-	}
-	st = read()
-	verify := func(path string) {
-		t.Helper()
-		p, err := getPage(s.PublicURL+strings.TrimPrefix(path, "/"), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := bodies[path]
-		if path != "/excluded" {
-			want = strings.Replace(want, heads[path], heads[path]+injectionTags(st.Current), 1)
-		}
-		if string(p.Body) != want {
-			t.Fatalf("%s: attributes, insertion position or original bytes changed", path)
-		}
-	}
-	for path := range heads {
-		verify(path)
-	}
-	p, err := getPage(s.PublicURL+"en?lang=fixture", nil)
+	return body
+}
+func (f *headFixture) read(t *testing.T) {
+	t.Helper()
+	var err error
+	f.st, err = loadState(f.root, f.s.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(p.Body), heads["/en"]+injectionTags(st.Current)) {
-		t.Fatal("query changed anchor selection")
-	}
-	var output strings.Builder
-	if err := apply(root, st, s, true, "all", &output); err != nil {
+}
+func (f *headFixture) get(t *testing.T, path string) Page {
+	t.Helper()
+	p, err := getPage(f.s.PublicURL+path, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Already in requested state") {
-		t.Fatal("not idempotent")
-	}
-	// A new fixed template must fail probe, then be learned on explicit enable.
-	oldHead := heads["/en"]
-	heads["/en"] = `<head data-fixture="new-template">`
-	writePage("/en", heads["/en"])
-	if _, err := probePages(s, []string{"/en"}, &st.Current); err == nil || !strings.Contains(err.Error(), "anchor changed") {
-		t.Fatalf("missing drift diagnostic: %v", err)
-	}
-	if err := apply(root, st, s, true, "all", io.Discard); err != nil {
-		t.Fatal("refresh:", err)
-	}
-	st = read()
-	verify("/en")
-	// Restore the original template before rolling back its matching snapshot.
-	heads["/en"] = oldHead
-	writePage("/en", oldHead)
-	if err := rollback(root, st, io.Discard); err != nil {
-		t.Fatal("rollback:", err)
-	}
-	st = read()
-	verify("/en")
-	// Earlier tag-shaped text must fail before any state/configuration mutation.
-	before := st.Current
-	if err := os.WriteFile(filepath.Join(root, "en.html"), []byte("<!-- "+oldHead+" -->"+bodies["/en"]), 0644); err != nil {
+	return p
+}
+func (f *headFixture) apply(t *testing.T, enabled bool) {
+	t.Helper()
+	if err := apply(f.root, f.st, f.s, enabled, "all", io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := apply(root, st, s, true, "all", io.Discard); err == nil {
-		t.Fatal("unsafe earlier anchor accepted")
+	f.read(t)
+}
+
+func TestNginxPlainHead(t *testing.T) {
+	for _, loading := range []string{"async", "sync"} {
+		t.Run(loading, func(t *testing.T) {
+			f := newHeadFixture(t, loading, false)
+			f.apply(t, true)
+			for _, head := range []string{"<head>", "<HEAD>", "<HeAd>"} {
+				f.write(t, "second", head)
+				p := f.get(t, "second?fixture=yes")
+				if strings.Count(string(p.Body), "data-rumable=") != 1 || !strings.Contains(string(p.Body), "<head>"+injectionTags(f.st.Current)) {
+					t.Fatalf("unprobed %s was not injected", head)
+				}
+			}
+			f.write(t, "excluded", "<head>")
+			if strings.Contains(string(f.get(t, "excluded").Body), "data-rumable=") {
+				t.Fatal("excluded page injected")
+			}
+			for _, head := range []string{`<head data-check="yes">`, `<head lang="en">`, "<head >", "<head\n>", "<head\t>", "<head/>"} {
+				f.write(t, "attr", head)
+				if strings.Contains(string(f.get(t, "attr").Body), "data-rumable=") {
+					t.Fatal("unsupported head injected")
+				}
+				before := f.st.Current
+				s := f.s
+				s.ProbePaths = []string{"/", "/attr"}
+				if err := apply(f.root, f.st, s, true, "all", io.Discard); err == nil {
+					t.Fatalf("accepted unsupported %s", head)
+				}
+				f.read(t)
+				if !snapshotsEqual(before, f.st.Current) {
+					t.Fatal("failed preflight changed deployment")
+				}
+			}
+			before := f.st.Current
+			f.s.ProbePaths = []string{"/second"}
+			f.apply(t, true)
+			for name, b := range before.Files {
+				if string(b) != string(f.st.Current.Files[name]) {
+					t.Fatal("probePaths altered injection rules", name)
+				}
+			}
+			if len(f.st.Current.HeadAnchors) != 0 {
+				t.Fatal("new deployment saved path anchors")
+			}
+			f.apply(t, false)
+			if strings.Contains(string(f.get(t, "second").Body), "data-rumable=") {
+				t.Fatal("disable failed")
+			}
+			if err := rollback(f.root, f.st, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			f.read(t)
+			if strings.Count(string(f.get(t, "second").Body), "data-rumable=") != 1 {
+				t.Fatal("rollback failed")
+			}
+		})
 	}
-	if !snapshotsEqual(read().Current, before) {
-		t.Fatal("failed preflight changed state")
+}
+
+func TestNginxLegacyHeadMigration(t *testing.T) {
+	f := newHeadFixture(t, "sync", true)
+	legacy := f.st.Current
+	// Even removing the attributed path from probePaths cannot silently lose it.
+	if err := apply(f.root, f.st, f.s, true, "all", io.Discard); err == nil || !strings.Contains(err.Error(), "plain opening <head>") {
+		t.Fatalf("unsafe legacy migration accepted: %v", err)
 	}
-	if err := verifyFiles(root, before); err != nil {
+	f.read(t)
+	if !snapshotsEqual(legacy, f.st.Current) {
+		t.Fatal("failed migration changed saved state")
+	}
+	if err := verifyFiles(f.root, legacy); err != nil {
 		t.Fatal(err)
 	}
-	writePage("/en", oldHead)
-	if err := apply(root, read(), s, false, "all", io.Discard); err != nil {
-		t.Fatal("disable:", err)
+	if strings.Count(string(f.get(t, "attr").Body), "data-rumable=") != 1 {
+		t.Fatal("legacy injection stopped")
 	}
-	st = read()
-	if st.Current.Enabled || st.Current.HeadAnchors["/en"] != oldHead {
-		t.Fatal("disable lost snapshot anchor")
+	f.apply(t, false)
+	if len(f.st.Current.HeadAnchors) == 0 {
+		t.Fatal("disable lost legacy state")
 	}
-	for path, body := range bodies {
-		p, err := getPage(s.PublicURL+strings.TrimPrefix(path, "/"), nil)
-		if err != nil || string(p.Body) != body {
-			t.Fatalf("disable changed %s: %v", path, err)
-		}
+	if err := rollback(f.root, f.st, io.Discard); err != nil {
+		t.Fatal(err)
 	}
-	t.Log("native Nginx: attributes, multiline/quotes, per-path anchors, internal redirects, query, single injection, exclusion, drift, refresh, idempotence, rollback and disable passed")
+	f.read(t)
+	if !snapshotsEqual(legacy, f.st.Current) {
+		t.Fatal("rollback did not restore exact legacy snapshot")
+	}
+	f.write(t, "attr", "<head>")
+	f.apply(t, true)
+	if len(f.st.Current.HeadAnchors) != 0 {
+		t.Fatal("migration retained path dependency")
+	}
+	if strings.Count(string(f.get(t, "attr").Body), "data-rumable=") != 1 {
+		t.Fatal("migrated unprobed page missing injection")
+	}
+	// Historical rollback is exact; restore that historical page template too.
+	f.write(t, "attr", `<head data-check="yes">`)
+	if err := rollback(f.root, f.st, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.read(t)
+	if !snapshotsEqual(legacy, f.st.Current) {
+		t.Fatal("migration history changed")
+	}
 }
