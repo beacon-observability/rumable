@@ -93,6 +93,9 @@ func TestCDNEnableUpgradeRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := waitAttachment(st.Current); err != nil {
+		t.Fatal("prepared CDN attachment:", err)
+	}
 	if err := apply(root, st, s, true, "all", io.Discard); err != nil {
 		t.Fatal("first enable:", err)
 	}
@@ -141,6 +144,9 @@ func TestCDNEnableUpgradeRollback(t *testing.T) {
 	st = read()
 	if st.Current.Enabled || st.Current.SDK.Version != "3.99.1" {
 		t.Fatal("disable lost selected CDN version")
+	}
+	if err := waitAttachment(st.Current); err != nil {
+		t.Fatal("offline disabled attachment:", err)
 	}
 	if _, err := probePages(st.Current.Site, st.Current.Site.ProbePaths, &st.Current); err != nil {
 		t.Fatal(err)
