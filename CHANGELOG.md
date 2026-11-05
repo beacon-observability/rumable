@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.11 · GitLab synchronization
+## 0.1.11 · 2026-11-05
 
 - Import GitLab main through `903e29f`, retaining the GitHub release workflows, multilingual setup, and IIS OTel environment fixes.
 - Fix first CDN attachment when the current SDK differs from the bundled digest; validate retained local assets before activation, then resolve and save the actual stable v3 SDK version and digest.
