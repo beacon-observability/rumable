@@ -5,22 +5,22 @@ Rumable is part of Beacon Observability and keeps the `rumable` executable and e
 - [Latest release and downloads](https://github.com/beacon-observability/rumable/releases/latest)
 - [English configuration page](https://beacon-observability.github.io/rumable/latest/setup/index.html)
 - [Latest configuration manifest](https://beacon-observability.github.io/rumable/latest/manifest.json)
-- [v0.1.10 release notes](releases/0.1.10.md)
+- [v0.1.11 release notes](releases/0.1.11.md)
 
 ## Download and verification
 
 All executable packages, installation scripts, `manifest.json`, `sdk.json`, and `SHA256SUMS` are GitHub Release assets. Configuration pages are hosted on GitHub Pages; their manifests pin downloads to an explicit GitHub Release tag. The page runs locally in the browser and sends configuration only when the generated command is executed on the target server.
 
-For example, download and verify Linux AMD64 0.1.10:
+For example, download and verify Linux AMD64 0.1.11:
 
 ```sh
-base=https://github.com/beacon-observability/rumable/releases/download/v0.1.10
-curl --proto '=https' --proto-redir '=https' -fsSL "$base/rumable_0.1.10_linux_amd64.tar.gz" -o rumable_0.1.10_linux_amd64.tar.gz
+base=https://github.com/beacon-observability/rumable/releases/download/v0.1.11
+curl --proto '=https' --proto-redir '=https' -fsSL "$base/rumable_0.1.11_linux_amd64.tar.gz" -o rumable_0.1.11_linux_amd64.tar.gz
 curl --proto '=https' --proto-redir '=https' -fsSL "$base/SHA256SUMS" -o SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-mkdir rumable-0.1.10
-tar -xzf rumable_0.1.10_linux_amd64.tar.gz -C rumable-0.1.10
-./rumable-0.1.10/rumable version
+mkdir rumable-0.1.11
+tar -xzf rumable_0.1.11_linux_amd64.tar.gz -C rumable-0.1.11
+./rumable-0.1.11/rumable version
 ```
 
 Use the package for your OS and architecture from the release assets. Modern builds use Go 1.26.4; legacy builds use Go 1.20.14. Review [platform compatibility](compatibility.md) before selecting legacy packages. GitHub redirects asset downloads; command-line clients must follow HTTPS redirects. Browser configuration pages load their same-origin Pages manifest rather than fetching a GitHub Release asset through browser CORS.
