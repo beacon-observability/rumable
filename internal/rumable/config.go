@@ -13,7 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-var Version = "0.1.10"
+var Version = "0.1.11"
 
 type Config struct {
 	SchemaVersion int    `json:"schemaVersion" toml:"schemaVersion"`

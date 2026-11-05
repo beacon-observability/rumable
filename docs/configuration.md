@@ -31,26 +31,34 @@ Both server types use the same browser fields below. The current bundled baselin
 | `source` | `"bundled"` | Same-origin bundled SDK; `"cdn"` selects external loading |
 | `loading` | `"async"` | Asynchronous; `"sync"` loads and executes SDK and initialization scripts in order, blocking HTML parsing |
 | `url` | Omitted | CDN only; omission uses the package-recorded source. An explicit URL must be a full HTTPS script URL without credentials, query, or fragment |
-| `integrity` | false | CDN only; enables the package SHA-256 SRI value and anonymous cross-origin mode |
+| `integrity` | false | CDN only; enables the SHA-256 SRI value resolved at activation and anonymous cross-origin mode |
 
 ~~~toml
 [sites.sdk]
 source = "cdn"
 loading = "async"
 # Omit url to retain the package-default source.
-# A custom URL must serve the same SDK bytes as the package.
+# A custom URL must serve a trusted stable v3 SDK.
 integrity = false
 ~~~
 
-Check, enable, and probe validate CDN identity/gzip content, JavaScript MIME, and the package digest. A custom CDN must serve identical bytes. SRI requires CORS allowing the website origin or `*`. CSP must allow the same-origin initialization script, actual SDK URL, receiver, and required Workers; policies are never rewritten automatically.
+Check and enable download the current CDN file and validate a stable v3 version, SDK markers, JavaScript MIME, and identical identity/gzip bytes. The CDN version need not match the bundled SDK. Activation saves the resolved version, SHA-256, and local copy from the same download. Deployed probes and rollback require that saved digest. Other major versions, prereleases, and missing markers are rejected.
+
+Choose a trusted HTTPS source. Format checks do not prove provenance, completeness, or collection compatibility. The initial digest records downloaded content for deployment consistency and optional SRI, rather than independently authenticating its source. Validate collection and replay after an SDK update. SRI requires CORS allowing the website origin or `*`. CSP must allow the same-origin initialization script, actual SDK URL, receiver, and required Workers; policies are never rewritten automatically.
 
 A mutable package-default CDN is not an immutable version pin. A successful hash check only describes the bytes observed at probe time. For reproducibility, choose bundled assets or an immutable HTTPS CDN URL with SRI. Workers must match the SDK used by the browser.
 
 Snapshots retain the resolved URL, SDK version, digest, and loading mode. Rollback cannot restore deleted or overwritten CDN files. If the old external resource is unavailable, rollback probing can fail and restore the attempted managed change. Disable does not require CDN availability. There is no automatic fallback to the local SDK copy.
 
-Asynchronous mode uses an async same-origin initialization script that loads the SDK and initializes it on load. Synchronous mode injects SDK then initialization script without async/defer; failures are recorded as load-error or init-error. Both modes use a standard opening `<head>`, external scripts, and ASCII-compatible HTML. Nginx injection targets GET/200 HTML; IIS targets GET/HTML, excluding downloads, assets, and encoded source bodies.
+Asynchronous mode uses an async same-origin initialization script that loads the SDK and initializes it on load. Synchronous mode injects SDK then initialization script without async/defer; failures are recorded as load-error or init-error. Both modes use a standard opening `<head>`, external scripts, and ASCII-compatible HTML. Nginx injection targets GET/200 HTML and bypasses requests containing Range; IIS targets GET/HTML, excluding downloads, assets, and encoded source bodies.
 
 Avoid duplicate SDK integrations and double injection by stacked servers. Strict nonce, strict-dynamic, and Trusted Types policies need site-specific integration. Same-origin SDK delivery does not make the reporting endpoint same-origin.
+
+## Nginx plain head
+
+New deployments match plain `<head>` case-insensitively. Attributes and extra whitespace inside the tag are unsupported. `probePaths` only selects verification pages; `includePaths` and `excludePaths` control injection scope. No extra modules or installation options are required.
+
+Legacy 0.1.9 snapshots retain disable, OTel-only, and rollback support. RUM updates also check saved attribute-head paths still in scope and stop before changing incompatible deployments. See [plain head support](nginx-plain-head.md).
 
 ## Validation and defaults
 

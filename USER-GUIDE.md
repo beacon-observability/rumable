@@ -66,7 +66,7 @@ Client Tokens enter public browser initialization scripts. Never substitute mana
 
 - The CLI can reach the target instance through its public URL with working DNS and TLS.
 - Each HTML template and effective handler has a verification path returning an anonymous HTTP 200 `text/html` document. Probes do not follow redirects or send login cookies.
-- Documents contain a literal standard `<head>` opening tag. Case variants work; attributes or extra whitespace are outside the supported anchor form. Earlier tag-shaped text can make the anchor ambiguous.
+- Documents contain a literal standard `<head>` opening tag. Case variants work; attributes or extra whitespace are outside the supported anchor form. Earlier tag-shaped text can make the anchor ambiguous. `probePaths` selects verification pages only; it does not control injection scope.
 - There is no conflicting integration of the same SDK. Also inspect dynamic application bundles; preflight cannot detect every hidden initialization.
 - CSP permits the initialization script, SDK, receiver, and required Workers.
 - Source HTML is uncompressed when it reaches the response filter. Nginx output gzip can remain enabled.
@@ -190,6 +190,12 @@ Nginx response filtering or IIS outbound rewriting inserts external scripts afte
 
 Asynchronous loading can miss early events. Synchronous downloads and execution can delay first paint, especially with a slow or unavailable CDN. Both modes use external scripts and leave CSP unchanged. A failed CDN request has no automatic local fallback.
 
+### Nginx plain head support
+
+New or updated RUM deployments match plain `<head>` case-insensitively, including `<HEAD>` and `<Head>`. Attributes and extra spaces, newlines, or tabs inside the tag are unsupported. No new module or installation option is required. `includePaths` and `excludePaths` control injection; pages outside `probePaths` can still receive scripts. Verification cannot establish compatibility for untested templates or later template changes.
+
+Replacing the CLI does not change existing deployments. Before updating a legacy 0.1.9 deployment, Rumable also checks saved attribute-head paths still in scope and stops before changing configuration if incompatible. Change those templates to plain head before updating. Disable, OTel-only operations, and rollback retain legacy compatibility. See [Nginx plain head injection](docs/nginx-plain-head.md).
+
 ### Configuration examples
 
 Start with this complete Linux/Nginx configuration. Replace application details, website, and binary path:
@@ -249,7 +255,7 @@ loading = "sync"
 integrity = false
 ~~~
 
-An optional `url = "https://cdn.example.com/sdk/3.3.21/rum.js"` illustrates a custom immutable CDN, not an existing hosted SDK. Supply your own actual URL serving the exact package SDK bytes. SRI requires CORS and a digest matching the release. With bundled mode, omit `url` and leave integrity false.
+An optional `url = "https://cdn.example.com/sdk/3.3.21/rum.js"` illustrates a custom immutable CDN, not an existing hosted SDK. Supply your own trusted URL serving a stable v3 SDK. Check/enable validate SDK markers, JavaScript MIME, identity/gzip byte consistency, and optional CORS; the CDN version need not match the bundled SDK. Activation records the actual version and digest. Format checks do not prove provenance, completeness, or collection compatibility; verify collection and replay after upgrading. SRI requires CORS and uses the digest saved at activation. With bundled mode, omit `url` and leave integrity false.
 
 For direct collector reporting, remove `site` and `clientToken` and set `datakitOrigin = "https://collector.example.com"` in `[sites.rum]`. For IIS, replace `[sites.nginx]` with `[sites.iis]` as shown in section 7.
 
@@ -257,7 +263,7 @@ For direct collector reporting, remove `site` and `clientToken` and set `datakit
 
 Bundled SDK files update only when the newer CLI is used to run `setup`, `enable`, or `enable --component rum` on the existing site. Merely replacing the CLI does not change deployed assets. `enable --component otel` preserves the browser SDK, initialization script, and CDN reference.
 
-A mutable CDN can change what visitors receive after deployment. Probe-time hash validation does not freeze future responses. Use bundled assets or immutable CDN URLs for reproducible delivery. Rollback restores saved references and local bytes, not deleted or overwritten external CDN files.
+A mutable CDN can change what visitors receive after deployment. Deployed probes and rollback require the saved digest and reject changed CDN content. Re-enable to validate the current stable v3 SDK and update the saved version and digest. SRI-protected old pages reject changed bytes. Probe-time hash validation does not freeze future responses. Use bundled assets or immutable CDN URLs for reproducible delivery. Rollback restores saved references and local bytes, not deleted or overwritten external CDN files.
 
 Keep original site IDs, target definitions, state, and old assets. Content-hashed assets remain available for cached HTML. Retest with a new browser session after SDK or sampling changes. The application version field and remote configuration do not upgrade SDK files.
 

@@ -20,6 +20,13 @@ The documentation check covers public Markdown, example comments, setup HTML/cat
 
 ## Linux integration
 
+For optional native Nginx integration tests, use a binary with sub_filter and PCRE. The tests use temporary Unix sockets without changing an existing service:
+
+~~~sh
+RUMABLE_TEST_NGINX=/absolute/path/to/nginx go test ./internal/rumable \
+  -run 'TestNginxPlainHead|TestNginxLegacyHeadMigration|TestNginxRangeResponses|TestCDNEnableUpgradeRollback' -count=3 -v
+~~~
+
 Use an isolated Docker environment with Go and curl available:
 
 ~~~sh

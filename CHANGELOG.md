@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.11 · GitLab synchronization
+
+- Import GitLab main through `903e29f`, retaining the GitHub release workflows, multilingual setup, and IIS OTel environment fixes.
+- Fix first CDN attachment when the current SDK differs from the bundled digest; validate retained local assets before activation, then resolve and save the actual stable v3 SDK version and digest.
+- Preserve deployed digest checks, optional SRI, offline disable, rollback, and retry after restored first-install failures.
+- Match plain Nginx `<head>` case-insensitively across the configured scope; verification paths no longer generate injection rules. Reject attributes and extra tag whitespace without adding modules.
+- Keep legacy 0.1.9 snapshot disable, OTel-only operations, and rollback; validate old attribute-head paths before updating RUM.
+- Bypass injection for Range requests while retaining cache protections and origin range handling.
+- Add first-install, loading-mode, SRI, unavailable-CDN, recovery, head migration, and Range regression coverage. See [injection and CDN changes](docs/7154213599-injection-fixes.md).
+
 ## 0.1.10 · 2026-11-03
 
 - Fix empty IIS OTel environment snapshots blocking enable and rollback on Windows PowerShell 5.1 ([#4](https://github.com/beacon-observability/rumable/issues/4)).

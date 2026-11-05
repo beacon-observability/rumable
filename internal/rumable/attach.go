@@ -514,11 +514,18 @@ func probeOriginalPages(s Site) error {
 	return nil
 }
 func waitAttachment(n Snapshot) error {
+	// Before the first enable, the CDN snapshot still describes the bundled
+	// placeholder. Verify the retained local assets while injection is disabled;
+	// enable resolves and verifies the actual CDN bytes before activating RUM.
+	scripts := n
+	if !scripts.Enabled {
+		scripts.SDKURL = ""
+	}
 	var err error
 	for i := 0; i < 12; i++ {
 		_, err = probePages(n.Site, n.Site.ProbePaths, &n)
 		if err == nil {
-			err = probeScripts(n.Site, n.Script, &n)
+			err = probeScripts(n.Site, n.Script, &scripts)
 		}
 		if err == nil {
 			return nil

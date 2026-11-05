@@ -21,9 +21,8 @@ type htmlElement struct {
 type htmlDocument struct {
 	elements []htmlElement
 	head     int
+	headTag  string
 }
-
-var headAnchor = regexp.MustCompile(`(?i)<head>`)
 
 // Inspect HTML tokens, not tag-shaped text inside scripts, comments, attributes
 // or inert templates. This is a probe, not a browser execution guarantee.
@@ -63,8 +62,9 @@ func inspectHTML(body []byte) (htmlDocument, error) {
 			if kind != htmllex.StartTagCloseToken && kind != htmllex.StartTagVoidToken {
 				return doc, fmt.Errorf("incomplete HTML start tag")
 			}
-			if prelude && name == "head" && strings.EqualFold(string(body[start:input.Offset()]), "<head>") {
+			if prelude && name == "head" && kind == htmllex.StartTagCloseToken {
 				doc.head = start
+				doc.headTag = string(body[start:input.Offset()])
 			}
 			if name == "html" && !seenHTML && prelude {
 				seenHTML = true
@@ -122,9 +122,15 @@ func inspectHTML(body []byte) (htmlDocument, error) {
 }
 
 func (d htmlDocument) checkAnchor(body []byte) error {
-	first := headAnchor.FindIndex(body)
-	if d.head < 0 || first == nil || first[0] != d.head {
-		return fmt.Errorf("no safe literal <head> injection anchor: require a plain opening <head> before page content, with no earlier <head> text in comments or attributes")
+	if d.head < 0 || d.headTag == "" {
+		return fmt.Errorf("no safe literal <head> injection anchor: require a complete opening head before page content")
+	}
+	if len(d.headTag) > 1024 || strings.ContainsAny(d.headTag, "$\x00") {
+		return fmt.Errorf("unsupported head injection anchor: maximum 1024 bytes, without dollar signs or NUL")
+	}
+	first := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(d.headTag)).FindIndex(body)
+	if first == nil || first[0] != d.head {
+		return fmt.Errorf("no safe literal <head> injection anchor: matching head text occurs earlier in comments or attributes")
 	}
 	return nil
 }
