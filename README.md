@@ -27,7 +27,7 @@ IIS requires a started, dedicated application pool. Enable, update, disable, and
 
 | Setting | Default | Alternative |
 | --- | --- | --- |
-| Source | Bundled SDK, served from the website origin | Package-default CDN source or a custom HTTPS CDN serving identical bytes |
+| Source | Bundled SDK, served from the website origin | Package-default or custom HTTPS CDN serving a stable v3 SDK; activation records its actual version and digest |
 | Loading | Asynchronous | Synchronous, which blocks HTML parsing while scripts load and execute |
 | Update | Deploy the newer package to the existing site | Manage immutable CDN files and their cache policy |
 

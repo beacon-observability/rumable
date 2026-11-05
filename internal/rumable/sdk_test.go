@@ -1,14 +1,138 @@
 package rumable
 
 import (
+	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+// Synthetic SDKs exercise metadata/byte identity without depending on a live CDN.
+func syntheticCDNSDK(version string) []byte {
+	return []byte(`window.DATAFLUX_RUM={init:function(){},startSessionReplayRecording:function(){},sdkVersion:"` + version + `",sdkName:"df_web_rum_sdk"};`)
+}
+
+func TestCDNResolveAndRetainActualVersion(t *testing.T) {
+	var content atomic.Value
+	content.Store(syntheticCDNSDK("3.99.1"))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		body := content.Load().([]byte)
+		if r.Header.Get("Accept-Encoding") == "gzip" {
+			w.Header().Set("Content-Encoding", "gzip")
+			z := gzip.NewWriter(w)
+			defer z.Close()
+			z.Write(body)
+		} else {
+			w.Write(body)
+		}
+	}))
+	defer server.Close()
+	previousClient := httpClient
+	httpClient = server.Client()
+	t.Cleanup(func() { httpClient = previousClient })
+	s := testSite()
+	s.SDK = SDKConfig{Source: "cdn", URL: server.URL + "/sdk.js", Integrity: true}
+	root := t.TempDir()
+	resolved, err := resolveCDNSDK(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probeCDNSDK(s, resolved.info, resolved.info.Source); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"async", "sync"} {
+		s.SDK.Loading = mode
+		n, files, err := renderDeploymentSDK(root, s, true, nil, false, resolved)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n.SDK.Version != "3.99.1" || n.SDK.SHA256 != hash(content.Load().([]byte)) || n.SDKURL != s.SDK.URL {
+			t.Fatal("deployment substituted the bundled SDK for the resolved CDN")
+		}
+		if err := validateSnapshot(n, s.ID); err != nil {
+			t.Fatal(err)
+		}
+		page := Page{Header: http.Header{"Content-Type": {"text/html"}}, Body: []byte("<html><head>" + injectionTags(n) + "</head></html>")}
+		if _, err := inspectInjection(s, page, nil); err != nil {
+			t.Fatal("probe without saved state still compared the bundled SDK", err)
+		}
+		if !bytes.Equal(files["public/"+s.ID+"/sdk."+n.SDK.SHA256+".js"], resolved.body) {
+			t.Fatal("retained SDK differs from the deployment digest")
+		}
+		boot := files["public/"+s.ID+"/"+strings.TrimPrefix(n.Script, s.assetPrefix())]
+		if !strings.Contains(string(boot)+injectionTags(n), sdkIntegrity(resolved.info)) {
+			t.Fatal("SRI does not use resolved bytes")
+		}
+		if err := deployAssets(root, s, files); err != nil {
+			t.Fatal(err)
+		}
+		// Serialization must retain the selected version independently of this CLI.
+		encoded, err := json.Marshal(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved Snapshot
+		if err := json.Unmarshal(encoded, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyFilesAssets(root, saved); err != nil {
+			t.Fatal(err)
+		}
+		content.Store(syntheticCDNSDK("3.99.2"))
+		if probeCDNSDK(s, saved.SDK, saved.SDKURL) == nil {
+			t.Fatal("saved deployment silently adopted changed CDN")
+		}
+		next, err := resolveCDNSDK(s)
+		if err != nil || next.info.Version != "3.99.2" {
+			t.Fatal("re-enable cannot resolve updated CDN", err)
+		}
+		content.Store(resolved.body)
+		if err := probeCDNSDK(s, saved.SDK, saved.SDKURL); err != nil {
+			t.Fatal("historical CDN cannot be verified", err)
+		}
+	}
+}
+
+func TestCDNResolveRejectsUnsupportedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind string
+		body       []byte
+		status     int
+	}{
+		{"html", "text/html", syntheticCDNSDK("3.99.1"), 200},
+		{"wrong SDK", "application/javascript", []byte("window.otherSDK={};"), 200},
+		{"new major", "application/javascript", syntheticCDNSDK("4.0.0"), 200},
+		{"prerelease", "application/javascript", syntheticCDNSDK("3.99.1-beta"), 200},
+		{"ambiguous", "application/javascript", append(syntheticCDNSDK("3.99.1"), syntheticCDNSDK("3.99.2")...), 200},
+		{"redirect", "application/javascript", syntheticCDNSDK("3.99.1"), 302},
+		{"empty", "application/javascript", nil, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.kind)
+				w.WriteHeader(tc.status)
+				w.Write(tc.body)
+			}))
+			defer server.Close()
+			previous := httpClient
+			httpClient = server.Client()
+			defer func() { httpClient = previous }()
+			s := testSite()
+			s.SDK = SDKConfig{Source: "cdn", URL: server.URL + "/sdk.js"}
+			if _, err := resolveCDNSDK(s); err == nil {
+				t.Fatal("unsupported CDN accepted")
+			}
+		})
+	}
+}
 
 func TestCDNConfigurationAndSavedReferences(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "rumable.toml")

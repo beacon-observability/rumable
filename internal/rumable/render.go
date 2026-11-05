@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,8 @@ type Snapshot struct {
 	// Never serialized, adopted by enable, or retained in successful history.
 	legacyIISRecovery bool
 
+	// Legacy 0.1.9 snapshot data; never learned by new RUM enables.
+	HeadAnchors   map[string]string `json:"headAnchors,omitempty"`
 	Uninstall     bool              `json:"uninstall,omitempty"`
 	Enabled       bool              `json:"enabled"`
 	OTelEnabled   bool              `json:"otelEnabled,omitempty"`
@@ -37,10 +40,25 @@ func render(root string, s Site, enabled bool) (Snapshot, map[string][]byte, err
 }
 
 func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, preserveBrowser bool) (Snapshot, map[string][]byte, error) {
+	return renderDeploymentSDK(root, s, enabled, previous, preserveBrowser, nil)
+}
+
+func renderDeploymentSDK(root string, s Site, enabled bool, previous *Snapshot, preserveBrowser bool, resolved *sdkBundle) (Snapshot, map[string][]byte, error) {
 	s = resolveOTelPaths(root, s)
 	active := enabled
 	enabled = enabled && s.RUM.isEnabled()
 	n := Snapshot{Enabled: enabled, Site: s, Files: map[string][]byte{}, Assets: map[string]string{}}
+	// Only historical disable/OTel operations retain 0.1.9 path anchors.
+	var anchors map[string]string
+	if previous != nil && (preserveBrowser || !enabled) {
+		anchors = previous.HeadAnchors
+	}
+	if len(anchors) > 0 {
+		n.HeadAnchors = make(map[string]string, len(anchors))
+		for path, anchor := range anchors {
+			n.HeadAnchors[path] = anchor
+		}
+	}
 	public := map[string][]byte{}
 	if preserveBrowser {
 		// OTel-only operations keep the exact browser release, including a saved
@@ -55,6 +73,9 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 		b, info, err := sdk()
 		if err != nil {
 			return Snapshot{}, nil, err
+		}
+		if resolved != nil {
+			b, info = resolved.body, resolved.info
 		}
 		sdkName := "sdk." + info.SHA256 + ".js"
 		sdkURL := sdkLocation(s, info)
@@ -102,15 +123,30 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 		}
 		fmt.Fprintf(&h, "}\nmap $sent_http_content_type $%s_html {\n    default 0;\n    text/html 1;\n    \"~*^text/html;\" 1;\n}\n", v)
 		fmt.Fprintf(&h, "map $sent_http_content_disposition $%s_download {\n    default 0;\n    ~*attachment 1;\n}\n", v)
-		fmt.Fprintf(&h, "map \"$%s_path:$%s_html:$request_method:$status:$sent_http_content_encoding:$%s_download\" $%s_tag {\n    default \"\";\n", v, v, v, v)
+		// sub_filter clears Content-Length before Nginx's range header filter.
+		// Gate on the request, not the response status (static ranges are still
+		// 200 at this point). Even malformed Range/If-Range must reach the origin.
+		fmt.Fprintf(&h, "map $http_range $%s_range {\n    default 1;\n    \"\" 0;\n}\n", v)
+		fmt.Fprintf(&h, "map \"$%s_path:$%s_html:$request_method:$status:$sent_http_content_encoding:$%s_download:$%s_range\" $%s_tag {\n    default \"\";\n", v, v, v, v, v)
 		if enabled {
 			// HEAD needs the GET metadata cleanup. A regex avoids longer hash keys
 			// exceeding the default 32-byte map bucket on legacy Nginx builds.
-			fmt.Fprintf(&h, "    \"~^1:1:(GET|HEAD):200::0$\" %s;\n", nginxQuote(injectionTags(n)))
+			fmt.Fprintf(&h, "    \"~^1:1:(GET|HEAD):200::0:0$\" %s;\n", nginxQuote(injectionTags(n)))
 		}
 		h.WriteString("}\n")
 		// Empty dynamic matches bypass the filter; excluded HTML must keep its bytes.
-		fmt.Fprintf(&h, "map $%s_tag $%s_anchor {\n    default '<head>';\n    \"\" \"\";\n}\n", v, v)
+		fmt.Fprintf(&h, "map $request_uri $%s_head {\n    default '<head>';\n", v)
+		paths := make([]string, 0, len(n.HeadAnchors))
+		for path := range n.HeadAnchors {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			// Regex keys avoid map hash bucket limits on long page paths.
+			fmt.Fprintf(&h, "    %s %s;\n", nginxRegexQuote("~^"+regexp.QuoteMeta((&url.URL{Path: path}).EscapedPath())+"(?:\\?|$)"), nginxQuote(n.HeadAnchors[path]))
+		}
+		h.WriteString("}\n")
+		fmt.Fprintf(&h, "map $%s_tag $%s_anchor {\n    default $%s_head;\n    \"\" \"\";\n}\n", v, v, v)
 		n.Files["http.conf"] = h.Bytes()
 		assetDir := filepath.ToSlash(filepath.Join(siteDir(root, s), "public", s.ID)) + "/"
 		// The reserved path always has an empty dynamic anchor. Override inherited
@@ -126,7 +162,7 @@ func renderDeployment(root string, s Site, enabled bool, previous *Snapshot, pre
 			n.Files["server.conf"] = []byte(strings.ReplaceAll(string(n.Files["server.conf"]), fmt.Sprintf("    sub_filter '$%s_anchor' '';\n", v), ""))
 		}
 		if enabled {
-			filter = fmt.Sprintf("# Managed by Rumable. HTML is gated independently of inherited sub_filter_types.\nsub_filter_once on;\nsub_filter_last_modified off;\nsub_filter '$%s_anchor' '<head>$%s_tag';\netag off;\nif_modified_since off;\n", v, v)
+			filter = fmt.Sprintf("# Managed by Rumable. HTML is gated independently of inherited sub_filter_types.\nsub_filter_once on;\nsub_filter_last_modified off;\nsub_filter '$%s_anchor' '$%s_head$%s_tag';\netag off;\nif_modified_since off;\n", v, v, v)
 		}
 		n.Files["location.conf"] = []byte(filter)
 		renderNginxOTel(&n)
@@ -156,6 +192,12 @@ func escapeScriptURL(raw string) string {
 	// until the browser parses the HTML attribute.
 	return strings.NewReplacer("$", "&#36;", "{", "&#123;", "}", "&#125;").Replace(html.EscapeString(raw))
 }
+
+// Regex map keys are not complex values: preserve the end-of-string operator.
+func nginxRegexQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
 func nginxQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(s) + `"`
 }
@@ -191,6 +233,11 @@ Add the following includes once, in the actual serving configuration:
 
 Do not create a competing location or replace existing proxy_pass/root/try_files.
 Review every HTML handler selected by includePaths and every probePaths entry.
+New enables match only plain <head>, case-insensitively; attributes and extra
+whitespace inside the tag are unsupported. probePaths only selects verification
+pages, while includePaths/excludePaths control injection. Never add paths to
+probePaths to enable a different tag format. Legacy 0.1.9 snapshots remain
+readable for disable, OTel-only operations and rollback.
 
 For proxy handlers, merge these into the existing proxy_set_header list at the
 same effective level; keep ALL existing Host/auth/custom headers. Adding a new
@@ -215,6 +262,10 @@ Rumable assets explicitly bypass inherited body filters.
 The enabled handler disables local validators; sub_filter removes ETag and
 Last-Modified and the original Content-Length for eligible GET and HEAD HTML
 without changing proxy_hide_header inheritance. HEAD emits no response body.
+Requests carrying Range bypass Rumable's body filter. Existing validator guards
+remain: static If-Range with an ETag can return an unmodified full 200 response
+because etag is off; date-based If-Range and origin 206 responses remain supported.
+Business-owned filters can still affect range responses.
 Local validator directives affect the entire attached handler, so keep
 static asset handlers separate where caching matters. The tool cannot infer
 all semantics of arbitrary Nginx configurations. Set attachmentReviewed=true

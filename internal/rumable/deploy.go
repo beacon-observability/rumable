@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -103,6 +104,10 @@ func compatibleTarget(a, b Site) bool {
 }
 
 func preflight(root string, s Site) error {
+	return preflightSDK(root, s, nil)
+}
+
+func preflightSDK(root string, s Site, resolved *sdkBundle) error {
 	if s.OTel != nil && s.OTel.Enabled {
 		if err := checkManagedDependency(root, s); err != nil {
 			return err
@@ -128,19 +133,36 @@ func preflight(root string, s Site) error {
 		return nil
 	}
 	if s.SDK.Source == "cdn" {
-		_, info, err := sdk()
-		if err != nil {
-			return err
+		if resolved == nil {
+			var err error
+			resolved, err = resolveCDNSDK(s)
+			if err != nil {
+				return err
+			}
 		}
-		if err = probeCDNSDK(s, info, sdkLocation(s, info)); err != nil {
+		if err := probeCDNSDK(s, resolved.info, resolved.info.Source); err != nil {
 			return err
 		}
 	}
+	paths := append([]string{}, s.ProbePaths...)
 	var managed []Snapshot
 	if st, err := loadState(root, s.ID); err == nil {
 		managed = append(managed, st.Current)
+		// A probe list edit must not silently drop a legacy attributed page.
+		known := map[string]bool{}
+		for _, path := range paths {
+			known[path] = true
+		}
+		var legacy []string
+		for path, anchor := range st.Current.HeadAnchors {
+			if !strings.EqualFold(anchor, "<head>") && s.matches(path) && !known[path] {
+				legacy = append(legacy, path)
+			}
+		}
+		sort.Strings(legacy)
+		paths = append(paths, legacy...)
 	}
-	for _, path := range s.ProbePaths {
+	for _, path := range paths {
 		p, err := preflightPage(s, path)
 		if err != nil {
 			return err
@@ -148,6 +170,7 @@ func preflight(root string, s Site) error {
 		if err = checkPage(s, p, managed...); err != nil {
 			return err
 		}
+
 	}
 	return probeWorkers(s)
 }
@@ -183,8 +206,16 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 		off := false
 		checking.RUM.Enabled = &off
 	}
+	var resolved *sdkBundle
 	if enabled {
-		if err := preflight(root, checking); err != nil {
+		if checking.RUM.isEnabled() && checking.SDK.Source == "cdn" {
+			var err error
+			resolved, err = resolveCDNSDK(checking)
+			if err != nil {
+				return err
+			}
+		}
+		if err := preflightSDK(root, checking, resolved); err != nil {
 			return err
 		}
 	} else if err := nativeCheck(root, s, false); err != nil {
@@ -212,7 +243,10 @@ func apply(root string, st State, s Site, enabled bool, component string, w io.W
 	if err := adoptIISDynamicCompression(root, &st); err != nil {
 		return err
 	}
-	n, public, err := renderDeployment(root, s, enabled, &st.Current, component == "otel")
+	// Disable must stay offline and retain the deployed CDN metadata/assets,
+	// rather than silently replacing them with this CLI's bundled SDK.
+	preserveBrowser := component == "otel" || !enabled && s.SDK.Source == "cdn" && s.SDK == st.Current.Site.SDK
+	n, public, err := renderDeploymentSDK(root, s, enabled, &st.Current, preserveBrowser, resolved)
 	if err != nil {
 		return err
 	}

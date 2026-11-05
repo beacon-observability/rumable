@@ -21,7 +21,7 @@ test('setup HTML and catalog provide complete English copy', () => {
 
 test('English copy fills values and nested field labels', () => {
   const t = createTranslator();
-  assert.equal(t('app.endpointHelp', {field:'site'}), 'Maps to site; enter the origin only');
+  assert.equal(t('app.endpointHelp', {field:'site'}), 'site: enter a service URL accessible to browsers, including a scheme and hostname, with an optional port and no path. HTTPS websites require HTTPS.');
   assert.equal(t('error.urlHTTPS', {label:{key:'field.sdkURL'}}), 'CDN URL must use HTTPS');
   assert.equal(t('release.loaded', {version:'0.1.8', sdk:'3.3.21'}), 'Rumable 0.1.8 · Web SDK 3.3.21');
 });
